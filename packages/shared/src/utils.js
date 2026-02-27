@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 export function clone(value) {
   if (typeof structuredClone === "function") {
     return structuredClone(value);
@@ -8,7 +6,7 @@ export function clone(value) {
 }
 
 export function createId(prefix) {
-  return `${prefix}_${crypto.randomUUID()}`;
+  return `${prefix}_${globalThis.crypto.randomUUID()}`;
 }
 
 export function defaultNameFromEmail(email) {

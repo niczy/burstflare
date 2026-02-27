@@ -10,6 +10,10 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "ci": "npm run lint && npm run build && npm test",
+    "cf:generate": "node scripts/cloudflare-generate-wrangler.mjs",
+    "cf:migrate": "node scripts/cloudflare-migrate.mjs",
+    "cf:provision": "node scripts/cloudflare-provision.mjs",
+    "cf:verify": "node scripts/cloudflare-verify.mjs",
     "dev": "node apps/edge/src/dev-server.js",
     "lint": "node scripts/lint.mjs",
     "test": "node --test"

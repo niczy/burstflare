@@ -1,14 +1,16 @@
 import { html, appJs, styles } from "../../web/src/assets.js";
+import { createBurstFlareService } from "../../../packages/shared/src/service.js";
+import { createCloudflareStateStore } from "../../../packages/shared/src/cloudflare-store.js";
+import { createMemoryStore } from "../../../packages/shared/src/memory-store.js";
 import {
   badRequest,
   cookie,
-  createBurstFlareService,
   notFound,
   parseJson,
   readCookie,
   toJson,
   unauthorized
-} from "../../../packages/shared/src/index.js";
+} from "../../../packages/shared/src/utils.js";
 
 function tokenFromRequest(request, sessionCookieName) {
   const authHeader = request.headers.get("authorization");
@@ -109,7 +111,7 @@ export function createApp(options = {}) {
   const service =
     options.service ||
     createBurstFlareService({
-      dataFile: options.dataFile || options.BURSTFLARE_DATA_FILE
+      store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore()
     });
 
   const routes = [

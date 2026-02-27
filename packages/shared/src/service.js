@@ -1,4 +1,4 @@
-import { createFileStore } from "./store.js";
+import { createMemoryStore } from "./memory-store.js";
 import { createId, defaultNameFromEmail } from "./utils.js";
 
 const SESSION_COOKIE = "burstflare_session";
@@ -254,7 +254,7 @@ function formatSession(state, session) {
 }
 
 export function createBurstFlareService(options = {}) {
-  const store = options.store || createFileStore(options.dataFile || ".local/burstflare-data.json");
+  const store = options.store || createMemoryStore();
   const clock = options.clock || (() => Date.now());
 
   return {

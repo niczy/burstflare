@@ -1,4 +1,8 @@
 .local/
+.env
+.env.*
+!.env.example
+wrangler.generated.toml
 dist/
 coverage/
 *.log

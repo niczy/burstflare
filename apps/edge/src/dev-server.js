@@ -1,9 +1,13 @@
 import http from "node:http";
 import { createApp } from "./worker.js";
+import { createBurstFlareService, createFileStore } from "../../../packages/shared/src/index.js";
 
 const port = Number(process.env.PORT || 8787);
 const dataFile = process.env.BURSTFLARE_DATA_FILE || ".local/burstflare-data.json";
-const app = createApp({ dataFile });
+const service = createBurstFlareService({
+  store: createFileStore(dataFile)
+});
+const app = createApp({ service });
 
 function readRequestBody(request) {
   return new Promise((resolve, reject) => {
