@@ -1,32 +1,30 @@
 export const styles = `
 :root {
   color-scheme: light;
-  --bg: #f5f1e8;
-  --panel: rgba(255, 255, 255, 0.9);
+  --bg: #f4efe6;
+  --panel: rgba(255, 255, 255, 0.92);
   --panel-strong: #ffffff;
-  --ink: #172121;
-  --muted: #57606a;
-  --accent: #c84c09;
-  --accent-soft: #ffe2d1;
-  --border: rgba(23, 33, 33, 0.12);
-  --shadow: 0 18px 50px rgba(23, 33, 33, 0.08);
+  --ink: #182120;
+  --muted: #5d6664;
+  --accent: #c25413;
+  --accent-soft: #ffe1d1;
+  --border: rgba(24, 33, 32, 0.12);
+  --shadow: 0 18px 50px rgba(24, 33, 32, 0.08);
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at top right, rgba(200, 76, 9, 0.14), transparent 28%),
-    linear-gradient(135deg, #f8efe3 0%, #f5f1e8 45%, #eef2eb 100%);
+    radial-gradient(circle at top right, rgba(194, 84, 19, 0.15), transparent 28%),
+    linear-gradient(135deg, #f9f0e4 0%, #f4efe6 45%, #edf2ea 100%);
 }
 
 main {
-  max-width: 1200px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 32px 20px 80px;
 }
@@ -42,7 +40,7 @@ main {
   background: var(--panel);
   backdrop-filter: blur(10px);
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: 22px;
   padding: 20px;
   box-shadow: var(--shadow);
 }
@@ -63,7 +61,7 @@ main {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
   gap: 20px;
   margin-top: 24px;
 }
@@ -150,14 +148,11 @@ pre {
   margin: 0;
 }
 
-.muted {
-  color: var(--muted);
-}
+.muted { color: var(--muted); }
+.error { color: #9d2500; min-height: 1.25em; }
 
 @media (max-width: 820px) {
-  .hero {
-    grid-template-columns: 1fr;
-  }
+  .hero { grid-template-columns: 1fr; }
 }
 `;
 
@@ -176,7 +171,7 @@ export const html = `<!doctype html>
           <span class="pill">Cloudflare-native burst dev</span>
           <h1 class="title">BurstFlare</h1>
           <p class="subtitle">
-            Manage accounts, templates, sessions, snapshots, and SSH handoff through a single edge control plane.
+            Shared control plane for accounts, workspace policy, build queues, container sessions, snapshots, and SSH handoff.
           </p>
         </div>
         <div class="card stack">
@@ -195,54 +190,81 @@ export const html = `<!doctype html>
             <button class="secondary" id="loginButton">Login</button>
           </div>
           <div class="muted" id="identity">Not signed in</div>
+          <div class="error" id="errors"></div>
         </div>
       </section>
 
       <section class="grid">
         <div class="card stack">
-          <h2>Templates</h2>
-          <div class="stack">
+          <h2>Workspace</h2>
+          <div class="row">
             <div>
-              <label for="templateName">Template Name</label>
-              <input id="templateName" type="text" placeholder="node-dev" />
+              <label for="inviteEmail">Invite Email</label>
+              <input id="inviteEmail" type="email" placeholder="teammate@example.com" />
             </div>
             <div>
-              <label for="templateDescription">Description</label>
-              <textarea id="templateDescription" placeholder="Node.js dev shell with SSH and preview ports"></textarea>
+              <label for="inviteRole">Role</label>
+              <select id="inviteRole">
+                <option value="member">member</option>
+                <option value="admin">admin</option>
+                <option value="viewer">viewer</option>
+              </select>
             </div>
-            <button id="createTemplateButton">Create Template</button>
           </div>
-          <div class="stack">
+          <div class="row">
+            <button id="inviteButton">Create Invite</button>
+            <button class="secondary" id="membersButton">Refresh Members</button>
+          </div>
+          <div>
+            <label for="inviteCode">Accept Invite Code</label>
+            <input id="inviteCode" type="text" placeholder="invite_..." />
+          </div>
+          <div class="row">
+            <button class="secondary" id="acceptInviteButton">Accept Invite</button>
+            <button class="secondary" id="planButton">Upgrade To Pro</button>
+          </div>
+          <div class="list" id="members"></div>
+        </div>
+
+        <div class="card stack">
+          <h2>Templates</h2>
+          <div>
+            <label for="templateName">Template Name</label>
+            <input id="templateName" type="text" placeholder="node-dev" />
+          </div>
+          <div>
+            <label for="templateDescription">Description</label>
+            <textarea id="templateDescription" placeholder="Node.js shell with SSH, browser access, and preview ports"></textarea>
+          </div>
+          <button id="createTemplateButton">Create Template</button>
+          <div class="row">
             <div>
               <label for="versionTemplate">Template ID</label>
               <input id="versionTemplate" type="text" placeholder="tpl_..." />
             </div>
-            <div class="row">
-              <div>
-                <label for="templateVersion">Version</label>
-                <input id="templateVersion" type="text" placeholder="1.0.0" />
-              </div>
-              <div>
-                <label for="templateNotes">Notes</label>
-                <input id="templateNotes" type="text" placeholder="Initial release" />
-              </div>
+            <div>
+              <label for="templateVersion">Version</label>
+              <input id="templateVersion" type="text" placeholder="1.0.0" />
             </div>
-            <button id="addVersionButton">Add Version</button>
           </div>
-          <div class="stack">
-            <div class="row">
-              <div>
-                <label for="promoteTemplate">Template ID</label>
-                <input id="promoteTemplate" type="text" placeholder="tpl_..." />
-              </div>
-              <div>
-                <label for="promoteVersion">Version ID</label>
-                <input id="promoteVersion" type="text" placeholder="tplv_..." />
-              </div>
+          <button class="secondary" id="addVersionButton">Queue Build</button>
+          <div class="row">
+            <button class="secondary" id="processBuildsButton">Process Builds</button>
+            <button class="secondary" id="listBuildsButton">Refresh Builds</button>
+          </div>
+          <div class="row">
+            <div>
+              <label for="promoteTemplate">Template ID</label>
+              <input id="promoteTemplate" type="text" placeholder="tpl_..." />
             </div>
-            <button id="promoteButton">Promote Version</button>
+            <div>
+              <label for="promoteVersion">Version ID</label>
+              <input id="promoteVersion" type="text" placeholder="tplv_..." />
+            </div>
           </div>
+          <button id="promoteButton">Promote Version</button>
           <div class="list" id="templates"></div>
+          <pre id="builds">[]</pre>
         </div>
 
         <div class="card stack">
@@ -260,13 +282,13 @@ export const html = `<!doctype html>
           <button id="createSessionButton">Create Session</button>
           <div class="row">
             <button class="secondary" id="refreshButton">Refresh Data</button>
-            <button class="secondary" id="reconcileButton">Reconcile Running Sessions</button>
+            <button class="secondary" id="reconcileButton">Reconcile</button>
           </div>
           <div class="list" id="sessions"></div>
         </div>
 
         <div class="card stack">
-          <h2>Snapshots + Usage</h2>
+          <h2>Snapshots + Reports</h2>
           <div class="row">
             <div>
               <label for="snapshotSession">Session ID</label>
@@ -278,11 +300,14 @@ export const html = `<!doctype html>
             </div>
           </div>
           <button id="snapshotButton">Create Snapshot</button>
+          <button class="secondary" id="reportButton">Refresh Admin Report</button>
           <pre id="usage"></pre>
+          <pre id="report">[]</pre>
         </div>
 
         <div class="card stack">
-          <h2>Audit</h2>
+          <h2>Audit + Releases</h2>
+          <pre id="releases">[]</pre>
           <pre id="audit">[]</pre>
         </div>
       </section>
@@ -297,6 +322,14 @@ const state = {
   me: null
 };
 
+function byId(id) {
+  return document.getElementById(id);
+}
+
+function setError(message) {
+  byId("errors").textContent = message || "";
+}
+
 function setToken(token) {
   state.token = token || "";
   if (state.token) {
@@ -308,7 +341,9 @@ function setToken(token) {
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  headers.set("content-type", "application/json");
+  if (!headers.has("content-type") && options.body !== undefined) {
+    headers.set("content-type", "application/json");
+  }
   if (state.token) {
     headers.set("authorization", "Bearer " + state.token);
   }
@@ -320,22 +355,30 @@ async function api(path, options = {}) {
   return data;
 }
 
-function byId(id) {
-  return document.getElementById(id);
-}
-
 function renderIdentity() {
   byId("identity").textContent = state.me
-    ? state.me.user.email + " in " + state.me.workspace.name
+    ? state.me.user.email + " in " + state.me.workspace.name + " (" + state.me.membership.role + ", " + state.me.workspace.plan + ")"
     : "Not signed in";
+}
+
+function renderMembers(membersData) {
+  const members = membersData.members.map((member) => {
+    const email = member.user ? member.user.email : member.userId;
+    return '<div class="item"><strong>' + email + '</strong><br><span class="muted">' + member.role + '</span></div>';
+  });
+  const invites = membersData.invites.map((invite) => {
+    return '<div class="item"><strong>' + invite.email + '</strong><br><span class="muted">' + invite.role +
+      ' / ' + invite.code + '</span></div>';
+  });
+  byId("members").innerHTML = members.concat(invites).join("");
 }
 
 function renderTemplates(templates) {
   byId("templates").innerHTML = templates.map((template) => {
-    const version = template.activeVersion ? template.activeVersion.version : "none";
-    const versions = template.versions.map((entry) => entry.version).join(", ") || "no versions";
+    const active = template.activeVersion ? template.activeVersion.version : "none";
+    const versions = template.versions.map((entry) => entry.version + ' (' + entry.status + ')').join(", ") || "no versions";
     return '<div class="item"><strong>' + template.name + '</strong><br><span class="muted">' + template.id +
-      '</span><br><span class="muted">active: ' + version + '</span><br><span class="muted">versions: ' + versions + '</span></div>';
+      '</span><br><span class="muted">active: ' + active + '</span><br><span class="muted">versions: ' + versions + '</span></div>';
   }).join("");
 }
 
@@ -345,7 +388,9 @@ function renderSessions(sessions) {
       '</span><br><span class="muted">' + session.templateName + ' / ' + session.state + '</span><div class="row" style="margin-top:8px">' +
       '<button data-start="' + session.id + '">Start</button>' +
       '<button class="secondary" data-stop="' + session.id + '">Stop</button>' +
+      '<button class="secondary" data-restart="' + session.id + '">Restart</button>' +
       '<button class="secondary" data-ssh="' + session.id + '">SSH</button>' +
+      '<button class="secondary" data-events="' + session.id + '">Events</button>' +
       '<button class="secondary" data-delete="' + session.id + '">Delete</button></div></div>';
   }).join("");
 }
@@ -353,26 +398,38 @@ function renderSessions(sessions) {
 function attachSessionButtons() {
   document.querySelectorAll("[data-start]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await api('/api/sessions/' + button.dataset.start + '/start', { method: 'POST' });
-      await refresh();
+      await perform(async () => api('/api/sessions/' + button.dataset.start + '/start', { method: 'POST' }));
     });
   });
   document.querySelectorAll("[data-stop]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await api('/api/sessions/' + button.dataset.stop + '/stop', { method: 'POST' });
-      await refresh();
+      await perform(async () => api('/api/sessions/' + button.dataset.stop + '/stop', { method: 'POST' }));
+    });
+  });
+  document.querySelectorAll("[data-restart]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => api('/api/sessions/' + button.dataset.restart + '/restart', { method: 'POST' }));
     });
   });
   document.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await api('/api/sessions/' + button.dataset.delete, { method: 'DELETE' });
-      await refresh();
+      await perform(async () => api('/api/sessions/' + button.dataset.delete, { method: 'DELETE' }));
     });
   });
   document.querySelectorAll("[data-ssh]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const data = await api('/api/sessions/' + button.dataset.ssh + '/ssh-token', { method: 'POST' });
-      alert(data.sshCommand);
+      await perform(async () => {
+        const data = await api('/api/sessions/' + button.dataset.ssh + '/ssh-token', { method: 'POST' });
+        alert(data.sshCommand);
+      });
+    });
+  });
+  document.querySelectorAll("[data-events]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => {
+        const data = await api('/api/sessions/' + button.dataset.events + '/events');
+        alert(JSON.stringify(data.events, null, 2));
+      });
     });
   });
 }
@@ -383,94 +440,160 @@ async function refresh() {
   }
   state.me = await api('/api/auth/me');
   renderIdentity();
+  renderMembers(await api('/api/workspaces/current/members'));
   const templates = await api('/api/templates');
   renderTemplates(templates.templates);
+  const builds = await api('/api/template-builds');
+  byId("builds").textContent = JSON.stringify(builds.builds, null, 2);
   const sessions = await api('/api/sessions');
   renderSessions(sessions.sessions);
   attachSessionButtons();
   const usage = await api('/api/usage');
-  byId("usage").textContent = JSON.stringify(usage.usage, null, 2);
+  byId("usage").textContent = JSON.stringify(usage, null, 2);
+  const report = await api('/api/admin/report');
+  byId("report").textContent = JSON.stringify(report.report, null, 2);
+  const releases = await api('/api/releases');
+  byId("releases").textContent = JSON.stringify(releases.releases, null, 2);
   const audit = await api('/api/audit');
   byId("audit").textContent = JSON.stringify(audit.audit, null, 2);
 }
 
+async function perform(action) {
+  setError("");
+  try {
+    await action();
+    await refresh();
+  } catch (error) {
+    console.error(error);
+    setError(error.message || "Request failed");
+  }
+}
+
 byId("registerButton").addEventListener("click", async () => {
-  const data = await api('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify({ email: byId("email").value, name: byId("name").value })
+  await perform(async () => {
+    const data = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email: byId("email").value, name: byId("name").value })
+    });
+    setToken(data.token);
   });
-  setToken(data.token);
-  await refresh();
 });
 
 byId("loginButton").addEventListener("click", async () => {
-  const data = await api('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: byId("email").value, kind: 'api' })
+  await perform(async () => {
+    const data = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: byId("email").value, kind: 'api' })
+    });
+    setToken(data.token);
   });
-  setToken(data.token);
-  await refresh();
+});
+
+byId("inviteButton").addEventListener("click", async () => {
+  await perform(async () => {
+    const data = await api('/api/workspaces/current/invites', {
+      method: 'POST',
+      body: JSON.stringify({ email: byId("inviteEmail").value, role: byId("inviteRole").value })
+    });
+    byId("inviteCode").value = data.invite.code;
+  });
+});
+
+byId("membersButton").addEventListener("click", () => perform(async () => {}));
+
+byId("acceptInviteButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await api('/api/workspaces/current/invites/accept', {
+      method: 'POST',
+      body: JSON.stringify({ inviteCode: byId("inviteCode").value })
+    });
+  });
+});
+
+byId("planButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await api('/api/workspaces/current/plan', {
+      method: 'POST',
+      body: JSON.stringify({ plan: 'pro' })
+    });
+  });
 });
 
 byId("createTemplateButton").addEventListener("click", async () => {
-  await api('/api/templates', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: byId("templateName").value,
-      description: byId("templateDescription").value
-    })
+  await perform(async () => {
+    await api('/api/templates', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: byId("templateName").value,
+        description: byId("templateDescription").value
+      })
+    });
   });
-  await refresh();
 });
 
 byId("addVersionButton").addEventListener("click", async () => {
-  await api('/api/templates/' + byId("versionTemplate").value + '/versions', {
-    method: 'POST',
-    body: JSON.stringify({
-      version: byId("templateVersion").value,
-      notes: byId("templateNotes").value,
-      manifest: {
-        image: 'registry.cloudflare.com/example/' + byId("versionTemplate").value + ':' + byId("templateVersion").value,
-        features: ['ssh', 'browser']
-      }
-    })
+  await perform(async () => {
+    await api('/api/templates/' + byId("versionTemplate").value + '/versions', {
+      method: 'POST',
+      body: JSON.stringify({
+        version: byId("templateVersion").value,
+        manifest: {
+          image: 'registry.cloudflare.com/example/' + byId("versionTemplate").value + ':' + byId("templateVersion").value,
+          features: ['ssh', 'browser', 'snapshots']
+        }
+      })
+    });
   });
-  await refresh();
 });
 
-byId("promoteButton").addEventListener("click", async () => {
-  await api('/api/templates/' + byId("promoteTemplate").value + '/promote', {
-    method: 'POST',
-    body: JSON.stringify({ versionId: byId("promoteVersion").value })
+byId("processBuildsButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await api('/api/template-builds/process', { method: 'POST' });
   });
-  await refresh();
+});
+
+byId("listBuildsButton").addEventListener("click", () => perform(async () => {}));
+
+byId("promoteButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await api('/api/templates/' + byId("promoteTemplate").value + '/promote', {
+      method: 'POST',
+      body: JSON.stringify({ versionId: byId("promoteVersion").value })
+    });
+  });
 });
 
 byId("createSessionButton").addEventListener("click", async () => {
-  const data = await api('/api/sessions', {
-    method: 'POST',
-    body: JSON.stringify({
-      name: byId("sessionName").value,
-      templateId: byId("sessionTemplate").value
-    })
+  await perform(async () => {
+    const data = await api('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: byId("sessionName").value,
+        templateId: byId("sessionTemplate").value
+      })
+    });
+    await api('/api/sessions/' + data.session.id + '/start', { method: 'POST' });
   });
-  await api('/api/sessions/' + data.session.id + '/start', { method: 'POST' });
-  await refresh();
 });
 
 byId("snapshotButton").addEventListener("click", async () => {
-  await api('/api/sessions/' + byId("snapshotSession").value + '/snapshots', {
-    method: 'POST',
-    body: JSON.stringify({ label: byId("snapshotLabel").value || 'manual' })
+  await perform(async () => {
+    await api('/api/sessions/' + byId("snapshotSession").value + '/snapshots', {
+      method: 'POST',
+      body: JSON.stringify({ label: byId("snapshotLabel").value || 'manual' })
+    });
   });
-  await refresh();
 });
 
-byId("refreshButton").addEventListener("click", refresh);
+byId("refreshButton").addEventListener("click", () => perform(async () => {}));
+
 byId("reconcileButton").addEventListener("click", async () => {
-  await api('/api/admin/reconcile', { method: 'POST' });
-  await refresh();
+  await perform(async () => {
+    await api('/api/admin/reconcile', { method: 'POST' });
+  });
 });
+
+byId("reportButton").addEventListener("click", () => perform(async () => {}));
 
 if (state.token) {
   refresh().catch((error) => {
@@ -478,6 +601,7 @@ if (state.token) {
     setToken("");
     state.me = null;
     renderIdentity();
+    setError(error.message || "Could not restore session");
   });
 }
 `;

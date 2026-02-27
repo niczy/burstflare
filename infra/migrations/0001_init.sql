@@ -21,6 +21,18 @@ CREATE TABLE workspace_memberships (
   PRIMARY KEY (workspace_id, user_id)
 );
 
+CREATE TABLE workspace_invites (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL,
+  code TEXT NOT NULL UNIQUE,
+  created_by_user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
 CREATE TABLE templates (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
@@ -52,9 +64,25 @@ CREATE TABLE sessions (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE session_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE session_snapshots (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
   label TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE binding_releases (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  template_id TEXT NOT NULL,
+  template_version_id TEXT NOT NULL,
   created_at TEXT NOT NULL
 );

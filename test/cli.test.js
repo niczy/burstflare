@@ -17,16 +17,15 @@ function capture() {
 }
 
 function createFetch(app) {
-  return async (url, options) => {
-    return app.fetch(
+  return async (url, options) =>
+    app.fetch(
       new Request(url, {
         ...options
       })
     );
-  };
 }
 
-test("cli can register, create a template, launch a session, and request ssh", async () => {
+test("cli can run device flow, build processing, session lifecycle, and reporting", async () => {
   const service = createBurstFlareService({
     store: createMemoryStore()
   });
@@ -45,9 +44,36 @@ test("cli can register, create a template, launch a session, and request ssh", a
     });
     assert.equal(code, 0);
 
-    const registerOutput = JSON.parse(stdout.data.trim());
-    const token = registerOutput.token;
-    assert.ok(token);
+    stdout.data = "";
+
+    code = await runCli(["auth", "device-start", "--email", "cli@example.com", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const deviceStart = JSON.parse(stdout.data.trim());
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "device-approve", "--code", deviceStart.deviceCode, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "device-exchange", "--code", deviceStart.deviceCode, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
 
     stdout.data = "";
 
@@ -75,6 +101,18 @@ test("cli can register, create a template, launch a session, and request ssh", a
 
     stdout.data = "";
 
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const processOutput = JSON.parse(stdout.data.trim());
+    assert.equal(processOutput.processed, 1);
+
+    stdout.data = "";
+
     code = await runCli(["template", "promote", templateId, versionId, "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -94,6 +132,30 @@ test("cli can register, create a template, launch a session, and request ssh", a
     assert.equal(code, 0);
     const sessionOutput = JSON.parse(stdout.data.trim());
     const sessionId = sessionOutput.session.id;
+
+    stdout.data = "";
+
+    code = await runCli(["events", sessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const eventsOutput = JSON.parse(stdout.data.trim());
+    assert.ok(eventsOutput.events.length >= 2);
+
+    stdout.data = "";
+
+    code = await runCli(["report", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const reportOutput = JSON.parse(stdout.data.trim());
+    assert.equal(reportOutput.report.releases, 1);
 
     stdout.data = "";
 

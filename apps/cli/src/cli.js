@@ -55,8 +55,11 @@ async function requestJson(url, options = {}, fetchImpl = fetch) {
   return data;
 }
 
-function headers(token) {
-  const map = { "content-type": "application/json" };
+function headers(token, withJson = true) {
+  const map = {};
+  if (withJson) {
+    map["content-type"] = "application/json";
+  }
   if (token) {
     map.authorization = `Bearer ${token}`;
   }
@@ -67,88 +70,168 @@ function print(stream, value) {
   stream.write(`${value}\n`);
 }
 
+function getBaseUrl(options, config) {
+  return options.url || config.baseUrl || "http://127.0.0.1:8787";
+}
+
+function getToken(options, config) {
+  return options.token || config.token || "";
+}
+
+async function saveAuthConfig(configPath, config, baseUrl, payload) {
+  await writeConfig(configPath, {
+    ...config,
+    baseUrl,
+    token: payload.token,
+    workspaceId: payload.workspace.id,
+    userEmail: payload.user.email
+  });
+}
+
+function helpText() {
+  return [
+    "burstflare auth register --email you@example.com [--name Name]",
+    "burstflare auth login --email you@example.com",
+    "burstflare auth device-start --email you@example.com",
+    "burstflare auth device-approve --code device_xxx",
+    "burstflare auth device-exchange --code device_xxx",
+    "burstflare auth switch-workspace <workspaceId>",
+    "burstflare auth whoami",
+    "burstflare workspace list",
+    "burstflare workspace members",
+    "burstflare workspace invite --email teammate@example.com [--role member]",
+    "burstflare workspace accept-invite --code invite_xxx",
+    "burstflare workspace set-role <userId> --role viewer",
+    "burstflare workspace plan <free|pro|enterprise>",
+    "burstflare template create <name> [--description ...]",
+    "burstflare template upload <templateId> --version 1.0.0 [--notes ...]",
+    "burstflare template promote <templateId> <versionId>",
+    "burstflare template list",
+    "burstflare build list",
+    "burstflare build process",
+    "burstflare build retry <buildId>",
+    "burstflare release list",
+    "burstflare up <name> --template <templateId>",
+    "burstflare list",
+    "burstflare status <sessionId>",
+    "burstflare events <sessionId>",
+    "burstflare start <sessionId>",
+    "burstflare down <sessionId>",
+    "burstflare restart <sessionId>",
+    "burstflare delete <sessionId>",
+    "burstflare snapshot save <sessionId> [--label manual]",
+    "burstflare snapshot list <sessionId>",
+    "burstflare usage",
+    "burstflare report",
+    "burstflare reconcile",
+    "burstflare ssh <sessionId>"
+  ].join("\n");
+}
+
 export async function runCli(argv, dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl || fetch;
   const stdout = dependencies.stdout || process.stdout;
   const stderr = dependencies.stderr || process.stderr;
   const env = dependencies.env || process.env;
   const configPath = dependencies.configPath || defaultConfigPath(env);
-
-  const { positionals, options } = parseArgs(argv);
-  const baseUrl = options.url || (await readConfig(configPath)).baseUrl || "http://127.0.0.1:8787";
   const config = await readConfig(configPath);
-  const token = options.token || config.token || "";
-
+  const { positionals, options } = parseArgs(argv);
+  const baseUrl = getBaseUrl(options, config);
+  const token = getToken(options, config);
   const [command = "help", subcommand, ...rest] = positionals;
 
   try {
     if (command === "help") {
-      print(
-        stdout,
-        [
-          "burstflare auth register --email you@example.com [--name Name]",
-          "burstflare auth login --email you@example.com",
-          "burstflare auth whoami",
-          "burstflare template create <name> [--description ...]",
-          "burstflare template upload <templateId> --version 1.0.0 [--notes ...]",
-          "burstflare template promote <templateId> <versionId>",
-          "burstflare template list",
-          "burstflare up <name> --template <templateId>",
-          "burstflare list",
-          "burstflare status <sessionId>",
-          "burstflare start <sessionId>",
-          "burstflare down <sessionId>",
-          "burstflare delete <sessionId>",
-          "burstflare snapshot save <sessionId> [--label manual]",
-          "burstflare snapshot list <sessionId>",
-          "burstflare ssh <sessionId>"
-        ].join("\n")
-      );
+      print(stdout, helpText());
       return 0;
     }
 
     if (command === "auth") {
       if (subcommand === "register") {
-        const email = options.email;
-        const name = options.name;
         const data = await requestJson(
           `${baseUrl}/api/auth/register`,
           {
             method: "POST",
             headers: headers(),
-            body: JSON.stringify({ email, name })
+            body: JSON.stringify({ email: options.email, name: options.name })
           },
           fetchImpl
         );
-        await writeConfig(configPath, {
-          ...config,
-          baseUrl,
-          token: data.token,
-          workspaceId: data.workspace.id,
-          userEmail: data.user.email
-        });
+        await saveAuthConfig(configPath, config, baseUrl, data);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "login") {
-        const email = options.email;
         const data = await requestJson(
           `${baseUrl}/api/auth/login`,
           {
             method: "POST",
             headers: headers(),
-            body: JSON.stringify({ email, kind: "api" })
+            body: JSON.stringify({ email: options.email, kind: "api" })
           },
           fetchImpl
         );
-        await writeConfig(configPath, {
-          ...config,
-          baseUrl,
-          token: data.token,
-          workspaceId: data.workspace.id,
-          userEmail: data.user.email
-        });
+        await saveAuthConfig(configPath, config, baseUrl, data);
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "device-start") {
+        const data = await requestJson(
+          `${baseUrl}/api/cli/device/start`,
+          {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ email: options.email, workspaceId: options["workspace-id"] || null })
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "device-approve") {
+        const data = await requestJson(
+          `${baseUrl}/api/cli/device/approve`,
+          {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ deviceCode: options.code })
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "device-exchange") {
+        const data = await requestJson(
+          `${baseUrl}/api/cli/device/exchange`,
+          {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ deviceCode: options.code })
+          },
+          fetchImpl
+        );
+        await saveAuthConfig(configPath, config, baseUrl, data);
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "switch-workspace") {
+        const workspaceId = rest[0];
+        const data = await requestJson(
+          `${baseUrl}/api/auth/switch-workspace`,
+          {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ workspaceId })
+          },
+          fetchImpl
+        );
+        await saveAuthConfig(configPath, config, baseUrl, data);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -157,7 +240,91 @@ export async function runCli(argv, dependencies = {}) {
         const data = await requestJson(
           `${baseUrl}/api/auth/me`,
           {
-            headers: headers(token)
+            headers: headers(token, false)
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+    }
+
+    if (command === "workspace") {
+      if (subcommand === "list") {
+        const data = await requestJson(
+          `${baseUrl}/api/workspaces`,
+          {
+            headers: headers(token, false)
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "members") {
+        const data = await requestJson(
+          `${baseUrl}/api/workspaces/current/members`,
+          {
+            headers: headers(token, false)
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "invite") {
+        const data = await requestJson(
+          `${baseUrl}/api/workspaces/current/invites`,
+          {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ email: options.email, role: options.role || "member" })
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "accept-invite") {
+        const data = await requestJson(
+          `${baseUrl}/api/workspaces/current/invites/accept`,
+          {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ inviteCode: options.code })
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "set-role") {
+        const userId = rest[0];
+        const data = await requestJson(
+          `${baseUrl}/api/workspaces/current/members/${userId}/role`,
+          {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ role: options.role })
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "plan") {
+        const plan = rest[0];
+        const data = await requestJson(
+          `${baseUrl}/api/workspaces/current/plan`,
+          {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ plan })
           },
           fetchImpl
         );
@@ -224,6 +391,33 @@ export async function runCli(argv, dependencies = {}) {
         const data = await requestJson(
           `${baseUrl}/api/templates`,
           {
+            headers: headers(token, false)
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+    }
+
+    if (command === "build") {
+      if (subcommand === "list") {
+        const data = await requestJson(
+          `${baseUrl}/api/template-builds`,
+          {
+            headers: headers(token, false)
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "process") {
+        const data = await requestJson(
+          `${baseUrl}/api/template-builds/process`,
+          {
+            method: "POST",
             headers: headers(token)
           },
           fetchImpl
@@ -231,6 +425,32 @@ export async function runCli(argv, dependencies = {}) {
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
+
+      if (subcommand === "retry") {
+        const buildId = rest[0];
+        const data = await requestJson(
+          `${baseUrl}/api/template-builds/${buildId}/retry`,
+          {
+            method: "POST",
+            headers: headers(token)
+          },
+          fetchImpl
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+    }
+
+    if (command === "release" && subcommand === "list") {
+      const data = await requestJson(
+        `${baseUrl}/api/releases`,
+        {
+          headers: headers(token, false)
+        },
+        fetchImpl
+      );
+      print(stdout, JSON.stringify(data, null, 2));
+      return 0;
     }
 
     if (command === "up") {
@@ -261,7 +481,7 @@ export async function runCli(argv, dependencies = {}) {
       const data = await requestJson(
         `${baseUrl}/api/sessions`,
         {
-          headers: headers(token)
+          headers: headers(token, false)
         },
         fetchImpl
       );
@@ -274,7 +494,20 @@ export async function runCli(argv, dependencies = {}) {
       const data = await requestJson(
         `${baseUrl}/api/sessions/${sessionId}`,
         {
-          headers: headers(token)
+          headers: headers(token, false)
+        },
+        fetchImpl
+      );
+      print(stdout, JSON.stringify(data, null, 2));
+      return 0;
+    }
+
+    if (command === "events") {
+      const sessionId = subcommand;
+      const data = await requestJson(
+        `${baseUrl}/api/sessions/${sessionId}/events`,
+        {
+          headers: headers(token, false)
         },
         fetchImpl
       );
@@ -310,13 +543,27 @@ export async function runCli(argv, dependencies = {}) {
       return 0;
     }
 
+    if (command === "restart") {
+      const sessionId = subcommand;
+      const data = await requestJson(
+        `${baseUrl}/api/sessions/${sessionId}/restart`,
+        {
+          method: "POST",
+          headers: headers(token)
+        },
+        fetchImpl
+      );
+      print(stdout, JSON.stringify(data, null, 2));
+      return 0;
+    }
+
     if (command === "delete") {
       const sessionId = subcommand;
       const data = await requestJson(
         `${baseUrl}/api/sessions/${sessionId}`,
         {
           method: "DELETE",
-          headers: headers(token)
+          headers: headers(token, false)
         },
         fetchImpl
       );
@@ -345,13 +592,50 @@ export async function runCli(argv, dependencies = {}) {
         const data = await requestJson(
           `${baseUrl}/api/sessions/${sessionId}/snapshots`,
           {
-            headers: headers(token)
+            headers: headers(token, false)
           },
           fetchImpl
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
+    }
+
+    if (command === "usage") {
+      const data = await requestJson(
+        `${baseUrl}/api/usage`,
+        {
+          headers: headers(token, false)
+        },
+        fetchImpl
+      );
+      print(stdout, JSON.stringify(data, null, 2));
+      return 0;
+    }
+
+    if (command === "report") {
+      const data = await requestJson(
+        `${baseUrl}/api/admin/report`,
+        {
+          headers: headers(token, false)
+        },
+        fetchImpl
+      );
+      print(stdout, JSON.stringify(data, null, 2));
+      return 0;
+    }
+
+    if (command === "reconcile") {
+      const data = await requestJson(
+        `${baseUrl}/api/admin/reconcile`,
+        {
+          method: "POST",
+          headers: headers(token)
+        },
+        fetchImpl
+      );
+      print(stdout, JSON.stringify(data, null, 2));
+      return 0;
     }
 
     if (command === "ssh") {
@@ -371,6 +655,6 @@ export async function runCli(argv, dependencies = {}) {
     throw new Error("Unknown command");
   } catch (error) {
     print(stderr, error.message || "Command failed");
-    return typeof error.status === "number" ? 1 : 1;
+    return 1;
   }
 }
