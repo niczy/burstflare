@@ -896,8 +896,9 @@ export function createBurstFlareService(options = {}) {
           updatedAt: nowIso(clock),
           lastStartedAt: null,
           lastStoppedAt: null,
-          previewUrl: `/runtime/sessions/${name}/preview`
+          previewUrl: null
         };
+        session.previewUrl = `/runtime/sessions/${session.id}/preview`;
         state.sessions.push(session);
         writeSessionEvent(state, clock, session.id, "created");
         writeAudit(state, clock, {

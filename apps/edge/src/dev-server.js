@@ -1,5 +1,5 @@
 import http from "node:http";
-import { createApp } from "./worker.js";
+import { createApp } from "./app.js";
 import { createBurstFlareService, createFileStore } from "../../../packages/shared/src/index.js";
 
 const port = Number(process.env.PORT || 8787);

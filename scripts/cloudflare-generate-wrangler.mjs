@@ -1,7 +1,8 @@
-import { readProvisionState } from "./lib/cloudflare.mjs";
+import { loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
 
-function renderWrangler(state) {
+function renderWrangler(state, config) {
   const { resources } = state;
+  const containerImage = config.containerImage || "./containers/session/Dockerfile";
   const lines = [`name = "burstflare"
 main = "apps/edge/src/worker.js"
 compatibility_date = "2026-02-27"
@@ -20,6 +21,18 @@ id = "${resources.kv.auth.id}"`,
 `[[kv_namespaces]]
 binding = "CACHE_KV"
 id = "${resources.kv.cache.id}"`];
+
+  if (config.enableContainers) {
+    lines.push(`[[durable_objects.bindings]]
+name = "SESSION_CONTAINER"
+class_name = "BurstFlareSessionContainer"`);
+    lines.push(`[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BurstFlareSessionContainer"]`);
+    lines.push(`[[containers]]
+class_name = "BurstFlareSessionContainer"
+image = "${containerImage}"`);
+  }
 
   if (resources.r2) {
     lines.push(`[[r2_buckets]]
@@ -50,7 +63,8 @@ async function main() {
   if (!state) {
     throw new Error("Missing .local/cloudflare-state.json. Run npm run cf:provision first.");
   }
-  const output = renderWrangler(state);
+  const config = await loadCloudflareConfig();
+  const output = renderWrangler(state, config);
   process.stdout.write(output);
 }
 

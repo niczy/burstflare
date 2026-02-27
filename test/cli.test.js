@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { rm } from "node:fs/promises";
 import { runCli } from "../apps/cli/src/cli.js";
-import { createApp } from "../apps/edge/src/worker.js";
+import { createApp } from "../apps/edge/src/app.js";
 import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
 
 function capture() {

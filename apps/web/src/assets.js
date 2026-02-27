@@ -389,6 +389,7 @@ function renderSessions(sessions) {
       '<button data-start="' + session.id + '">Start</button>' +
       '<button class="secondary" data-stop="' + session.id + '">Stop</button>' +
       '<button class="secondary" data-restart="' + session.id + '">Restart</button>' +
+      '<button class="secondary" data-preview="' + session.previewUrl + '">Preview</button>' +
       '<button class="secondary" data-ssh="' + session.id + '">SSH</button>' +
       '<button class="secondary" data-events="' + session.id + '">Events</button>' +
       '<button class="secondary" data-delete="' + session.id + '">Delete</button></div></div>';
@@ -422,6 +423,11 @@ function attachSessionButtons() {
         const data = await api('/api/sessions/' + button.dataset.ssh + '/ssh-token', { method: 'POST' });
         alert(data.sshCommand);
       });
+    });
+  });
+  document.querySelectorAll("[data-preview]").forEach((button) => {
+    button.addEventListener("click", () => {
+      window.open(button.dataset.preview, "_blank", "noopener");
     });
   });
   document.querySelectorAll("[data-events]").forEach((button) => {

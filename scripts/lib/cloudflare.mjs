@@ -28,6 +28,8 @@ export async function loadCloudflareConfig() {
     zoneId: getRequiredEnv(env, "CLOUDFLARE_ZONE_ID", ["zone_id"]),
     domain: getRequiredEnv(env, "CLOUDFLARE_DOMAIN", ["domain"]),
     apiToken: getRequiredEnv(env, "CLOUDFLARE_API_TOKEN"),
+    enableContainers: env.CLOUDFLARE_ENABLE_CONTAINERS === "1" || Boolean(env.CLOUDFLARE_CONTAINER_IMAGE),
+    containerImage: env.CLOUDFLARE_CONTAINER_IMAGE || "",
     slug: slugifyDomain(getRequiredEnv(env, "CLOUDFLARE_DOMAIN", ["domain"]))
   };
 }

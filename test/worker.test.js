@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp } from "../apps/edge/src/worker.js";
+import { createApp } from "../apps/edge/src/app.js";
 import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
 
 async function requestJson(app, path, init = {}) {

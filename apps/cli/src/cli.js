@@ -124,6 +124,7 @@ function helpText() {
     "burstflare usage",
     "burstflare report",
     "burstflare reconcile",
+    "burstflare preview <sessionId>",
     "burstflare ssh <sessionId>"
   ].join("\n");
 }
@@ -635,6 +636,20 @@ export async function runCli(argv, dependencies = {}) {
         fetchImpl
       );
       print(stdout, JSON.stringify(data, null, 2));
+      return 0;
+    }
+
+    if (command === "preview") {
+      const sessionId = subcommand;
+      const session = await requestJson(
+        `${baseUrl}/api/sessions/${sessionId}`,
+        {
+          headers: headers(token, false)
+        },
+        fetchImpl
+      );
+      const url = new URL(session.session.previewUrl, baseUrl).toString();
+      print(stdout, url);
       return 0;
     }
 
