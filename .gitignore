@@ -1,0 +1,6 @@
+.local/
+dist/
+coverage/
+*.log
+node_modules/
+apps/*/dist/

@@ -1,0 +1,14 @@
+name = "burstflare"
+main = "apps/edge/src/worker.js"
+compatibility_date = "2026-02-27"
+
+[vars]
+BURSTFLARE_DATA_FILE = ".local/burstflare-data.json"
+
+# The runtime code is structured around Cloudflare-native services.
+# Real deployments should replace the local file-backed adapter with:
+# - D1 for durable metadata
+# - KV for ephemeral/session indexes
+# - R2 for template bundles and snapshots
+# - Queues/Workflows for async template builds and reconciliation
+# - Durable Objects and Containers for session runtime coordination

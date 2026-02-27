@@ -1,0 +1,8 @@
+{
+  "name": "@burstflare/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "burstflare": "./bin/burstflare.js"
+  }
+}

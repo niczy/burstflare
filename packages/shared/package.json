@@ -1,0 +1,5 @@
+{
+  "name": "@burstflare/shared",
+  "private": true,
+  "type": "module"
+}

@@ -1,0 +1,483 @@
+export const styles = `
+:root {
+  color-scheme: light;
+  --bg: #f5f1e8;
+  --panel: rgba(255, 255, 255, 0.9);
+  --panel-strong: #ffffff;
+  --ink: #172121;
+  --muted: #57606a;
+  --accent: #c84c09;
+  --accent-soft: #ffe2d1;
+  --border: rgba(23, 33, 33, 0.12);
+  --shadow: 0 18px 50px rgba(23, 33, 33, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top right, rgba(200, 76, 9, 0.14), transparent 28%),
+    linear-gradient(135deg, #f8efe3 0%, #f5f1e8 45%, #eef2eb 100%);
+}
+
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 20px 80px;
+}
+
+.hero {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1.4fr 1fr;
+  align-items: start;
+}
+
+.card {
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 4.4rem);
+  line-height: 0.94;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+}
+
+.subtitle {
+  margin: 12px 0 0;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+input,
+textarea,
+select,
+button {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 11px 12px;
+  font: inherit;
+}
+
+textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+button.secondary {
+  background: var(--panel-strong);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.row > * {
+  flex: 1;
+}
+
+.pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.item {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.84rem;
+  margin: 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+@media (max-width: 820px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+}
+`;
+
+export const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BurstFlare</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="card">
+          <span class="pill">Cloudflare-native burst dev</span>
+          <h1 class="title">BurstFlare</h1>
+          <p class="subtitle">
+            Manage accounts, templates, sessions, snapshots, and SSH handoff through a single edge control plane.
+          </p>
+        </div>
+        <div class="card stack">
+          <div class="row">
+            <div>
+              <label for="email">Email</label>
+              <input id="email" type="email" placeholder="you@example.com" />
+            </div>
+            <div>
+              <label for="name">Name</label>
+              <input id="name" type="text" placeholder="Nicholas" />
+            </div>
+          </div>
+          <div class="row">
+            <button id="registerButton">Register</button>
+            <button class="secondary" id="loginButton">Login</button>
+          </div>
+          <div class="muted" id="identity">Not signed in</div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card stack">
+          <h2>Templates</h2>
+          <div class="stack">
+            <div>
+              <label for="templateName">Template Name</label>
+              <input id="templateName" type="text" placeholder="node-dev" />
+            </div>
+            <div>
+              <label for="templateDescription">Description</label>
+              <textarea id="templateDescription" placeholder="Node.js dev shell with SSH and preview ports"></textarea>
+            </div>
+            <button id="createTemplateButton">Create Template</button>
+          </div>
+          <div class="stack">
+            <div>
+              <label for="versionTemplate">Template ID</label>
+              <input id="versionTemplate" type="text" placeholder="tpl_..." />
+            </div>
+            <div class="row">
+              <div>
+                <label for="templateVersion">Version</label>
+                <input id="templateVersion" type="text" placeholder="1.0.0" />
+              </div>
+              <div>
+                <label for="templateNotes">Notes</label>
+                <input id="templateNotes" type="text" placeholder="Initial release" />
+              </div>
+            </div>
+            <button id="addVersionButton">Add Version</button>
+          </div>
+          <div class="stack">
+            <div class="row">
+              <div>
+                <label for="promoteTemplate">Template ID</label>
+                <input id="promoteTemplate" type="text" placeholder="tpl_..." />
+              </div>
+              <div>
+                <label for="promoteVersion">Version ID</label>
+                <input id="promoteVersion" type="text" placeholder="tplv_..." />
+              </div>
+            </div>
+            <button id="promoteButton">Promote Version</button>
+          </div>
+          <div class="list" id="templates"></div>
+        </div>
+
+        <div class="card stack">
+          <h2>Sessions</h2>
+          <div class="row">
+            <div>
+              <label for="sessionName">Session Name</label>
+              <input id="sessionName" type="text" placeholder="my-workspace" />
+            </div>
+            <div>
+              <label for="sessionTemplate">Template ID</label>
+              <input id="sessionTemplate" type="text" placeholder="tpl_..." />
+            </div>
+          </div>
+          <button id="createSessionButton">Create Session</button>
+          <div class="row">
+            <button class="secondary" id="refreshButton">Refresh Data</button>
+            <button class="secondary" id="reconcileButton">Reconcile Running Sessions</button>
+          </div>
+          <div class="list" id="sessions"></div>
+        </div>
+
+        <div class="card stack">
+          <h2>Snapshots + Usage</h2>
+          <div class="row">
+            <div>
+              <label for="snapshotSession">Session ID</label>
+              <input id="snapshotSession" type="text" placeholder="ses_..." />
+            </div>
+            <div>
+              <label for="snapshotLabel">Label</label>
+              <input id="snapshotLabel" type="text" placeholder="manual-save" />
+            </div>
+          </div>
+          <button id="snapshotButton">Create Snapshot</button>
+          <pre id="usage"></pre>
+        </div>
+
+        <div class="card stack">
+          <h2>Audit</h2>
+          <pre id="audit">[]</pre>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>`;
+
+export const appJs = `
+const state = {
+  token: localStorage.getItem("burstflare_token") || "",
+  me: null
+};
+
+function setToken(token) {
+  state.token = token || "";
+  if (state.token) {
+    localStorage.setItem("burstflare_token", state.token);
+  } else {
+    localStorage.removeItem("burstflare_token");
+  }
+}
+
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set("content-type", "application/json");
+  if (state.token) {
+    headers.set("authorization", "Bearer " + state.token);
+  }
+  const response = await fetch(path, { ...options, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed");
+  }
+  return data;
+}
+
+function byId(id) {
+  return document.getElementById(id);
+}
+
+function renderIdentity() {
+  byId("identity").textContent = state.me
+    ? state.me.user.email + " in " + state.me.workspace.name
+    : "Not signed in";
+}
+
+function renderTemplates(templates) {
+  byId("templates").innerHTML = templates.map((template) => {
+    const version = template.activeVersion ? template.activeVersion.version : "none";
+    const versions = template.versions.map((entry) => entry.version).join(", ") || "no versions";
+    return '<div class="item"><strong>' + template.name + '</strong><br><span class="muted">' + template.id +
+      '</span><br><span class="muted">active: ' + version + '</span><br><span class="muted">versions: ' + versions + '</span></div>';
+  }).join("");
+}
+
+function renderSessions(sessions) {
+  byId("sessions").innerHTML = sessions.map((session) => {
+    return '<div class="item"><strong>' + session.name + '</strong><br><span class="muted">' + session.id +
+      '</span><br><span class="muted">' + session.templateName + ' / ' + session.state + '</span><div class="row" style="margin-top:8px">' +
+      '<button data-start="' + session.id + '">Start</button>' +
+      '<button class="secondary" data-stop="' + session.id + '">Stop</button>' +
+      '<button class="secondary" data-ssh="' + session.id + '">SSH</button>' +
+      '<button class="secondary" data-delete="' + session.id + '">Delete</button></div></div>';
+  }).join("");
+}
+
+function attachSessionButtons() {
+  document.querySelectorAll("[data-start]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api('/api/sessions/' + button.dataset.start + '/start', { method: 'POST' });
+      await refresh();
+    });
+  });
+  document.querySelectorAll("[data-stop]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api('/api/sessions/' + button.dataset.stop + '/stop', { method: 'POST' });
+      await refresh();
+    });
+  });
+  document.querySelectorAll("[data-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await api('/api/sessions/' + button.dataset.delete, { method: 'DELETE' });
+      await refresh();
+    });
+  });
+  document.querySelectorAll("[data-ssh]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const data = await api('/api/sessions/' + button.dataset.ssh + '/ssh-token', { method: 'POST' });
+      alert(data.sshCommand);
+    });
+  });
+}
+
+async function refresh() {
+  if (!state.token) {
+    return;
+  }
+  state.me = await api('/api/auth/me');
+  renderIdentity();
+  const templates = await api('/api/templates');
+  renderTemplates(templates.templates);
+  const sessions = await api('/api/sessions');
+  renderSessions(sessions.sessions);
+  attachSessionButtons();
+  const usage = await api('/api/usage');
+  byId("usage").textContent = JSON.stringify(usage.usage, null, 2);
+  const audit = await api('/api/audit');
+  byId("audit").textContent = JSON.stringify(audit.audit, null, 2);
+}
+
+byId("registerButton").addEventListener("click", async () => {
+  const data = await api('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email: byId("email").value, name: byId("name").value })
+  });
+  setToken(data.token);
+  await refresh();
+});
+
+byId("loginButton").addEventListener("click", async () => {
+  const data = await api('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: byId("email").value, kind: 'api' })
+  });
+  setToken(data.token);
+  await refresh();
+});
+
+byId("createTemplateButton").addEventListener("click", async () => {
+  await api('/api/templates', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: byId("templateName").value,
+      description: byId("templateDescription").value
+    })
+  });
+  await refresh();
+});
+
+byId("addVersionButton").addEventListener("click", async () => {
+  await api('/api/templates/' + byId("versionTemplate").value + '/versions', {
+    method: 'POST',
+    body: JSON.stringify({
+      version: byId("templateVersion").value,
+      notes: byId("templateNotes").value,
+      manifest: {
+        image: 'registry.cloudflare.com/example/' + byId("versionTemplate").value + ':' + byId("templateVersion").value,
+        features: ['ssh', 'browser']
+      }
+    })
+  });
+  await refresh();
+});
+
+byId("promoteButton").addEventListener("click", async () => {
+  await api('/api/templates/' + byId("promoteTemplate").value + '/promote', {
+    method: 'POST',
+    body: JSON.stringify({ versionId: byId("promoteVersion").value })
+  });
+  await refresh();
+});
+
+byId("createSessionButton").addEventListener("click", async () => {
+  const data = await api('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: byId("sessionName").value,
+      templateId: byId("sessionTemplate").value
+    })
+  });
+  await api('/api/sessions/' + data.session.id + '/start', { method: 'POST' });
+  await refresh();
+});
+
+byId("snapshotButton").addEventListener("click", async () => {
+  await api('/api/sessions/' + byId("snapshotSession").value + '/snapshots', {
+    method: 'POST',
+    body: JSON.stringify({ label: byId("snapshotLabel").value || 'manual' })
+  });
+  await refresh();
+});
+
+byId("refreshButton").addEventListener("click", refresh);
+byId("reconcileButton").addEventListener("click", async () => {
+  await api('/api/admin/reconcile', { method: 'POST' });
+  await refresh();
+});
+
+if (state.token) {
+  refresh().catch((error) => {
+    console.error(error);
+    setToken("");
+    state.me = null;
+    renderIdentity();
+  });
+}
+`;
