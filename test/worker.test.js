@@ -87,6 +87,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const rootHtml = await rootResponse.text();
   assert.match(rootHtml, /Browser Terminal/);
   assert.match(rootHtml, /terminalOutput/);
+  assert.match(rootHtml, /snapshotList/);
+  assert.match(rootHtml, /snapshotContentPreview/);
 
   const appScriptResponse = await app.fetch(new Request("http://example.test/app.js"));
   assert.equal(appScriptResponse.status, 200);
@@ -97,6 +99,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /api\/workspaces\/current\/settings/);
   assert.match(appScript, /new WebSocket/);
   assert.match(appScript, /terminalSendButton/);
+  assert.match(appScript, /refreshSnapshots/);
+  assert.match(appScript, /data-snapshot-download/);
   assert.match(appScript, /logout-all/);
   assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
   assert.doesNotMatch(appScript, /state\.token/);

@@ -195,10 +195,10 @@ This file lists the remaining work required to close the gap between the current
   - R2-backed snapshot content storage
   - short-lived signed upload grants for snapshot uploads through the Worker
   - CLI save and restore path for snapshot artifacts
+  - richer manual snapshot save/list/view/delete controls in the web UI
 - Remaining:
   - persisted-path config in templates
   - container-side automatic snapshot upload/download
-  - richer manual save/restore controls in the web UI
   - restore safety checks
 
 ### PR 15: Usage Metering, Quotas, And Plan Enforcement

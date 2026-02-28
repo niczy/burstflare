@@ -530,3 +530,18 @@ This file records what has already been implemented in the repository and what h
 - Verified the live Worker now serves:
   - the `Browser Terminal` panel in the HTML shell
   - browser bundle wiring for `new WebSocket(...)` terminal attach
+
+## 44. Web Snapshot Controls
+
+- Expanded the browser shell snapshot card beyond create-only behavior.
+- Added web UI controls for:
+  - loading snapshots for the selected session
+  - inline text upload when creating a snapshot
+  - viewing stored snapshot content
+  - deleting snapshots
+- Added client-side snapshot refresh and raw-content fetch helpers.
+- Added UI state cleanup for snapshot content and list state on logout.
+- Added Worker test coverage for the served snapshot list/content UI wiring.
+- Verified the live Worker now serves:
+  - snapshot list and content preview panels in the HTML shell
+  - browser bundle wiring for snapshot list refresh, content view, and delete actions

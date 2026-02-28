@@ -345,8 +345,17 @@ export const html = `<!doctype html>
               <input id="snapshotLabel" type="text" placeholder="manual-save" />
             </div>
           </div>
-          <button id="snapshotButton">Create Snapshot</button>
-          <button class="secondary" id="reportButton">Refresh Admin Report</button>
+          <div>
+            <label for="snapshotContent">Snapshot Content</label>
+            <textarea id="snapshotContent" placeholder="Optional text payload to store with the snapshot"></textarea>
+          </div>
+          <div class="row">
+            <button id="snapshotButton">Create Snapshot</button>
+            <button class="secondary" id="snapshotListButton">Load Snapshots</button>
+            <button class="secondary" id="reportButton">Refresh Admin Report</button>
+          </div>
+          <div class="list" id="snapshotList"></div>
+          <pre id="snapshotContentPreview">No snapshot content loaded.</pre>
           <pre id="usage"></pre>
           <pre id="report">[]</pre>
         </div>
@@ -506,6 +515,23 @@ async function api(path, options = {}, allowRetry = true) {
   return data;
 }
 
+async function requestRaw(path, options = {}, allowRetry = true) {
+  const headers = new Headers(options.headers || {});
+  if (["POST", "PUT", "PATCH", "DELETE"].includes((options.method || "GET").toUpperCase()) && state.csrfToken) {
+    headers.set("x-burstflare-csrf", state.csrfToken);
+  }
+  const response = await fetch(path, { ...options, headers });
+  if (response.status === 401 && allowRetry && state.refreshToken) {
+    await refreshAuth();
+    return requestRaw(path, options, false);
+  }
+  if (!response.ok) {
+    const bodyText = await response.text().catch(() => "");
+    throw new Error(bodyText || "Request failed");
+  }
+  return response;
+}
+
 function renderIdentity() {
   byId("identity").textContent = state.me
     ? state.me.user.email + " in " + state.me.workspace.name + " (" + state.me.membership.role + ", " + state.me.workspace.plan + ")"
@@ -598,6 +624,48 @@ function renderSessions(sessions) {
   }).join("");
 }
 
+function renderSnapshots(snapshots) {
+  byId("snapshotList").innerHTML = snapshots.map((snapshot) => {
+    return '<div class="item"><strong>' + snapshot.label + '</strong><br><span class="muted">' + snapshot.id +
+      '</span><br><span class="muted">' + (snapshot.bytes || 0) + ' bytes</span><div class="row" style="margin-top:8px">' +
+      '<button class="secondary" data-snapshot-download="' + snapshot.id + '">View</button>' +
+      '<button class="secondary" data-snapshot-delete="' + snapshot.id + '">Delete</button></div></div>';
+  }).join("");
+
+  document.querySelectorAll("[data-snapshot-download]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => {
+        const sessionId = byId("snapshotSession").value;
+        const response = await requestRaw('/api/sessions/' + sessionId + '/snapshots/' + button.dataset.snapshotDownload + '/content');
+        const text = await response.text();
+        byId("snapshotContentPreview").textContent = text || "Snapshot content is empty.";
+      });
+    });
+  });
+
+  document.querySelectorAll("[data-snapshot-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => {
+        const sessionId = byId("snapshotSession").value;
+        await api('/api/sessions/' + sessionId + '/snapshots/' + button.dataset.snapshotDelete, {
+          method: 'DELETE'
+        });
+      });
+    });
+  });
+}
+
+async function refreshSnapshots() {
+  const sessionId = byId("snapshotSession").value;
+  if (!sessionId) {
+    byId("snapshotList").textContent = "";
+    byId("snapshotContentPreview").textContent = "No snapshot content loaded.";
+    return;
+  }
+  const data = await api('/api/sessions/' + sessionId + '/snapshots');
+  renderSnapshots(data.snapshots);
+}
+
 function clearPanels() {
   byId("workspaceName").value = "";
   byId("members").textContent = "";
@@ -608,6 +676,9 @@ function clearPanels() {
   byId("terminalInput").value = "";
   setTerminalOutput("Waiting for a session attach...");
   closeTerminal();
+  byId("snapshotContent").value = "";
+  byId("snapshotList").textContent = "";
+  byId("snapshotContentPreview").textContent = "No snapshot content loaded.";
   byId("usage").textContent = "";
   byId("report").textContent = "";
   byId("releases").textContent = "";
@@ -673,6 +744,7 @@ async function refresh() {
   const sessions = await api('/api/sessions');
   renderSessions(sessions.sessions);
   attachSessionButtons();
+  await refreshSnapshots();
   const usage = await api('/api/usage');
   byId("usage").textContent = JSON.stringify(usage, null, 2);
   const report = await api('/api/admin/report');
@@ -859,12 +931,28 @@ byId("createSessionButton").addEventListener("click", async () => {
 
 byId("snapshotButton").addEventListener("click", async () => {
   await perform(async () => {
-    await api('/api/sessions/' + byId("snapshotSession").value + '/snapshots', {
+    const sessionId = byId("snapshotSession").value;
+    const created = await api('/api/sessions/' + sessionId + '/snapshots', {
       method: 'POST',
       body: JSON.stringify({ label: byId("snapshotLabel").value || 'manual' })
     });
+    const snapshotBody = byId("snapshotContent").value;
+    if (snapshotBody) {
+      await api('/api/sessions/' + sessionId + '/snapshots/' + created.snapshot.id + '/content', {
+        method: 'PUT',
+        headers: {
+          'content-type': 'text/plain; charset=utf-8'
+        },
+        body: snapshotBody
+      });
+      byId("snapshotContentPreview").textContent = snapshotBody;
+    }
   });
 });
+
+byId("snapshotListButton").addEventListener("click", () => perform(async () => {
+  await refreshSnapshots();
+}));
 
 byId("refreshButton").addEventListener("click", () => perform(async () => {}));
 
