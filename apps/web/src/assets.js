@@ -282,6 +282,10 @@ export const html = `<!doctype html>
               <input id="templateVersion" type="text" placeholder="1.0.0" />
             </div>
           </div>
+          <div>
+            <label for="persistedPaths">Persisted Paths</label>
+            <input id="persistedPaths" type="text" placeholder="/workspace,/home/dev/.cache" />
+          </div>
           <button class="secondary" id="addVersionButton">Queue Build</button>
           <div class="row">
             <button class="secondary" id="processBuildsButton">Process Builds</button>
@@ -403,6 +407,14 @@ function appendTerminalOutput(message) {
   const current = byId("terminalOutput").textContent;
   byId("terminalOutput").textContent = current ? current + "\\n" + message : message;
   byId("terminalOutput").scrollTop = byId("terminalOutput").scrollHeight;
+}
+
+function parsePersistedPaths(value) {
+  const items = String(value || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return items.length ? items : undefined;
 }
 
 function setAuth(refreshToken = state.refreshToken, csrfToken = state.csrfToken) {
@@ -668,6 +680,7 @@ async function refreshSnapshots() {
 
 function clearPanels() {
   byId("workspaceName").value = "";
+  byId("persistedPaths").value = "";
   byId("members").textContent = "";
   byId("authSessions").textContent = "";
   byId("templates").textContent = "";
@@ -892,7 +905,8 @@ byId("addVersionButton").addEventListener("click", async () => {
         version: byId("templateVersion").value,
         manifest: {
           image: 'registry.cloudflare.com/example/' + byId("versionTemplate").value + ':' + byId("templateVersion").value,
-          features: ['ssh', 'browser', 'snapshots']
+          features: ['ssh', 'browser', 'snapshots'],
+          persistedPaths: parsePersistedPaths(byId("persistedPaths").value)
         }
       })
     });

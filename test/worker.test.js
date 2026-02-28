@@ -87,6 +87,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const rootHtml = await rootResponse.text();
   assert.match(rootHtml, /Browser Terminal/);
   assert.match(rootHtml, /terminalOutput/);
+  assert.match(rootHtml, /persistedPaths/);
   assert.match(rootHtml, /snapshotList/);
   assert.match(rootHtml, /snapshotContentPreview/);
 
@@ -99,6 +100,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /api\/workspaces\/current\/settings/);
   assert.match(appScript, /new WebSocket/);
   assert.match(appScript, /terminalSendButton/);
+  assert.match(appScript, /parsePersistedPaths/);
   assert.match(appScript, /refreshSnapshots/);
   assert.match(appScript, /data-snapshot-download/);
   assert.match(appScript, /logout-all/);
@@ -253,11 +255,13 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
       version: "2.0.0",
       manifest: {
         image: "registry.cloudflare.com/test/python-dev:2.0.0",
+        persistedPaths: ["/workspace"],
         sleepTtlSeconds: 1
       }
     })
   });
   assert.equal(version.data.build.status, "queued");
+  assert.deepEqual(version.data.templateVersion.manifest.persistedPaths, ["/workspace"]);
   assert.deepEqual(queuedBuilds, [{ type: "build", buildId: version.data.build.id }]);
 
   const invalidVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {

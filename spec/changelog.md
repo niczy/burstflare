@@ -545,3 +545,15 @@ This file records what has already been implemented in the repository and what h
 - Verified the live Worker now serves:
   - snapshot list and content preview panels in the HTML shell
   - browser bundle wiring for snapshot list refresh, content view, and delete actions
+
+## 45. Persisted-Path Template Inputs
+
+- Exposed template `persistedPaths` at the product edges instead of leaving it as backend-only manifest data.
+- Added CLI support for `--persisted-paths /workspace,/home/dev/.cache` on `burstflare template upload`.
+- Added a persisted-paths input to the web template version form.
+- Added client-side parsing of comma-separated persisted paths in the browser shell.
+- Added test coverage across the service, Worker, and CLI suites to ensure persisted paths pass through the manifest correctly.
+- Verified the live Worker can:
+  - serve the persisted-paths UI field in the web shell
+  - accept persisted paths in template version creation
+  - store the provided persisted paths in the returned manifest

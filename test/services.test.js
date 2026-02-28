@@ -149,10 +149,12 @@ test("service covers invites, queued builds, releases, session events, usage, an
     version: "1.0.0",
     manifest: {
       image: "registry.cloudflare.com/test/node-dev:1.0.0",
+      persistedPaths: ["/workspace", "/home/dev/.cache"],
       sleepTtlSeconds: 1
     }
   });
   assert.equal(version.build.status, "queued");
+  assert.deepEqual(version.templateVersion.manifest.persistedPaths, ["/workspace", "/home/dev/.cache"]);
   assert.deepEqual(queuedBuilds, [version.build.id]);
   await assert.rejects(
     () =>

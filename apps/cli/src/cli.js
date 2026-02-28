@@ -93,6 +93,17 @@ function getRefreshToken(options, config) {
   return options["refresh-token"] || config.refreshToken || "";
 }
 
+function parseListOption(value) {
+  if (!value || typeof value !== "string") {
+    return undefined;
+  }
+  const items = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return items.length ? items : undefined;
+}
+
 async function saveAuthConfig(configPath, config, baseUrl, payload) {
   await writeConfig(configPath, {
     ...config,
@@ -139,7 +150,7 @@ function helpText() {
     "burstflare workspace set-role <userId> --role viewer",
     "burstflare workspace plan <free|pro|enterprise>",
     "burstflare template create <name> [--description ...]",
-    "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600]",
+    "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
     "burstflare template promote <templateId> <versionId>",
     "burstflare template archive <templateId>",
     "burstflare template restore <templateId>",
@@ -637,7 +648,8 @@ export async function runCli(argv, dependencies = {}) {
                 image: `registry.cloudflare.com/local/${templateId}:${options.version}`,
                 features: ["ssh", "browser", "snapshots"],
                 simulateFailure: Boolean(options["simulate-failure"]),
-                sleepTtlSeconds: options["sleep-ttl-seconds"] ? Number(options["sleep-ttl-seconds"]) : undefined
+                sleepTtlSeconds: options["sleep-ttl-seconds"] ? Number(options["sleep-ttl-seconds"]) : undefined,
+                persistedPaths: parseListOption(options["persisted-paths"])
               }
             })
           }

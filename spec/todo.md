@@ -196,8 +196,8 @@ This file lists the remaining work required to close the gap between the current
   - short-lived signed upload grants for snapshot uploads through the Worker
   - CLI save and restore path for snapshot artifacts
   - richer manual snapshot save/list/view/delete controls in the web UI
+  - persisted-path config is now exposed in CLI and web template version inputs
 - Remaining:
-  - persisted-path config in templates
   - container-side automatic snapshot upload/download
   - restore safety checks
 
