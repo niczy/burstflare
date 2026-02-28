@@ -48,8 +48,9 @@ function createBucket() {
 }
 
 async function requestJson(app, path, init = {}) {
+  const url = path.startsWith("http://") || path.startsWith("https://") ? path : `http://example.test${path}`;
   const response = await app.fetch(
-    new Request(`http://example.test${path}`, {
+    new Request(url, {
       ...init
     })
   );
@@ -150,10 +151,18 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(invalidVersion.response.status, 400);
 
   const bundleBody = "print('hello from bundle')";
-  const bundleUpload = await requestJson(app, `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`, {
+  const bundleGrant = await requestJson(app, `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle/upload`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      contentType: "text/x-python",
+      bytes: bundleBody.length
+    })
+  });
+  assert.equal(bundleGrant.response.status, 200);
+  const bundleUpload = await requestJson(app, bundleGrant.data.uploadGrant.url, {
     method: "PUT",
     headers: {
-      ...ownerHeaders,
       "content-type": "text/x-python"
     },
     body: bundleBody
@@ -262,13 +271,27 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(snapshot.response.status, 200);
 
-  const snapshotUpload = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content`, {
+  const snapshotPayload = "snapshot payload";
+  const snapshotGrant = await requestJson(
+    app,
+    `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content/upload`,
+    {
+      method: "POST",
+      headers: switchedHeaders,
+      body: JSON.stringify({
+        contentType: "text/plain",
+        bytes: snapshotPayload.length
+      })
+    }
+  );
+  assert.equal(snapshotGrant.response.status, 200);
+
+  const snapshotUpload = await requestJson(app, snapshotGrant.data.uploadGrant.url, {
     method: "PUT",
     headers: {
-      ...switchedHeaders,
       "content-type": "text/plain"
     },
-    body: "snapshot payload"
+    body: snapshotPayload
   });
   assert.equal(snapshotUpload.response.status, 200);
 

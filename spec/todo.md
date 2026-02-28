@@ -104,11 +104,12 @@ This file lists the remaining work required to close the gap between the current
   - authenticated bundle upload endpoint
   - authenticated bundle download endpoint
   - R2-backed template-bundle storage
+  - short-lived signed upload grants for bundle uploads through the Worker
   - manifest validation and upload size limits
   - template archive and restore controls
   - archived templates block new session creation
 - Remaining:
-  - signed R2 upload URLs
+  - direct-to-R2 presigned upload URLs if we want to bypass the Worker relay path
   - admin-grade template management UX
 
 ### PR 08: Async Build Pipeline With Queues And Workflows
@@ -192,6 +193,7 @@ This file lists the remaining work required to close the gap between the current
   - snapshot content upload and download routes
   - snapshot deletion route and artifact cleanup
   - R2-backed snapshot content storage
+  - short-lived signed upload grants for snapshot uploads through the Worker
   - CLI save and restore path for snapshot artifacts
 - Remaining:
   - persisted-path config in templates

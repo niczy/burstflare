@@ -15,6 +15,7 @@ export function createDefaultState() {
     sessions: [],
     sessionEvents: [],
     snapshots: [],
+    uploadGrants: [],
     usageEvents: [],
     auditLogs: []
   };

@@ -699,6 +699,25 @@ export function createApp(options = {}) {
       )
     },
     {
+      method: "POST",
+      pattern: "/api/templates/:templateId/versions/:versionId/bundle/upload",
+      handler: withErrorHandling(async (request, { templateId, versionId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        const result = await service.createTemplateVersionBundleUploadGrant(token, templateId, versionId, body);
+        return toJson({
+          ...result,
+          uploadGrant: {
+            ...result.uploadGrant,
+            url: new URL(`/api/uploads/${result.uploadGrant.id}`, request.url).toString()
+          }
+        });
+      })
+    },
+    {
       method: "GET",
       pattern: "/api/templates/:templateId/versions/:versionId/bundle",
       handler: withErrorHandling(async (request, { templateId, versionId }) => {
@@ -925,6 +944,25 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "POST",
+      pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/content/upload",
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        const result = await service.createSnapshotUploadGrant(token, sessionId, snapshotId, body);
+        return toJson({
+          ...result,
+          uploadGrant: {
+            ...result.uploadGrant,
+            url: new URL(`/api/uploads/${result.uploadGrant.id}`, request.url).toString()
+          }
+        });
+      })
+    },
+    {
       method: "PUT",
       pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/content",
       handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
@@ -968,6 +1006,25 @@ export function createApp(options = {}) {
         }
         return toJson(await service.deleteSnapshot(token, sessionId, snapshotId));
       })
+    },
+    {
+      method: "PUT",
+      pattern: "/api/uploads/:uploadGrantId",
+      handler: withRateLimit(
+        {
+          scope: "signed-upload",
+          limit: 16,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { uploadGrantId }) => {
+          return toJson(
+            await service.consumeUploadGrant(uploadGrantId, {
+              body: await request.arrayBuffer(),
+              contentType: request.headers.get("content-type") || "application/octet-stream"
+            })
+          );
+        })
+      )
     },
     {
       method: "POST",

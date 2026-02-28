@@ -135,6 +135,22 @@ test("service covers invites, queued builds, releases, session events, usage, an
     contentType: "application/javascript"
   });
   assert.equal(uploaded.bundle.bytes, 22);
+  const signedBundleBody = "bundle-via-grant";
+  const bundleGrant = await service.createTemplateVersionBundleUploadGrant(owner.token, template.template.id, version.templateVersion.id, {
+    contentType: "text/plain",
+    bytes: signedBundleBody.length
+  });
+  assert.match(bundleGrant.uploadGrant.id, /^upg_/);
+  const grantUploaded = await service.consumeUploadGrant(bundleGrant.uploadGrant.id, {
+    body: signedBundleBody,
+    contentType: "text/plain"
+  });
+  assert.equal(grantUploaded.target, "template_bundle");
+  assert.equal(objects.readBundleText(version.templateVersion.id), signedBundleBody);
+  await assert.rejects(
+    () => service.consumeUploadGrant(bundleGrant.uploadGrant.id, { body: signedBundleBody, contentType: "text/plain" }),
+    /Upload grant not found/
+  );
   await assert.rejects(
     () =>
       service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
@@ -143,9 +159,9 @@ test("service covers invites, queued builds, releases, session events, usage, an
       }),
     /Bundle exceeds size limit/
   );
-  assert.equal(objects.readBundleText(version.templateVersion.id), "console.log('bundle');");
+  assert.equal(objects.readBundleText(version.templateVersion.id), signedBundleBody);
   const bundle = await service.getTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id);
-  assert.equal(new TextDecoder().decode(bundle.body), "console.log('bundle');");
+  assert.equal(new TextDecoder().decode(bundle.body), signedBundleBody);
   await assert.rejects(
     () => service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id),
     /build-ready/
@@ -202,10 +218,16 @@ test("service covers invites, queued builds, releases, session events, usage, an
     label: "manual-save"
   });
   assert.equal(snapshot.snapshot.label, "manual-save");
-  const uploadedSnapshot = await service.uploadSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id, {
-    body: "workspace-state",
+  const snapshotBody = "workspace-state";
+  const snapshotGrant = await service.createSnapshotUploadGrant(switched.token, session.session.id, snapshot.snapshot.id, {
+    contentType: "text/plain",
+    bytes: snapshotBody.length
+  });
+  const uploadedSnapshot = await service.consumeUploadGrant(snapshotGrant.uploadGrant.id, {
+    body: snapshotBody,
     contentType: "text/plain"
   });
+  assert.equal(uploadedSnapshot.target, "snapshot");
   assert.equal(uploadedSnapshot.snapshot.bytes, 15);
   const downloadedSnapshot = await service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id);
   assert.equal(new TextDecoder().decode(downloadedSnapshot.body), "workspace-state");

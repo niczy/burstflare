@@ -260,3 +260,19 @@ This file records what has already been implemented in the repository and what h
   - return `409` with `Template is archived` when session creation is attempted
   - restore the template
   - allow session creation again after restore
+
+## 26. Signed Artifact Upload Grants
+
+- Added short-lived one-time upload grants for template-bundle uploads.
+- Added short-lived one-time upload grants for snapshot-content uploads.
+- Added a public grant-consumption upload route that accepts a signed grant id and stores the artifact.
+- Updated the CLI to use signed upload grants for:
+  - `template upload --file`
+  - `snapshot save --file`
+- Kept the existing authenticated direct upload routes for local and admin-friendly fallback flows.
+- Verified the live Worker can:
+  - mint a bundle upload grant
+  - upload a template bundle through the grant URL
+  - mint a snapshot upload grant
+  - upload snapshot content through the grant URL
+  - read both artifacts back successfully afterward

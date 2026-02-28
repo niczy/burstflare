@@ -276,6 +276,20 @@ export async function runCli(argv, dependencies = {}) {
     return response;
   }
 
+  async function uploadWithGrant(uploadUrl, body, contentType) {
+    return requestJson(
+      uploadUrl,
+      {
+        method: "PUT",
+        headers: {
+          "content-type": contentType || "application/octet-stream"
+        },
+        body
+      },
+      fetchImpl
+    );
+  }
+
   try {
     if (command === "help") {
       print(stdout, helpText());
@@ -524,16 +538,21 @@ export async function runCli(argv, dependencies = {}) {
         let result = created;
         if (options.file) {
           const bundleBody = await readFile(options.file);
-          const uploaded = await requestJsonAuthed(
-            `${baseUrl}/api/templates/${templateId}/versions/${created.templateVersion.id}/bundle`,
+          const uploadGrant = await requestJsonAuthed(
+            `${baseUrl}/api/templates/${templateId}/versions/${created.templateVersion.id}/bundle/upload`,
             {
-              method: "PUT",
-              headers: {
-                ...headers(undefined, false),
-                "content-type": options["content-type"] || "application/octet-stream"
-              },
-              body: bundleBody
+              method: "POST",
+              headers: headers(undefined),
+              body: JSON.stringify({
+                contentType: options["content-type"] || "application/octet-stream",
+                bytes: bundleBody.byteLength
+              })
             }
+          );
+          const uploaded = await uploadWithGrant(
+            uploadGrant.uploadGrant.url,
+            bundleBody,
+            uploadGrant.uploadGrant.contentType || options["content-type"] || "application/octet-stream"
           );
           result = {
             ...created,
@@ -782,16 +801,21 @@ export async function runCli(argv, dependencies = {}) {
         let result = created;
         if (options.file) {
           const snapshotBody = await readFile(options.file);
-          const uploaded = await requestJsonAuthed(
-            `${baseUrl}/api/sessions/${sessionId}/snapshots/${created.snapshot.id}/content`,
+          const uploadGrant = await requestJsonAuthed(
+            `${baseUrl}/api/sessions/${sessionId}/snapshots/${created.snapshot.id}/content/upload`,
             {
-              method: "PUT",
-              headers: {
-                ...headers(undefined, false),
-                "content-type": options["content-type"] || "application/octet-stream"
-              },
-              body: snapshotBody
+              method: "POST",
+              headers: headers(undefined),
+              body: JSON.stringify({
+                contentType: options["content-type"] || "application/octet-stream",
+                bytes: snapshotBody.byteLength
+              })
             }
+          );
+          const uploaded = await uploadWithGrant(
+            uploadGrant.uploadGrant.url,
+            snapshotBody,
+            uploadGrant.uploadGrant.contentType || options["content-type"] || "application/octet-stream"
           );
           result = uploaded;
         }

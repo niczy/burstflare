@@ -6,6 +6,7 @@ const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const REFRESH_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const RUNTIME_TOKEN_TTL_MS = 1000 * 60 * 15;
 const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
+const UPLOAD_GRANT_TTL_MS = 1000 * 60 * 10;
 const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
@@ -213,6 +214,135 @@ function writeBindingRelease(state, clock, workspaceId, templateId, templateVers
   };
   state.bindingReleases.push(release);
   return release;
+}
+
+function getUploadGrants(state) {
+  if (!Array.isArray(state.uploadGrants)) {
+    state.uploadGrants = [];
+  }
+  return state.uploadGrants;
+}
+
+function pruneUploadGrants(state, clock) {
+  const cutoff = nowMs(clock);
+  state.uploadGrants = getUploadGrants(state).filter(
+    (entry) => !entry.usedAt && new Date(entry.expiresAt).getTime() > cutoff
+  );
+  return state.uploadGrants;
+}
+
+function createUploadGrant(state, clock, details) {
+  const grants = pruneUploadGrants(state, clock);
+  const grant = {
+    id: createId("upg"),
+    createdAt: nowIso(clock),
+    expiresAt: futureIso(clock, UPLOAD_GRANT_TTL_MS),
+    usedAt: null,
+    ...details
+  };
+  grants.push(grant);
+  return grant;
+}
+
+async function storeTemplateBundleUpload({
+  state,
+  clock,
+  objects,
+  workspace,
+  template,
+  templateVersion,
+  actorUserId,
+  body,
+  contentType = "application/octet-stream"
+}) {
+  const bundleBody = toUint8Array(body);
+  ensure(bundleBody.byteLength > 0, "Bundle body is required");
+  ensure(bundleBody.byteLength <= MAX_TEMPLATE_BUNDLE_BYTES, "Bundle exceeds size limit", 413);
+
+  templateVersion.bundleKey =
+    templateVersion.bundleKey || `templates/${workspace.id}/${template.id}/${templateVersion.id}/bundle.bin`;
+  templateVersion.bundleUploadedAt = nowIso(clock);
+  templateVersion.bundleContentType = contentType;
+  templateVersion.bundleBytes = bundleBody.byteLength;
+
+  if (objects?.putTemplateVersionBundle) {
+    await objects.putTemplateVersionBundle({
+      workspace,
+      template,
+      templateVersion,
+      body: bundleBody,
+      contentType
+    });
+  }
+
+  writeAudit(state, clock, {
+    action: "template.bundle_uploaded",
+    actorUserId,
+    workspaceId: workspace.id,
+    targetType: "template_version",
+    targetId: templateVersion.id,
+    details: {
+      contentType,
+      bytes: bundleBody.byteLength
+    }
+  });
+
+  return {
+    templateVersion,
+    bundle: {
+      key: templateVersion.bundleKey,
+      uploadedAt: templateVersion.bundleUploadedAt,
+      contentType: templateVersion.bundleContentType,
+      bytes: templateVersion.bundleBytes
+    }
+  };
+}
+
+async function storeSnapshotUpload({
+  state,
+  clock,
+  objects,
+  workspace,
+  session,
+  snapshot,
+  actorUserId,
+  body,
+  contentType = "application/octet-stream"
+}) {
+  const snapshotBody = toUint8Array(body);
+  ensure(snapshotBody.byteLength > 0, "Snapshot body is required");
+  ensure(snapshotBody.byteLength <= MAX_SNAPSHOT_BYTES, "Snapshot exceeds size limit", 413);
+
+  snapshot.uploadedAt = nowIso(clock);
+  snapshot.contentType = contentType;
+  snapshot.bytes = snapshotBody.byteLength;
+
+  if (objects?.putSnapshot) {
+    await objects.putSnapshot({
+      workspace,
+      session,
+      snapshot,
+      body: snapshotBody,
+      contentType
+    });
+    snapshot.inlineContentBase64 = null;
+  } else {
+    snapshot.inlineContentBase64 = toBase64(snapshotBody);
+  }
+
+  writeAudit(state, clock, {
+    action: "snapshot.content_uploaded",
+    actorUserId,
+    workspaceId: workspace.id,
+    targetType: "snapshot",
+    targetId: snapshot.id,
+    details: {
+      contentType,
+      bytes: snapshot.bytes
+    }
+  });
+
+  return { snapshot };
 }
 
 function requireAuth(state, token, clock) {
@@ -1032,47 +1162,66 @@ export function createBurstFlareService(options = {}) {
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
         const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
         ensure(templateVersion, "Template version not found", 404);
+        return storeTemplateBundleUpload({
+          state,
+          clock,
+          objects,
+          workspace: auth.workspace,
+          template: auth.template,
+          templateVersion,
+          actorUserId: auth.user.id,
+          body,
+          contentType
+        });
+      });
+    },
 
-        const bundleBody = toUint8Array(body);
-        ensure(bundleBody.byteLength > 0, "Bundle body is required");
-        ensure(bundleBody.byteLength <= MAX_TEMPLATE_BUNDLE_BYTES, "Bundle exceeds size limit", 413);
-
-        templateVersion.bundleKey =
-          templateVersion.bundleKey ||
-          `templates/${auth.workspace.id}/${auth.template.id}/${templateVersion.id}/bundle.bin`;
-        templateVersion.bundleUploadedAt = nowIso(clock);
-        templateVersion.bundleContentType = contentType;
-        templateVersion.bundleBytes = bundleBody.byteLength;
-
-        if (objects?.putTemplateVersionBundle) {
-          await objects.putTemplateVersionBundle({
-            workspace: auth.workspace,
-            template: auth.template,
-            templateVersion,
-            body: bundleBody,
-            contentType
-          });
+    async createTemplateVersionBundleUploadGrant(
+      token,
+      templateId,
+      versionId,
+      { contentType = "application/octet-stream", bytes = null } = {}
+    ) {
+      return store.transact((state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
+        const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
+        ensure(templateVersion, "Template version not found", 404);
+        if (bytes !== null) {
+          ensure(Number.isInteger(bytes) && bytes > 0, "Upload bytes must be a positive integer");
+          ensure(bytes <= MAX_TEMPLATE_BUNDLE_BYTES, "Bundle exceeds size limit", 413);
         }
 
+        const uploadGrant = createUploadGrant(state, clock, {
+          kind: "template_bundle",
+          workspaceId: auth.workspace.id,
+          templateId: auth.template.id,
+          templateVersionId: templateVersion.id,
+          actorUserId: auth.user.id,
+          contentType,
+          expectedBytes: bytes
+        });
+
         writeAudit(state, clock, {
-          action: "template.bundle_uploaded",
+          action: "template.bundle_upload_grant_created",
           actorUserId: auth.user.id,
           workspaceId: auth.workspace.id,
           targetType: "template_version",
           targetId: templateVersion.id,
           details: {
             contentType,
-            bytes: bundleBody.byteLength
+            bytes,
+            uploadGrantId: uploadGrant.id
           }
         });
 
         return {
-          templateVersion,
-          bundle: {
-            key: templateVersion.bundleKey,
-            uploadedAt: templateVersion.bundleUploadedAt,
-            contentType: templateVersion.bundleContentType,
-            bytes: templateVersion.bundleBytes
+          uploadGrant: {
+            id: uploadGrant.id,
+            method: "PUT",
+            expiresAt: uploadGrant.expiresAt,
+            contentType: uploadGrant.contentType,
+            expectedBytes: uploadGrant.expectedBytes
           }
         };
       });
@@ -1502,41 +1651,144 @@ export function createBurstFlareService(options = {}) {
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
         ensure(snapshot, "Snapshot not found", 404);
+        return storeSnapshotUpload({
+          state,
+          clock,
+          objects,
+          workspace: auth.workspace,
+          session: auth.session,
+          snapshot,
+          actorUserId: auth.user.id,
+          body,
+          contentType
+        });
+      });
+    },
 
-        const snapshotBody = toUint8Array(body);
-        ensure(snapshotBody.byteLength > 0, "Snapshot body is required");
-        ensure(snapshotBody.byteLength <= MAX_SNAPSHOT_BYTES, "Snapshot exceeds size limit", 413);
-
-        snapshot.uploadedAt = nowIso(clock);
-        snapshot.contentType = contentType;
-        snapshot.bytes = snapshotBody.byteLength;
-
-        if (objects?.putSnapshot) {
-          await objects.putSnapshot({
-            workspace: auth.workspace,
-            session: auth.session,
-            snapshot,
-            body: snapshotBody,
-            contentType
-          });
-          snapshot.inlineContentBase64 = null;
-        } else {
-          snapshot.inlineContentBase64 = toBase64(snapshotBody);
+    async createSnapshotUploadGrant(
+      token,
+      sessionId,
+      snapshotId,
+      { contentType = "application/octet-stream", bytes = null } = {}
+    ) {
+      return store.transact((state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        ensure(auth.session.state !== "deleted", "Session deleted", 409);
+        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
+        ensure(snapshot, "Snapshot not found", 404);
+        if (bytes !== null) {
+          ensure(Number.isInteger(bytes) && bytes > 0, "Upload bytes must be a positive integer");
+          ensure(bytes <= MAX_SNAPSHOT_BYTES, "Snapshot exceeds size limit", 413);
         }
 
+        const uploadGrant = createUploadGrant(state, clock, {
+          kind: "snapshot",
+          workspaceId: auth.workspace.id,
+          sessionId: auth.session.id,
+          snapshotId: snapshot.id,
+          actorUserId: auth.user.id,
+          contentType,
+          expectedBytes: bytes
+        });
+
         writeAudit(state, clock, {
-          action: "snapshot.content_uploaded",
+          action: "snapshot.upload_grant_created",
           actorUserId: auth.user.id,
           workspaceId: auth.workspace.id,
           targetType: "snapshot",
           targetId: snapshot.id,
           details: {
             contentType,
-            bytes: snapshot.bytes
+            bytes,
+            uploadGrantId: uploadGrant.id
           }
         });
 
-        return { snapshot };
+        return {
+          uploadGrant: {
+            id: uploadGrant.id,
+            method: "PUT",
+            expiresAt: uploadGrant.expiresAt,
+            contentType: uploadGrant.contentType,
+            expectedBytes: uploadGrant.expectedBytes
+          }
+        };
+      });
+    },
+
+    async consumeUploadGrant(grantId, { body, contentType = "application/octet-stream" } = {}) {
+      return store.transact(async (state) => {
+        const grants = pruneUploadGrants(state, clock);
+        const uploadGrant = grants.find((entry) => entry.id === grantId);
+        ensure(uploadGrant, "Upload grant not found", 404);
+
+        const payload = toUint8Array(body);
+        ensure(payload.byteLength > 0, "Upload body is required");
+        if (uploadGrant.expectedBytes !== null && uploadGrant.expectedBytes !== undefined) {
+          ensure(payload.byteLength === uploadGrant.expectedBytes, "Upload body size does not match grant");
+        }
+
+        uploadGrant.usedAt = nowIso(clock);
+        const effectiveContentType = contentType || uploadGrant.contentType || "application/octet-stream";
+
+        if (uploadGrant.kind === "template_bundle") {
+          const workspace = state.workspaces.find((entry) => entry.id === uploadGrant.workspaceId);
+          ensure(workspace, "Workspace not found", 404);
+          const template = state.templates.find(
+            (entry) => entry.id === uploadGrant.templateId && entry.workspaceId === uploadGrant.workspaceId
+          );
+          ensure(template, "Template not found", 404);
+          const templateVersion = state.templateVersions.find(
+            (entry) => entry.id === uploadGrant.templateVersionId && entry.templateId === template.id
+          );
+          ensure(templateVersion, "Template version not found", 404);
+          const uploaded = await storeTemplateBundleUpload({
+            state,
+            clock,
+            objects,
+            workspace,
+            template,
+            templateVersion,
+            actorUserId: uploadGrant.actorUserId,
+            body: payload,
+            contentType: effectiveContentType
+          });
+          return {
+            target: "template_bundle",
+            ...uploaded
+          };
+        }
+
+        if (uploadGrant.kind === "snapshot") {
+          const workspace = state.workspaces.find((entry) => entry.id === uploadGrant.workspaceId);
+          ensure(workspace, "Workspace not found", 404);
+          const session = state.sessions.find(
+            (entry) => entry.id === uploadGrant.sessionId && entry.workspaceId === uploadGrant.workspaceId
+          );
+          ensure(session, "Session not found", 404);
+          ensure(session.state !== "deleted", "Session deleted", 409);
+          const snapshot = state.snapshots.find(
+            (entry) => entry.id === uploadGrant.snapshotId && entry.sessionId === session.id
+          );
+          ensure(snapshot, "Snapshot not found", 404);
+          const uploaded = await storeSnapshotUpload({
+            state,
+            clock,
+            objects,
+            workspace,
+            session,
+            snapshot,
+            actorUserId: uploadGrant.actorUserId,
+            body: payload,
+            contentType: effectiveContentType
+          });
+          return {
+            target: "snapshot",
+            ...uploaded
+          };
+        }
+
+        ensure(false, "Upload grant not supported", 400);
       });
     },
 
