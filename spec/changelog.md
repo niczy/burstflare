@@ -604,3 +604,15 @@ This file records what has already been implemented in the repository and what h
   - produce a dead-lettered build
   - recover it through the new bulk retry route
   - report the recovered build ID in the response
+
+## 49. Browser Device Approval Controls
+
+- Added in-app device-code approval controls to the browser shell.
+- Added a browser input for device codes plus an `Approve Device` action.
+- Surfaced the current `pendingDeviceCodes` count in the browser UI.
+- Reused the existing device-approval API flow instead of introducing a parallel auth path.
+- Added Worker test coverage for the served device-approval UI and client wiring.
+- Verified the live Worker can:
+  - serve the device approval controls in the browser shell
+  - approve a real device code from a browser-authenticated session
+  - complete the device exchange flow afterward

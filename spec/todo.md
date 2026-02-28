@@ -52,7 +52,7 @@ This file lists the remaining work required to close the gap between the current
 - Remaining:
   - WebAuthn
   - Turnstile production enablement with a configured `TURNSTILE_SECRET` and real client widget flow
-  - richer browser-facing device management UX beyond the current logout-all and auth-session list-revoke controls
+  - richer browser-facing auth/device management UX beyond the current logout-all, auth-session list-revoke, and device-approval controls
 
 ### PR 04: Workspace And Membership Model
 

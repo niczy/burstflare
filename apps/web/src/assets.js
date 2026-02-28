@@ -254,10 +254,16 @@ export const html = `<!doctype html>
         <div class="card stack">
           <h2>Auth Sessions</h2>
           <div class="muted">Review and revoke active browser or CLI sign-ins without forcing a full account-wide logout.</div>
+          <div>
+            <label for="deviceCode">Approve Device Code</label>
+            <input id="deviceCode" type="text" placeholder="device_..." />
+          </div>
           <div class="row">
+            <button class="secondary" id="approveDeviceButton">Approve Device</button>
             <button class="secondary" id="authSessionsButton">Refresh Sessions</button>
             <button class="secondary" id="logoutAllButton">Logout All Sessions</button>
           </div>
+          <div class="muted" id="deviceStatus">Pending device approvals: 0</div>
           <div class="list" id="authSessions"></div>
         </div>
 
@@ -403,6 +409,10 @@ function setTerminalStatus(message) {
 function setTerminalOutput(message) {
   byId("terminalOutput").textContent = message;
   byId("terminalOutput").scrollTop = byId("terminalOutput").scrollHeight;
+}
+
+function setDeviceStatus(message) {
+  byId("deviceStatus").textContent = message;
 }
 
 function appendTerminalOutput(message) {
@@ -577,6 +587,9 @@ function renderIdentity() {
     : "Not signed in";
   if (state.me) {
     byId("workspaceName").value = state.me.workspace.name;
+    setDeviceStatus('Pending device approvals: ' + state.me.pendingDeviceCodes);
+  } else {
+    setDeviceStatus('Pending device approvals: 0');
   }
 }
 
@@ -706,6 +719,7 @@ async function refreshSnapshots() {
 }
 
 function clearPanels() {
+  byId("deviceCode").value = "";
   byId("workspaceName").value = "";
   byId("persistedPaths").value = "";
   byId("members").textContent = "";
@@ -894,6 +908,16 @@ byId("saveWorkspaceButton").addEventListener("click", async () => {
 });
 
 byId("membersButton").addEventListener("click", () => perform(async () => {}));
+
+byId("approveDeviceButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await api('/api/cli/device/approve', {
+      method: 'POST',
+      body: JSON.stringify({ deviceCode: byId("deviceCode").value })
+    });
+    byId("deviceCode").value = "";
+  });
+});
 
 byId("authSessionsButton").addEventListener("click", () => perform(async () => {}));
 

@@ -86,6 +86,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(rootResponse.status, 200);
   const rootHtml = await rootResponse.text();
   assert.match(rootHtml, /Browser Terminal/);
+  assert.match(rootHtml, /Approve Device Code/);
+  assert.match(rootHtml, /deviceStatus/);
   assert.match(rootHtml, /terminalOutput/);
   assert.match(rootHtml, /persistedPaths/);
   assert.match(rootHtml, /snapshotList/);
@@ -97,8 +99,10 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /burstflare_refresh_token/);
   assert.match(appScript, /x-burstflare-csrf/);
   assert.match(appScript, /api\/auth\/sessions/);
+  assert.match(appScript, /api\/cli\/device\/approve/);
   assert.match(appScript, /api\/workspaces\/current\/settings/);
   assert.match(appScript, /new WebSocket/);
+  assert.match(appScript, /pendingDeviceCodes/);
   assert.match(appScript, /startAutoRefresh/);
   assert.match(appScript, /setInterval/);
   assert.match(appScript, /terminalSendButton/);
