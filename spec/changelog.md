@@ -197,3 +197,10 @@ This file records what has already been implemented in the repository and what h
   - enqueue a reconcile job
   - process it through the reconcile queue consumer
   - move a running session to `sleeping` asynchronously
+
+## 20. Scheduled Reconcile Trigger
+
+- Added a deployed Cloudflare cron trigger for reconcile scheduling.
+- Added a Worker `scheduled` handler that enqueues reconcile jobs when the cron fires.
+- Kept the existing queue consumer as the execution path for scheduled reconcile work.
+- Verified the live deployment now includes the `*/15 * * * *` schedule trigger.

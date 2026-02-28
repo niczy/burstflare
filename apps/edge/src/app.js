@@ -294,6 +294,19 @@ export function createWorkerService(options = {}) {
   });
 }
 
+export async function handleScheduled(controller, options = {}) {
+  if (options.RECONCILE_QUEUE) {
+    await options.RECONCILE_QUEUE.send({
+      type: "reconcile",
+      source: "scheduled",
+      cron: controller.cron || null
+    });
+    return;
+  }
+  const service = createWorkerService(options);
+  await service.reconcile();
+}
+
 export function createApp(options = {}) {
   const service = createWorkerService(options);
   const rateLimiter = createRateLimiter(options);

@@ -1,5 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
-import { createApp, createWorkerService } from "./app.js";
+import { createApp, createWorkerService, handleScheduled } from "./app.js";
 
 export class BurstFlareSessionContainer extends Container {
   defaultPort = 8080;
@@ -41,5 +41,9 @@ export default {
         await service.reconcile();
       }
     }
+  },
+
+  async scheduled(controller, env) {
+    await handleScheduled(controller, createRuntimeOptions(env));
   }
 };

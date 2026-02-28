@@ -63,6 +63,9 @@ max_batch_size = 1
 max_batch_timeout = 1`);
   }
 
+  lines.push(`[triggers]
+crons = ["*/15 * * * *"]`);
+
   return `${lines.join("\n\n")}\n`;
 }
 

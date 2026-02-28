@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp } from "../apps/edge/src/app.js";
+import { createApp, handleScheduled } from "../apps/edge/src/app.js";
 
 function toBytes(value) {
   if (value instanceof Uint8Array) {
@@ -319,4 +319,25 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: { authorization: `Bearer ${refreshed.data.token}` }
   });
   assert.equal(revoked.response.status, 401);
+});
+
+test("worker scheduled handler enqueues reconcile jobs", async () => {
+  const messages = [];
+  await handleScheduled(
+    { cron: "*/15 * * * *" },
+    {
+      RECONCILE_QUEUE: {
+        async send(body) {
+          messages.push(body);
+        }
+      }
+    }
+  );
+  assert.deepEqual(messages, [
+    {
+      type: "reconcile",
+      source: "scheduled",
+      cron: "*/15 * * * *"
+    }
+  ]);
 });
