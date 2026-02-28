@@ -261,6 +261,10 @@ function writeSessionEvent(state, clock, sessionId, stateName, details = {}) {
 function createBindingManifest(template, templateVersion, build) {
   return {
     image: templateVersion?.manifest?.image || null,
+    imageReference: build?.artifactImageReference || null,
+    imageDigest: build?.artifactImageDigest || null,
+    configDigest: build?.artifactConfigDigest || null,
+    layerCount: build?.artifactLayerCount || 0,
     features: templateVersion?.manifest?.features || [],
     persistedPaths: templateVersion?.manifest?.persistedPaths || [],
     bundleUploaded: Boolean(templateVersion?.bundleUploadedAt),
@@ -743,6 +747,10 @@ function buildTemplateBuildLog(build, template, templateVersion) {
     `artifact_key=${build.artifactKey || ""}`,
     `artifact_source=${build.artifactSource || ""}`,
     `artifact_digest=${build.artifactDigest || ""}`,
+    `artifact_image_reference=${build.artifactImageReference || ""}`,
+    `artifact_image_digest=${build.artifactImageDigest || ""}`,
+    `artifact_config_digest=${build.artifactConfigDigest || ""}`,
+    `artifact_layer_count=${build.artifactLayerCount || 0}`,
     `artifact_bytes=${build.artifactBytes || 0}`,
     `artifact_built_at=${build.artifactBuiltAt || ""}`,
     `started_at=${build.startedAt || ""}`,
@@ -820,9 +828,46 @@ async function loadBuildInput({ objects, template, templateVersion }) {
   };
 }
 
+function parseImageReference(image) {
+  const raw = String(image || "").trim();
+  if (!raw) {
+    return {
+      repository: null,
+      tag: null
+    };
+  }
+
+  const withoutDigest = raw.split("@")[0];
+  const lastSlash = withoutDigest.lastIndexOf("/");
+  const lastColon = withoutDigest.lastIndexOf(":");
+  if (lastColon > lastSlash) {
+    return {
+      repository: withoutDigest.slice(0, lastColon),
+      tag: withoutDigest.slice(lastColon + 1)
+    };
+  }
+  return {
+    repository: withoutDigest,
+    tag: "latest"
+  };
+}
+
 async function buildTemplateArtifact({ template, templateVersion, build, input, clock }) {
   const text = tryDecodeText(input.body);
   const lineCount = text ? text.split(/\r?\n/).length : 0;
+  const sourceSha256 = await sha256Hex(input.body);
+  const manifestJson = JSON.stringify(templateVersion.manifest || {}, null, 2);
+  const manifestSha256 = await sha256Hex(manifestJson);
+  const imageParts = parseImageReference(templateVersion.manifest?.image);
+  const imageRepository = imageParts.repository || `registry.cloudflare.com/burstflare/${template.id}`;
+  const imageTag = imageParts.tag || templateVersion.version || "latest";
+  const imageDigest = `sha256:${await sha256Hex(`${sourceSha256}:${manifestSha256}:image`)}`;
+  const configDigest = `sha256:${await sha256Hex(`${manifestSha256}:${templateVersion.id}:config`)}`;
+  const layerDigests = [
+    `sha256:${await sha256Hex(`${sourceSha256}:bundle-layer`)}`,
+    `sha256:${await sha256Hex(`${manifestSha256}:manifest-layer`)}`
+  ];
+  const buildReference = `${imageRepository}:${imageTag}`;
   const artifact = {
     buildId: build.id,
     templateId: template.id,
@@ -830,13 +875,29 @@ async function buildTemplateArtifact({ template, templateVersion, build, input, 
     templateVersionId: templateVersion.id,
     version: templateVersion.version,
     image: templateVersion.manifest?.image || null,
+    imageRepository,
+    imageTag,
+    imageReference: `${imageRepository}@${imageDigest}`,
+    imageDigest,
+    configDigest,
+    layerDigests,
+    layerCount: layerDigests.length,
+    buildReference,
+    buildStrategy: "simulated-oci",
     features: templateVersion.manifest?.features || [],
     persistedPaths: templateVersion.manifest?.persistedPaths || [],
     source: input.source,
     sourceContentType: input.contentType,
     sourceBytes: input.bytes,
-    sourceSha256: await sha256Hex(input.body),
+    sourceSha256,
+    manifestSha256,
     lineCount,
+    labels: {
+      "org.opencontainers.image.title": template.name,
+      "org.opencontainers.image.version": templateVersion.version,
+      "org.opencontainers.image.revision": build.id,
+      "org.opencontainers.image.source": buildReference
+    },
     builtAt: nowIso(clock)
   };
   return {
@@ -947,6 +1008,10 @@ async function processBuildRecord({
     build.artifactBytes = 0;
     build.artifactBuiltAt = null;
     build.artifactSource = null;
+    build.artifactImageReference = null;
+    build.artifactImageDigest = null;
+    build.artifactConfigDigest = null;
+    build.artifactLayerCount = 0;
     templateVersion.status = "failed";
     templateVersion.builtAt = null;
     await clearBuildArtifact({ objects, build });
@@ -1057,6 +1122,10 @@ async function processBuildRecord({
   build.artifactDigest = builtArtifact.artifact.sourceSha256;
   build.artifactBytes = new TextEncoder().encode(builtArtifact.json).byteLength;
   build.artifactBuiltAt = builtArtifact.artifact.builtAt;
+  build.artifactImageReference = builtArtifact.artifact.imageReference;
+  build.artifactImageDigest = builtArtifact.artifact.imageDigest;
+  build.artifactConfigDigest = builtArtifact.artifact.configDigest;
+  build.artifactLayerCount = builtArtifact.artifact.layerCount;
   await persistBuildArtifact({
     objects,
     build,
@@ -2172,6 +2241,10 @@ export function createBurstFlareService(options = {}) {
           artifactKey: `artifacts/${templateId}/${version}.json`,
           artifactSource: null,
           artifactDigest: null,
+          artifactImageReference: null,
+          artifactImageDigest: null,
+          artifactConfigDigest: null,
+          artifactLayerCount: 0,
           artifactBytes: 0,
           artifactBuiltAt: null,
           dispatchMode: jobs?.buildStrategy || null,
@@ -2472,6 +2545,10 @@ export function createBurstFlareService(options = {}) {
             templateVersionId: templateVersion.id,
             source: build.artifactSource || "unknown",
             sourceSha256: build.artifactDigest || null,
+            imageReference: build.artifactImageReference || null,
+            imageDigest: build.artifactImageDigest || null,
+            configDigest: build.artifactConfigDigest || null,
+            layerCount: build.artifactLayerCount || 0,
             builtAt: build.artifactBuiltAt || null
           },
           null,

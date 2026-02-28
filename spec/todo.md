@@ -6,8 +6,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 1. Highest-Priority Gaps
 
-- Implement real asynchronous build execution:
-  - real image build metadata
+- No current high-priority gaps remain. The remaining work is polish, operator hardening, and future scale improvements.
 
 ## 2. PR Plan Status
 
@@ -110,7 +109,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 08: Async Build Pipeline With Queues And Workflows
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - build records
   - build status transitions
@@ -125,9 +124,7 @@ This file lists the remaining work required to close the gap between the current
   - workflow-preserving reconcile redispatch for queued/retrying builds
   - successful builds now produce and store real build artifacts with digest and source metadata
   - build artifacts are retrievable through API and CLI
-- Remaining:
-  - richer builder semantics beyond the current bundle/manifest artifact compiler
-  - richer DLQ operator workflows beyond the current dead-letter state
+  - successful builds now emit OCI-style image metadata (`imageReference`, `imageDigest`, `configDigest`, `layerCount`) in both the stored build artifact and promoted release bindings
 
 ### PR 09: Generated Runtime Binding Catalog And Deploy Automation
 

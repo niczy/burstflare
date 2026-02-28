@@ -516,6 +516,9 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const parsedBuildArtifact = JSON.parse(await buildArtifact.text());
   assert.equal(parsedBuildArtifact.source, "bundle");
   assert.equal(parsedBuildArtifact.templateVersionId, version.data.templateVersion.id);
+  assert.match(parsedBuildArtifact.imageReference, /^registry\.cloudflare\.com\/test\/python-dev@sha256:/);
+  assert.match(parsedBuildArtifact.imageDigest, /^sha256:/);
+  assert.equal(parsedBuildArtifact.layerCount, 2);
 
   const failingVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
     method: "POST",
@@ -592,6 +595,9 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(promoted.response.status, 200);
   assert.equal(promoted.data.release.binding.artifactSource, "bundle");
   assert.equal(promoted.data.release.binding.templateName, "python-dev");
+  assert.equal(promoted.data.release.binding.imageReference, parsedBuildArtifact.imageReference);
+  assert.equal(promoted.data.release.binding.imageDigest, parsedBuildArtifact.imageDigest);
+  assert.equal(promoted.data.release.binding.layerCount, 2);
 
   const archived = await requestJson(app, `/api/templates/${templateId}/archive`, {
     method: "POST",

@@ -267,6 +267,9 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const buildArtifactOutput = JSON.parse(stdout.data.trim());
     assert.equal(buildArtifactOutput.source, "bundle");
     assert.equal(buildArtifactOutput.templateVersionId, versionOutput.templateVersion.id);
+    assert.match(buildArtifactOutput.imageReference, /@sha256:/);
+    assert.match(buildArtifactOutput.imageDigest, /^sha256:/);
+    assert.equal(buildArtifactOutput.layerCount, 2);
 
     stdout.data = "";
 

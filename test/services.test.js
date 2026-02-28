@@ -282,11 +282,16 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const buildLog = await service.getTemplateBuildLog(owner.token, version.build.id);
   assert.match(buildLog.text, /bundle_uploaded=true/);
   assert.match(buildLog.text, /artifact_source=bundle/);
+  assert.match(buildLog.text, /artifact_image_reference=registry\.cloudflare\.com\/test\/node-dev@sha256:/);
   const buildArtifact = await service.getTemplateBuildArtifact(owner.token, version.build.id);
   const parsedBuildArtifact = JSON.parse(buildArtifact.text);
   assert.equal(parsedBuildArtifact.source, "bundle");
   assert.equal(parsedBuildArtifact.sourceBytes, signedBundleBody.length);
   assert.equal(parsedBuildArtifact.templateVersionId, version.templateVersion.id);
+  assert.match(parsedBuildArtifact.imageReference, /^registry\.cloudflare\.com\/test\/node-dev@sha256:/);
+  assert.match(parsedBuildArtifact.imageDigest, /^sha256:/);
+  assert.match(parsedBuildArtifact.configDigest, /^sha256:/);
+  assert.equal(parsedBuildArtifact.layerCount, 2);
   assert.equal(objects.readBuildArtifactText(version.build.id) !== null, true);
 
   const stuckVersion = await service.addTemplateVersion(owner.token, template.template.id, {
@@ -345,6 +350,9 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(promoted.release.binding.templateName, "node-dev");
   assert.equal(promoted.release.binding.artifactSource, "bundle");
   assert.equal(promoted.release.binding.artifactDigest, parsedBuildArtifact.sourceSha256);
+  assert.equal(promoted.release.binding.imageReference, parsedBuildArtifact.imageReference);
+  assert.equal(promoted.release.binding.imageDigest, parsedBuildArtifact.imageDigest);
+  assert.equal(promoted.release.binding.layerCount, 2);
   const archived = await service.archiveTemplate(owner.token, template.template.id);
   assert.ok(archived.template.archivedAt);
   await assert.rejects(

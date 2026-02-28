@@ -1179,3 +1179,22 @@ This file records what has already been implemented in the repository and what h
   - the public editor route renders the workspace editor shell
   - saving `/workspace/project/notes.txt` through the public editor route updates the live runtime
   - a subsequent runtime-backed snapshot captures the saved editor content in the structured snapshot envelope
+
+## 77. OCI-Style Build Metadata
+
+- The build compiler now emits OCI-style image metadata instead of only raw source digests.
+- Successful build artifacts now include:
+  - `imageReference`
+  - `imageDigest`
+  - `configDigest`
+  - `layerDigests`
+  - `layerCount`
+  - `buildStrategy = simulated-oci`
+  - OCI-style labels for title, version, revision, and source
+- Successful build records now persist the image metadata fields so they are available without re-reading the artifact blob.
+- Build logs now include the persisted image metadata values.
+- Promoted release bindings now carry the same image metadata so the runtime catalog has a stable image-oriented contract.
+- Added service, Worker, and CLI test coverage for the new build metadata fields.
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - `GET /api/template-builds/:id/artifact` now returns OCI-style image metadata for a fresh build
+  - `POST /api/templates/:id/promote` returns a release binding whose `imageReference` and `imageDigest` match the stored build artifact
