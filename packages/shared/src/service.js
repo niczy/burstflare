@@ -2371,7 +2371,7 @@ export function createBurstFlareService(options = {}) {
         });
         return {
           token: runtimeToken.token,
-          sshCommand: `ssh -o ProxyCommand='wscat --connect ws://localhost:8787/runtime/sessions/${auth.session.id}/ssh?token=${runtimeToken.token}' dev@burstflare`
+          sshCommand: `wscat --connect ws://localhost:8787/runtime/sessions/${auth.session.id}/ssh?token=${runtimeToken.token}`
         };
       });
     },

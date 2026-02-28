@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp, handleScheduled } from "../apps/edge/src/app.js";
+import { createApp, createWorkerService, handleScheduled } from "../apps/edge/src/app.js";
 
 function toBytes(value) {
   if (value instanceof Uint8Array) {
@@ -589,7 +589,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     method: "POST",
     headers: switchedHeaders
   });
-  assert.match(ssh.data.sshCommand, /ProxyCommand/);
+  assert.match(ssh.data.sshCommand, /wscat --connect/);
 
   const runtimeInvalid = await app.fetch(
     new Request(`http://example.test/runtime/sessions/${sessionId}/ssh?token=${switchedToken}`)
@@ -797,4 +797,78 @@ test("worker scheduled handler enqueues reconcile jobs", async () => {
       cron: "*/15 * * * *"
     }
   ]);
+});
+
+test("worker proxies runtime SSH websocket upgrades into the session container", async () => {
+  const forwarded = {
+    started: 0,
+    sessionId: null,
+    path: null,
+    requestSessionId: null,
+    upgrade: null
+  };
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer(sessionId) {
+      forwarded.sessionId = sessionId;
+      return {
+        async startAndWaitForPorts() {
+          forwarded.started += 1;
+        },
+        async fetch(request) {
+          const url = new URL(request.url);
+          forwarded.path = url.pathname;
+          forwarded.requestSessionId = url.searchParams.get("sessionId");
+          forwarded.upgrade = request.headers.get("upgrade");
+          return new Response("proxied ssh", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8"
+            }
+          });
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "ssh-proxy@example.com",
+    name: "SSH Proxy"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "ssh-proxy",
+    description: "Template for container proxy"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/ssh-proxy:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const session = await service.createSession(owner.token, {
+    name: "container-shell",
+    templateId: template.template.id
+  });
+  await service.startSession(owner.token, session.session.id);
+  const runtime = await service.issueRuntimeToken(owner.token, session.session.id);
+
+  const response = await app.fetch(
+    new Request(`http://example.test/runtime/sessions/${session.session.id}/ssh?token=${runtime.token}`, {
+      headers: {
+        upgrade: "websocket"
+      }
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "proxied ssh");
+  assert.equal(forwarded.started, 1);
+  assert.equal(forwarded.sessionId, session.session.id);
+  assert.equal(forwarded.path, "/ssh");
+  assert.equal(forwarded.requestSessionId, session.session.id);
+  assert.equal(forwarded.upgrade, "websocket");
 });

@@ -441,6 +441,14 @@ export function createApp(options = {}) {
     return new Request(url.toString(), request);
   }
 
+  function createRuntimeSshRequest(request, sessionId) {
+    const url = new URL(request.url);
+    url.pathname = "/ssh";
+    url.search = "";
+    url.searchParams.set("sessionId", sessionId);
+    return new Request(url.toString(), request);
+  }
+
   function rewriteSshCommand(request, sshCommand) {
     const url = new URL(request.url);
     const host = url.host;
@@ -1387,6 +1395,10 @@ export function createApp(options = {}) {
             status: 426,
             headers: { "content-type": "text/plain; charset=utf-8" }
           });
+        }
+        const container = await startSessionContainer(sessionId);
+        if (container && typeof container.fetch === "function") {
+          return container.fetch(createRuntimeSshRequest(request, sessionId));
         }
         const bridge = createRuntimeSshBridge(sessionId);
         if (!bridge?.client) {

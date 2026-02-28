@@ -15,7 +15,7 @@ This file lists the remaining work required to close the gap between the current
   - workflow orchestration
   - real image build metadata
 - Replace the current session lifecycle shim with a real Durable Object state machine and per-session locking.
-- Replace the current SSH WebSocket bridge stub with a real container-backed SSH proxy.
+- Replace the current container-backed shell bridge with a standards-compliant `sshd`-backed SSH proxy.
 - Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
 - Implement real container-side snapshot upload, restore, and persisted-path behavior for running containers.
 
@@ -168,10 +168,11 @@ This file lists the remaining work required to close the gap between the current
 - Done:
   - runtime token issuance for SSH attach
   - Worker-side authenticated WebSocket upgrade path for the SSH route
-  - CLI `burstflare ssh <session>` command emits the attach command
+  - container-backed SSH-route WebSocket traffic now proxies into the session runtime
+  - CLI `burstflare ssh <session>` command now emits the current `wscat` attach command
 - Remaining:
   - run `sshd` in runtime images
-  - replace the current bridge stub with a real container-backed SSH proxy
+  - replace the current container shell bridge with a standards-compliant SSH proxy
   - `scp` / forwarding compatibility where supported
 
 ### PR 13: Browser Terminal And Web Session Controls
@@ -180,7 +181,7 @@ This file lists the remaining work required to close the gap between the current
 - Done:
   - browser preview route
   - basic web controls for sessions
-  - browser terminal panel wired to the SSH WebSocket bridge
+  - browser terminal panel wired to the container-backed SSH WebSocket shell
   - automatic live dashboard refresh while the browser session is active
 - Remaining:
   - richer container-native terminal/editor integration

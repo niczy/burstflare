@@ -653,3 +653,29 @@ This file records what has already been implemented in the repository and what h
   - upload snapshot content
   - restore that snapshot
   - return the restored snapshot ID on the updated session record
+
+## 52. Container-Backed SSH Shell Proxy
+
+- Replaced the old Worker-side echo bridge with container-backed SSH-route proxying when the session container binding is available.
+- The Worker now:
+  - starts the session container for SSH attach
+  - rewrites `/runtime/sessions/:sessionId/ssh` to the container `/ssh` endpoint
+  - forwards the WebSocket upgrade directly into the container runtime
+- Added a real container-side WebSocket shell endpoint in the session runtime image.
+- The container shell now returns session-scoped command responses for:
+  - `help`
+  - `pwd`
+  - `ls`
+  - `cd`
+  - `whoami`
+  - `env`
+  - `uname -a`
+  - `exit`
+- Updated the emitted attach command to the truthful current runtime command:
+  - `wscat --connect ...`
+  - removed the misleading fake `ssh -o ProxyCommand=...` wrapper
+- Added Worker test coverage to prove SSH upgrades are rewritten and forwarded into the container binding.
+- Verified the live Worker can:
+  - attach to the public SSH WebSocket route
+  - receive the container shell welcome banner
+  - return `/workspace` for `pwd`

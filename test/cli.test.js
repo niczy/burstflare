@@ -571,7 +571,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       configPath
     });
     assert.equal(code, 0);
-    assert.match(stdout.data, /ssh -o ProxyCommand=/);
+    assert.match(stdout.data, /wscat --connect/);
     assert.equal(stderr.data, "");
 
     stdout.data = "";

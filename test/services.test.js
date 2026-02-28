@@ -324,7 +324,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   await service.stopSession(switched.token, staleSession.session.id);
 
   const runtime = await service.issueRuntimeToken(switched.token, session.session.id);
-  assert.match(runtime.sshCommand, /ssh -o ProxyCommand=/);
+  assert.match(runtime.sshCommand, /wscat --connect/);
   await service.validateRuntimeToken(runtime.token, session.session.id);
 
   const events = await service.listSessionEvents(switched.token, session.session.id);
