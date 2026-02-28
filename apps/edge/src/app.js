@@ -1311,6 +1311,17 @@ export function createApp(options = {}) {
     },
     {
       method: "POST",
+      pattern: "/api/admin/builds/retry-dead-lettered",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.retryDeadLetteredBuilds(token));
+      })
+    },
+    {
+      method: "POST",
       pattern: "/api/admin/reconcile",
       handler: withErrorHandling(async (request) => {
         const token = requireToken(request, service);

@@ -401,6 +401,14 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(deadLetterBuild.status, "dead_lettered");
   assert.equal(deadLetterBuild.attempts, 3);
 
+  const bulkRetried = await requestJson(app, "/api/admin/builds/retry-dead-lettered", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(bulkRetried.response.status, 200);
+  assert.equal(bulkRetried.data.recovered, 1);
+  assert.deepEqual(bulkRetried.data.buildIds, [failingVersion.data.build.id]);
+
   const promoted = await requestJson(app, `/api/templates/${templateId}/promote`, {
     method: "POST",
     headers: ownerHeaders,
@@ -627,9 +635,10 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerHeaders
   });
   assert.equal(report.data.report.releases, 1);
+  assert.equal(report.data.report.buildsQueued, 1);
   assert.equal(report.data.report.buildsBuilding, 0);
   assert.equal(report.data.report.buildsStuck, 0);
-  assert.equal(report.data.report.buildsDeadLettered, 1);
+  assert.equal(report.data.report.buildsDeadLettered, 0);
   assert.equal(report.data.report.sessionsSleeping, 1);
   assert.equal(report.data.report.activeUploadGrants, 0);
 

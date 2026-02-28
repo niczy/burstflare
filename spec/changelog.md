@@ -588,3 +588,19 @@ This file records what has already been implemented in the repository and what h
   - `startAutoRefresh`
   - `stopAutoRefresh`
   - a `setInterval`-driven 15-second refresh loop
+
+## 48. Bulk Dead-Letter Build Recovery
+
+- Added an operator-facing bulk recovery path for dead-lettered builds.
+- Added `POST /api/admin/builds/retry-dead-lettered`.
+- Added CLI support for `burstflare build retry-dead-lettered`.
+- The bulk recovery flow now:
+  - finds dead-lettered builds in the current workspace
+  - resets their attempt counter
+  - moves them back into retry flow
+  - re-enqueues them for build processing
+- Added test coverage across the service, Worker, and CLI suites.
+- Verified the live Worker can:
+  - produce a dead-lettered build
+  - recover it through the new bulk retry route
+  - report the recovered build ID in the response

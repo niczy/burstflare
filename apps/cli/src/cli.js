@@ -160,6 +160,7 @@ function helpText() {
     "burstflare build log <buildId>",
     "burstflare build process",
     "burstflare build retry <buildId>",
+    "burstflare build retry-dead-lettered",
     "burstflare release list",
     "burstflare up <name> --template <templateId>",
     "burstflare list",
@@ -789,6 +790,18 @@ export async function runCli(argv, dependencies = {}) {
         const buildId = rest[0];
         const data = await requestJsonAuthed(
           `${baseUrl}/api/template-builds/${buildId}/retry`,
+          {
+            method: "POST",
+            headers: headers(undefined)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "retry-dead-lettered") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/admin/builds/retry-dead-lettered`,
           {
             method: "POST",
             headers: headers(undefined)

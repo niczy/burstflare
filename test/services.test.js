@@ -259,6 +259,9 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const failedBuildLog = await service.getTemplateBuildLog(owner.token, failingVersion.build.id);
   assert.match(failedBuildLog.text, /build_status=dead_lettered/);
+  const bulkRetried = await service.retryDeadLetteredBuilds(owner.token);
+  assert.equal(bulkRetried.recovered, 1);
+  assert.deepEqual(bulkRetried.buildIds, [failingVersion.build.id]);
   await assert.rejects(() => service.retryTemplateBuild(owner.token, version.build.id), /Build is not retryable/);
 
   const promoted = await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
@@ -406,9 +409,11 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const report = await service.getAdminReport(ownerSecondLogin.token);
   assert.equal(report.report.members, 2);
   assert.equal(report.report.releases, 1);
+  assert.equal(report.report.buildsQueued, 0);
   assert.equal(report.report.buildsBuilding, 0);
   assert.equal(report.report.buildsStuck, 0);
-  assert.equal(report.report.buildsDeadLettered, 1);
+  assert.equal(report.report.buildsFailed, 1);
+  assert.equal(report.report.buildsDeadLettered, 0);
   assert.equal(report.report.sessionsTotal, 0);
   assert.equal(report.report.sessionsSleeping, 0);
   assert.equal(report.report.activeUploadGrants, 0);

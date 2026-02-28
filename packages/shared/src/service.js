@@ -1794,6 +1794,46 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async retryDeadLetteredBuilds(token) {
+      return store.transact(async (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const buildIds = [];
+        for (const build of state.templateBuilds) {
+          if (build.status !== "dead_lettered") {
+            continue;
+          }
+          const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+          if (!version) {
+            continue;
+          }
+          const template = state.templates.find((entry) => entry.id === version.templateId);
+          if (!template || template.workspaceId !== auth.workspace.id) {
+            continue;
+          }
+          build.status = "retrying";
+          build.attempts = 0;
+          build.updatedAt = nowIso(clock);
+          build.deadLetteredAt = null;
+          version.status = "queued";
+          buildIds.push(build.id);
+          writeAudit(state, clock, {
+            action: "template.build_retried_bulk",
+            actorUserId: auth.user.id,
+            workspaceId: auth.workspace.id,
+            targetType: "template_build",
+            targetId: build.id
+          });
+          if (jobs?.enqueueBuild) {
+            await jobs.enqueueBuild(build.id);
+          }
+        }
+        return {
+          recovered: buildIds.length,
+          buildIds
+        };
+      });
+    },
+
     async promoteTemplateVersion(token, templateId, versionId) {
       return store.transact((state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);

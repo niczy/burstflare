@@ -356,6 +356,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["build", "retry-dead-lettered", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const bulkRetried = JSON.parse(stdout.data.trim());
+    assert.equal(bulkRetried.recovered, 1);
+    assert.deepEqual(bulkRetried.buildIds, [failingVersionOutput.build.id]);
+
+    stdout.data = "";
+
     code = await runCli(["template", "promote", templateId, versionId, "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -515,9 +528,10 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     const reportOutput = JSON.parse(stdout.data.trim());
     assert.equal(reportOutput.report.releases, 1);
+    assert.equal(reportOutput.report.buildsQueued, 1);
     assert.equal(reportOutput.report.buildsBuilding, 0);
     assert.equal(reportOutput.report.buildsStuck, 0);
-    assert.equal(reportOutput.report.buildsDeadLettered, 1);
+    assert.equal(reportOutput.report.buildsDeadLettered, 0);
     assert.equal(reportOutput.report.sessionsSleeping, 1);
     assert.equal(reportOutput.report.activeUploadGrants, 0);
 

@@ -119,6 +119,7 @@ This file lists the remaining work required to close the gap between the current
   - R2-backed build-log storage
   - queue-backed build enqueue and consumer processing
   - bounded retry and dead-letter behavior for failed builds
+  - operator bulk retry for dead-lettered builds
 - Remaining:
   - workflow orchestration
   - real builder execution
