@@ -1,4 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
+import { WorkflowEntrypoint } from "cloudflare:workers";
 import { createApp, createWorkerService, handleScheduled } from "./app.js";
 
 const RUNTIME_STATE_KEY = "burstflare:runtime-state";
@@ -184,6 +185,63 @@ export class BurstFlareSessionContainer extends Container {
       lastError: String(error?.message || error || "Unknown container error")
     });
     throw error;
+  }
+}
+
+export class BurstFlareBuildWorkflow extends WorkflowEntrypoint {
+  async run(event, step) {
+    const payload = event?.payload || {};
+    const buildId = payload.buildId;
+    if (!buildId) {
+      throw new Error("Build ID is required");
+    }
+
+    const workflowName = payload.workflowName || this.env.BUILD_WORKFLOW_NAME || "burstflare-builds";
+    const instanceId = payload.instanceId || null;
+    const service = createWorkerService(this.env);
+    try {
+      await step.do("mark build workflow running", async () => {
+        await service.markTemplateBuildWorkflow(buildId, {
+          status: "running",
+          instanceId,
+          name: workflowName
+        });
+      });
+    } catch (error) {
+      if (error?.status === 404) {
+        return {
+          buildId,
+          processed: 0,
+          status: "missing",
+          attempts: 0
+        };
+      }
+      throw error;
+    }
+
+    try {
+      return await step.do("execute template build", async () => {
+        const result = await service.processTemplateBuildById(buildId, {
+          source: "workflow"
+        });
+        return {
+          buildId,
+          processed: result.processed,
+          status: result.build?.status || "skipped",
+          attempts: result.build?.attempts || 0
+        };
+      });
+    } catch (error) {
+      if (error?.status === 404) {
+        return {
+          buildId,
+          processed: 0,
+          status: "missing",
+          attempts: 0
+        };
+      }
+      throw error;
+    }
   }
 }
 

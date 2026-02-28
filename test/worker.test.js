@@ -427,7 +427,10 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(version.data.build.status, "queued");
   assert.deepEqual(version.data.templateVersion.manifest.persistedPaths, ["/workspace"]);
-  assert.deepEqual(queuedBuilds, [{ type: "build", buildId: version.data.build.id }]);
+  assert.equal(queuedBuilds.length, 1);
+  assert.equal(queuedBuilds[0].type, "build");
+  assert.equal(queuedBuilds[0].buildId, version.data.build.id);
+  assert.match(queuedBuilds[0].dispatchedAt, /\d{4}-\d{2}-\d{2}T/);
 
   const invalidVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
     method: "POST",
@@ -1181,4 +1184,64 @@ test("worker coordinates session lifecycle through the session container durable
     `restart:${sessionId}`,
     "delete"
   ]);
+});
+
+test("worker exposes workflow-backed build dispatch", async () => {
+  const healthApp = createApp({
+    BUILD_WORKFLOW_NAME: "burstflare-builds",
+    BUILD_WORKFLOW: {
+      async create() {
+        return null;
+      }
+    }
+  });
+  const health = await requestJson(healthApp, "/api/health");
+  assert.equal(health.response.status, 200);
+  assert.equal(health.data.runtime.workflowEnabled, true);
+  assert.equal(health.data.runtime.buildDispatchMode, "workflow");
+
+  const workflowRuns = [];
+  const service = createWorkerService({
+    BUILD_WORKFLOW_NAME: "burstflare-builds",
+    BUILD_WORKFLOW: {
+      async create(payload) {
+        workflowRuns.push(payload);
+        return {
+          id: payload.id
+        };
+      }
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "workflow-worker@example.com",
+    name: "Workflow Worker"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "workflow-worker",
+    description: "Workflow worker template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/workflow-worker:1.0.0"
+    }
+  });
+
+  assert.equal(version.build.dispatchMode, "workflow");
+  assert.equal(version.build.workflowStatus, "queued");
+  assert.equal(workflowRuns.length, 1);
+  assert.equal(workflowRuns[0].params.buildId, version.build.id);
+  assert.equal(workflowRuns[0].params.workflowName, "burstflare-builds");
+
+  await service.markTemplateBuildWorkflow(version.build.id, {
+    status: "running",
+    instanceId: version.build.workflowInstanceId,
+    name: "burstflare-builds"
+  });
+  const processed = await service.processTemplateBuildById(version.build.id, {
+    source: "workflow"
+  });
+  assert.equal(processed.build.status, "succeeded");
+  assert.equal(processed.build.workflowStatus, "succeeded");
 });

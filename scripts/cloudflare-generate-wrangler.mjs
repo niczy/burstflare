@@ -10,7 +10,8 @@ function renderWrangler(state, config) {
   const vars = [
     `BURSTFLARE_DATA_FILE = "${dataFile}"`,
     `CLOUDFLARE_ENVIRONMENT = "${config.environment}"`,
-    `CLOUDFLARE_DOMAIN = "${state.domain}"`
+    `CLOUDFLARE_DOMAIN = "${state.domain}"`,
+    `BUILD_WORKFLOW_NAME = "${config.workerName}-builds"`
   ];
   if (config.turnstileSiteKey) {
     vars.push(`TURNSTILE_SITE_KEY = "${config.turnstileSiteKey}"`);
@@ -48,6 +49,11 @@ new_sqlite_classes = ["BurstFlareSessionContainer"]`);
 class_name = "BurstFlareSessionContainer"
 image = "${containerImage}"`);
   }
+
+  lines.push(`[[workflows]]
+binding = "BUILD_WORKFLOW"
+name = "${config.workerName}-builds"
+class_name = "BurstFlareBuildWorkflow"`);
 
   if (resources.r2) {
     lines.push(`[[r2_buckets]]

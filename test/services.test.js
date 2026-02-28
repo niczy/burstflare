@@ -87,8 +87,14 @@ test("service covers invites, queued builds, releases, session events, usage, an
     store,
     objects,
     jobs: {
+      buildStrategy: "queue",
       async enqueueBuild(buildId) {
         queuedBuilds.push(buildId);
+        return {
+          buildId,
+          dispatch: "queue",
+          dispatchedAt: new Date(tick + 1).toISOString()
+        };
       },
       async enqueueReconcile() {
         reconcileJobs += 1;
@@ -476,4 +482,62 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const audit = await service.getAudit(ownerSecondLogin.token);
   assert.ok(audit.audit.length >= 10);
+});
+
+test("service records workflow dispatch metadata and workflow-driven build completion", async () => {
+  const workflowRuns = [];
+  const service = createBurstFlareService({
+    jobs: {
+      buildStrategy: "workflow",
+      async enqueueBuild(buildId) {
+        const instanceId = `bwf_${buildId}_${workflowRuns.length + 1}`;
+        workflowRuns.push({ buildId, instanceId });
+        return {
+          buildId,
+          dispatch: "workflow",
+          dispatchedAt: "2026-02-28T00:00:00.000Z",
+          workflow: {
+            name: "burstflare-builds",
+            instanceId,
+            dispatchedAt: "2026-02-28T00:00:00.000Z"
+          }
+        };
+      }
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "workflow-owner@example.com",
+    name: "Workflow Owner"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "workflow-template",
+    description: "Workflow template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/workflow:1.0.0"
+    }
+  });
+
+  assert.equal(version.build.dispatchMode, "workflow");
+  assert.equal(version.build.workflowStatus, "queued");
+  assert.match(version.build.workflowInstanceId, /^bwf_/);
+  assert.equal(workflowRuns.length, 1);
+
+  const marked = await service.markTemplateBuildWorkflow(version.build.id, {
+    status: "running",
+    instanceId: version.build.workflowInstanceId,
+    name: "burstflare-builds",
+    timestamp: "2026-02-28T00:00:01.000Z"
+  });
+  assert.equal(marked.build.workflowStatus, "running");
+
+  const processed = await service.processTemplateBuildById(version.build.id, {
+    source: "workflow"
+  });
+  assert.equal(processed.build.status, "succeeded");
+  assert.equal(processed.build.workflowStatus, "succeeded");
+  assert.equal(processed.build.dispatchMode, "workflow");
 });

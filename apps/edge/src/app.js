@@ -292,20 +292,50 @@ function createTurnstileVerifier(options) {
 }
 
 function createJobQueue(options) {
-  if (!options.BUILD_QUEUE && !options.RECONCILE_QUEUE) {
+  if (!options.BUILD_QUEUE && !options.RECONCILE_QUEUE && !options.BUILD_WORKFLOW) {
     return null;
   }
 
   return {
+    buildStrategy: options.BUILD_WORKFLOW ? "workflow" : options.BUILD_QUEUE ? "queue" : null,
     async enqueueBuild(buildId) {
+      const dispatchedAt = new Date().toISOString();
+      if (options.BUILD_WORKFLOW && typeof options.BUILD_WORKFLOW.create === "function") {
+        const instanceId = `bwf_${buildId}_${globalThis.crypto.randomUUID()}`;
+        const workflowName = options.BUILD_WORKFLOW_NAME || "burstflare-builds";
+        await options.BUILD_WORKFLOW.create({
+          id: instanceId,
+          params: {
+            buildId,
+            instanceId,
+            workflowName,
+            dispatchedAt
+          }
+        });
+        return {
+          buildId,
+          dispatch: "workflow",
+          dispatchedAt,
+          workflow: {
+            name: workflowName,
+            instanceId,
+            dispatchedAt
+          }
+        };
+      }
       if (!options.BUILD_QUEUE) {
         return null;
       }
       await options.BUILD_QUEUE.send({
         type: "build",
-        buildId
+        buildId,
+        dispatchedAt
       });
-      return { buildId };
+      return {
+        buildId,
+        dispatch: "queue",
+        dispatchedAt
+      };
     },
 
     async enqueueReconcile() {
@@ -634,6 +664,7 @@ export async function handleScheduled(controller, options = {}) {
 
 export function createApp(options = {}) {
   const service = createWorkerService(options);
+  const jobs = createJobQueue(options);
   const rateLimiter = createRateLimiter(options);
   const turnstile = createTurnstileVerifier(options);
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
@@ -979,7 +1010,9 @@ export function createApp(options = {}) {
           service: "burstflare",
           runtime: {
             containersEnabled: hasContainerBinding(),
-            turnstileEnabled: turnstile.enabled
+            turnstileEnabled: turnstile.enabled,
+            workflowEnabled: jobs?.buildStrategy === "workflow",
+            buildDispatchMode: jobs?.buildStrategy || "manual"
           }
         })
     },

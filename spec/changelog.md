@@ -859,3 +859,33 @@ This file records what has already been implemented in the repository and what h
   - a synthetic live passkey registration succeeds
   - a synthetic live passkey login succeeds and issues a browser token
   - the live deployment currently reports `turnstileEnabled: false`, so passkeys are fully verified but Turnstile enforcement is not active until real keys are configured
+
+## 62. Workflow-Backed Build Orchestration
+
+- Added a real Cloudflare Workflow binding for template builds:
+  - `BUILD_WORKFLOW`
+  - workflow name generation through the Wrangler config generator
+  - `BurstFlareBuildWorkflow` execution in the Worker entrypoint
+- Build dispatch now prefers Workflows over the build queue when the workflow binding is present.
+- Added build-level workflow execution metadata, including:
+  - `dispatchMode`
+  - `executionSource`
+  - `workflowName`
+  - `workflowInstanceId`
+  - `workflowStatus`
+  - queued / started / finished timestamps
+- Template-build retries from workflow-driven runs now re-dispatch through new workflow instances instead of relying only on the queue consumer path.
+- Reconcile now preserves workflow-driven execution by re-dispatching queued and retrying builds through the workflow layer instead of bypassing it with direct in-process execution.
+- Extended build logs to include workflow orchestration metadata for operator inspection.
+- Added service and Worker test coverage for:
+  - workflow dispatch metadata on newly queued builds
+  - workflow-marked running state
+  - workflow-driven successful build completion
+  - workflow-enabled runtime health reporting
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - the Worker deploy now includes `workflow: burstflare-builds`
+  - `/api/health` now reports `workflowEnabled: true` and `buildDispatchMode: workflow`
+  - a live template build now reaches `succeeded` asynchronously with:
+    - `dispatchMode = workflow`
+    - `workflowStatus = succeeded`
+    - `executionSource = workflow`

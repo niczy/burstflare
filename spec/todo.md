@@ -9,7 +9,6 @@ This file lists the remaining work required to close the gap between the current
 - Implement production-grade browser auth:
   - enable live Turnstile enforcement by configuring `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in the production deployment
 - Implement real asynchronous build execution:
-  - workflow orchestration
   - real image build metadata
 - Finish moving the session lifecycle under a real Durable Object state machine and per-session locking.
 - Replace the current container-backed shell bridge with a standards-compliant `sshd`-backed SSH proxy.
@@ -118,7 +117,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 08: Async Build Pipeline With Queues And Workflows
 
-- Status: partially complete
+- Status: mostly complete
 - Done:
   - build records
   - build status transitions
@@ -128,8 +127,10 @@ This file lists the remaining work required to close the gap between the current
   - queue-backed build enqueue and consumer processing
   - bounded retry and dead-letter behavior for failed builds
   - operator bulk retry for dead-lettered builds
+  - workflow-backed build orchestration through a live `BUILD_WORKFLOW` binding
+  - workflow metadata on build records and build logs
+  - workflow-preserving reconcile redispatch for queued/retrying builds
 - Remaining:
-  - workflow orchestration
   - real builder execution
   - richer DLQ operator workflows beyond the current dead-letter state
 
@@ -274,15 +275,15 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Finish PR 08, PR 10, PR 12, and PR 14 first. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
-2. Then finish PR 15, PR 16, and PR 17 so the platform has real enforcement, cleanup, and security controls.
+1. Finish PR 10, PR 12, and PR 14 first. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
+2. Then finish the remaining PR 08 builder work plus PR 15, PR 16, and PR 17 so the platform has real execution, enforcement, cleanup, and security controls.
 3. Enable live Turnstile keys for PR 03 and finish PR 18 last, once the runtime and platform guarantees are stable.
 
 ## 4. CI And Test Work Still Needed
 
 - Expand migration and persistence tests beyond the current normalized-store cutover and scoped-collection coverage.
 - Add integration tests for browser auth, device auth, and session revocation.
-- Add queue-consumer and workflow tests for build processing.
+- Add deeper queue-consumer and workflow tests for build processing, including failure and retry orchestration across live workflow redispatch.
 - Add Durable Object concurrency tests for session state.
 - Add end-to-end runtime tests for SSH, browser terminal access, and snapshot restore.
 - Add deployment smoke tests that run automatically after a successful Cloudflare deploy.

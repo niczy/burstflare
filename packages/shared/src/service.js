@@ -523,10 +523,18 @@ function buildTemplateBuildLog(build, template, templateVersion) {
     `bundle_uploaded=${templateVersion.bundleUploadedAt ? "true" : "false"}`,
     `bundle_key=${templateVersion.bundleKey || ""}`,
     `build_status=${build.status}`,
+    `dispatch_mode=${build.dispatchMode || ""}`,
+    `execution_source=${build.executionSource || ""}`,
     `attempts=${build.attempts}`,
     `last_error=${build.lastError || ""}`,
     `last_failure_at=${build.lastFailureAt || ""}`,
     `dead_lettered_at=${build.deadLetteredAt || ""}`,
+    `workflow_name=${build.workflowName || ""}`,
+    `workflow_instance_id=${build.workflowInstanceId || ""}`,
+    `workflow_status=${build.workflowStatus || ""}`,
+    `workflow_queued_at=${build.workflowQueuedAt || ""}`,
+    `workflow_started_at=${build.workflowStartedAt || ""}`,
+    `workflow_finished_at=${build.workflowFinishedAt || ""}`,
     `started_at=${build.startedAt || ""}`,
     `finished_at=${build.finishedAt || ""}`
   ];
@@ -553,6 +561,56 @@ async function persistBuildLog({ objects, template, templateVersion, build, log 
   });
 }
 
+function isAsyncBuildSource(source) {
+  return source === "queue" || source === "workflow";
+}
+
+function applyBuildDispatch(build, dispatch, clock) {
+  if (!dispatch) {
+    return;
+  }
+  build.dispatchMode = dispatch.dispatch || build.dispatchMode || null;
+  build.lastQueuedAt = dispatch.dispatchedAt || nowIso(clock);
+
+  if (dispatch.workflow) {
+    build.workflowName = dispatch.workflow.name || build.workflowName || null;
+    build.workflowInstanceId = dispatch.workflow.instanceId || build.workflowInstanceId || null;
+    build.workflowStatus = "queued";
+    build.workflowQueuedAt = dispatch.workflow.dispatchedAt || dispatch.dispatchedAt || nowIso(clock);
+    build.workflowStartedAt = null;
+    build.workflowFinishedAt = null;
+  } else if (dispatch.dispatch === "queue") {
+    build.workflowStatus = null;
+    build.workflowQueuedAt = null;
+    build.workflowStartedAt = null;
+    build.workflowFinishedAt = null;
+  }
+}
+
+function markBuildWorkflowState(build, status, clock) {
+  if (!status) {
+    return;
+  }
+  build.workflowStatus = status;
+  if (status === "running") {
+    build.workflowStartedAt = build.startedAt || nowIso(clock);
+    build.workflowFinishedAt = null;
+    return;
+  }
+  if (["succeeded", "failed", "dead_lettered"].includes(status)) {
+    build.workflowFinishedAt = build.finishedAt || nowIso(clock);
+  }
+}
+
+async function enqueueBuildDispatch({ jobs, build, clock }) {
+  if (!jobs?.enqueueBuild) {
+    return null;
+  }
+  const dispatch = await jobs.enqueueBuild(build.id);
+  applyBuildDispatch(build, dispatch, clock);
+  return dispatch;
+}
+
 async function processBuildRecord({
   state,
   clock,
@@ -572,7 +630,11 @@ async function processBuildRecord({
   build.startedAt = nowIso(clock);
   build.updatedAt = nowIso(clock);
   build.attempts += 1;
+  build.executionSource = source;
   templateVersion.status = "building";
+  if (source === "workflow") {
+    markBuildWorkflowState(build, "running", clock);
+  }
 
   const failureReason = getBuildFailureReason(templateVersion);
   if (failureReason) {
@@ -583,11 +645,9 @@ async function processBuildRecord({
     templateVersion.status = "failed";
     templateVersion.builtAt = null;
 
-    if (source === "queue" && build.attempts < MAX_BUILD_ATTEMPTS) {
+    if (isAsyncBuildSource(source) && build.attempts < MAX_BUILD_ATTEMPTS) {
       build.status = "retrying";
-      if (jobs?.enqueueBuild) {
-        await jobs.enqueueBuild(build.id);
-      }
+      await enqueueBuildDispatch({ jobs, build, clock });
       writeAudit(state, clock, {
         action: "template.build_retry_scheduled",
         actorUserId,
@@ -606,6 +666,9 @@ async function processBuildRecord({
     } else if (build.attempts >= MAX_BUILD_ATTEMPTS) {
       build.status = "dead_lettered";
       build.deadLetteredAt = build.finishedAt;
+      if (source === "workflow" || build.dispatchMode === "workflow") {
+        markBuildWorkflowState(build, "dead_lettered", clock);
+      }
       writeAudit(state, clock, {
         action: "template.build_dead_lettered",
         actorUserId,
@@ -624,6 +687,9 @@ async function processBuildRecord({
     } else {
       build.status = "failed";
       build.deadLetteredAt = null;
+      if (source === "workflow" || build.dispatchMode === "workflow") {
+        markBuildWorkflowState(build, "failed", clock);
+      }
       writeAudit(state, clock, {
         action: "template.build_failed",
         actorUserId,
@@ -665,6 +731,9 @@ async function processBuildRecord({
   build.deadLetteredAt = null;
   templateVersion.status = "ready";
   templateVersion.builtAt = nowIso(clock);
+  if (source === "workflow" || build.dispatchMode === "workflow") {
+    markBuildWorkflowState(build, "succeeded", clock);
+  }
 
   const buildLog = buildTemplateBuildLog(build, template, templateVersion);
   await persistBuildLog({
@@ -1763,6 +1832,15 @@ export function createBurstFlareService(options = {}) {
           templateVersionId: templateVersion.id,
           status: "queued",
           builderImage: "burstflare/builder:local",
+          dispatchMode: jobs?.buildStrategy || null,
+          executionSource: null,
+          lastQueuedAt: null,
+          workflowName: null,
+          workflowInstanceId: null,
+          workflowStatus: null,
+          workflowQueuedAt: null,
+          workflowStartedAt: null,
+          workflowFinishedAt: null,
           attempts: 0,
           lastError: null,
           lastFailureAt: null,
@@ -1784,9 +1862,7 @@ export function createBurstFlareService(options = {}) {
           details: { version }
         });
 
-        if (jobs?.enqueueBuild) {
-          await jobs.enqueueBuild(build.id);
-        }
+        await enqueueBuildDispatch({ jobs, build, clock });
 
         return { templateVersion, build };
       });
@@ -1955,6 +2031,35 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async markTemplateBuildWorkflow(buildId, patch = {}) {
+      return transact(TEMPLATE_SCOPE, (state) => {
+        const build = state.templateBuilds.find((entry) => entry.id === buildId);
+        ensure(build, "Build not found", 404);
+        const timestamp = patch.timestamp || nowIso(clock);
+        if (patch.instanceId !== undefined) {
+          build.workflowInstanceId = patch.instanceId;
+        }
+        if (patch.name !== undefined) {
+          build.workflowName = patch.name;
+        }
+        if (patch.status) {
+          markBuildWorkflowState(build, patch.status, clock);
+        }
+        if (patch.status === "running") {
+          build.executionSource = "workflow";
+          build.dispatchMode = "workflow";
+          build.workflowQueuedAt = build.workflowQueuedAt || timestamp;
+          build.workflowStartedAt = timestamp;
+          build.workflowFinishedAt = null;
+        }
+        if (["succeeded", "failed", "dead_lettered"].includes(patch.status)) {
+          build.workflowFinishedAt = timestamp;
+        }
+        build.updatedAt = timestamp;
+        return { build };
+      });
+    },
+
     async getTemplateBuildLog(token, buildId) {
       return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireAuth(state, token, clock);
@@ -2012,9 +2117,7 @@ export function createBurstFlareService(options = {}) {
           targetType: "template_build",
           targetId: build.id
         });
-        if (jobs?.enqueueBuild) {
-          await jobs.enqueueBuild(build.id);
-        }
+        await enqueueBuildDispatch({ jobs, build, clock });
         return { build };
       });
     },
@@ -2048,9 +2151,7 @@ export function createBurstFlareService(options = {}) {
             targetType: "template_build",
             targetId: build.id
           });
-          if (jobs?.enqueueBuild) {
-            await jobs.enqueueBuild(build.id);
-          }
+          await enqueueBuildDispatch({ jobs, build, clock });
         }
         return {
           recovered: buildIds.length,
@@ -2779,6 +2880,10 @@ export function createBurstFlareService(options = {}) {
           if (build.attempts >= MAX_BUILD_ATTEMPTS) {
             build.status = "dead_lettered";
             build.deadLetteredAt = recoveredAt;
+            if (build.dispatchMode === "workflow") {
+              build.workflowStatus = "dead_lettered";
+              build.workflowFinishedAt = recoveredAt;
+            }
             writeAudit(state, clock, {
               action: "template.build_dead_lettered",
               actorUserId: auth?.user.id || null,
@@ -2797,9 +2902,7 @@ export function createBurstFlareService(options = {}) {
           } else {
             build.status = "retrying";
             build.deadLetteredAt = null;
-            if (jobs?.enqueueBuild) {
-              await jobs.enqueueBuild(build.id);
-            }
+            await enqueueBuildDispatch({ jobs, build, clock });
             writeAudit(state, clock, {
               action: "template.build_recovered",
               actorUserId: auth?.user.id || null,
@@ -2832,6 +2935,16 @@ export function createBurstFlareService(options = {}) {
             continue;
           }
           if (workspaceId && template.workspaceId !== workspaceId) {
+            continue;
+          }
+          if (jobs?.buildStrategy === "workflow") {
+            if (["queued", "running"].includes(build.workflowStatus)) {
+              continue;
+            }
+            const dispatched = await enqueueBuildDispatch({ jobs, build, clock });
+            if (dispatched) {
+              processedBuilds += 1;
+            }
             continue;
           }
           const processedBuild = await processBuildRecord({
