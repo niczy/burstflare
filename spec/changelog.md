@@ -808,3 +808,20 @@ This file records what has already been implemented in the repository and what h
 - Verified the live Worker can:
   - pass the public smoke flow after the scoped-load refactor
   - complete a traced end-to-end flow across auth, templates, async builds, sessions, snapshots, and admin reporting with the new scoped transaction path
+
+## 60. Legacy State Retirement And Schema Validation
+
+- Added `packages/shared/src/cloudflare-schema.js` as the shared schema definition for normalized Cloudflare persistence.
+- Removed the runtime legacy-row fallback from the Cloudflare store.
+- The Worker now reads only from normalized D1 tables and will not read `_burstflare_state`.
+- Added `infra/migrations/0004_drop_legacy_state.sql` to:
+  - pin `bf_state_meta.schema_version`
+  - drop the legacy `_burstflare_state` table
+- Added `scripts/cloudflare-validate-schema.mjs` to validate the live D1 schema against the shared normalized schema definition.
+- Updated `npm run cf:migrate` to run schema validation automatically after migrations.
+- Added test coverage that confirms the Cloudflare store loads normalized state directly without any legacy fallback.
+- Verified in the live Cloudflare environment that:
+  - `0004_drop_legacy_state.sql` applied successfully
+  - schema validation passes with no missing tables or indexes
+  - `legacyTablePresent` is `false`
+  - the public Worker still passes the end-to-end smoke flow after the breaking cutover

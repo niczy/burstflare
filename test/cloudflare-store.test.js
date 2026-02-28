@@ -141,25 +141,69 @@ class MockD1Database {
   }
 }
 
-test("cloudflare store projects legacy state into normalized tables on save and preserves array order", async () => {
+test("cloudflare store loads normalized state without legacy fallback and preserves array order", async () => {
   const db = new MockD1Database();
-  const legacyState = {
-    users: [
-      {
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_users (row_key, position, email, created_at, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "usr_2",
+      0,
+      "zeta@example.com",
+      "2026-02-28T00:00:00.000Z",
+      JSON.stringify({
         id: "usr_2",
         email: "zeta@example.com",
         name: "Zeta",
         createdAt: "2026-02-28T00:00:00.000Z"
-      },
-      {
+      }),
+      "2026-02-28T00:00:00.000Z"
+    )
+    .run();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_users (row_key, position, email, created_at, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "usr_1",
+      1,
+      "alpha@example.com",
+      "2026-02-28T00:00:01.000Z",
+      JSON.stringify({
         id: "usr_1",
         email: "alpha@example.com",
         name: "Alpha",
         createdAt: "2026-02-28T00:00:01.000Z"
-      }
-    ],
-    sessions: [
-      {
+      }),
+      "2026-02-28T00:00:01.000Z"
+    )
+    .run();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_sessions (row_key, position, workspace_id, template_id, state, name, updated_at_field, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "ses_z",
+      0,
+      "ws_1",
+      "tpl_1",
+      "running",
+      "z-first",
+      "2026-02-28T00:00:00.000Z",
+      JSON.stringify({
         id: "ses_z",
         workspaceId: "ws_1",
         templateId: "tpl_1",
@@ -168,8 +212,27 @@ test("cloudflare store projects legacy state into normalized tables on save and 
         createdByUserId: "usr_2",
         createdAt: "2026-02-28T00:00:00.000Z",
         updatedAt: "2026-02-28T00:00:00.000Z"
-      },
-      {
+      }),
+      "2026-02-28T00:00:00.000Z"
+    )
+    .run();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_sessions (row_key, position, workspace_id, template_id, state, name, updated_at_field, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "ses_a",
+      1,
+      "ws_1",
+      "tpl_1",
+      "sleeping",
+      "a-second",
+      "2026-02-28T00:00:01.000Z",
+      JSON.stringify({
         id: "ses_a",
         workspaceId: "ws_1",
         templateId: "tpl_1",
@@ -178,35 +241,19 @@ test("cloudflare store projects legacy state into normalized tables on save and 
         createdByUserId: "usr_1",
         createdAt: "2026-02-28T00:00:01.000Z",
         updatedAt: "2026-02-28T00:00:01.000Z"
-      }
-    ]
-  };
-
-  await db
-    .prepare(
-      `
-        INSERT INTO _burstflare_state (id, value, updated_at)
-        VALUES (?, ?, ?)
-      `
+      }),
+      "2026-02-28T00:00:01.000Z"
     )
-    .bind("global", JSON.stringify(legacyState), "2026-02-28T00:00:02.000Z")
     .run();
 
   const store = createCloudflareStateStore(db);
   const loaded = await store.load();
-  await store.save(loaded);
-  const loadedAgain = await store.load();
 
   assert.deepEqual(loaded.users.map((entry) => entry.id), ["usr_2", "usr_1"]);
-  assert.deepEqual(loadedAgain.users.map((entry) => entry.id), ["usr_2", "usr_1"]);
   assert.deepEqual(loaded.sessions.map((entry) => entry.id), ["ses_z", "ses_a"]);
-  assert.deepEqual(loadedAgain.sessions.map((entry) => entry.id), ["ses_z", "ses_a"]);
 
   const meta = await db.prepare("SELECT value FROM bf_state_meta WHERE key = ? LIMIT 1").bind("schema_version").first();
   assert.equal(meta.value, "1");
-
-  const normalizedUsers = await db.prepare("SELECT payload_json FROM bf_users ORDER BY position ASC, row_key ASC").all();
-  assert.equal(normalizedUsers.results.length, 2);
 });
 
 test("cloudflare store can load and save a scoped normalized collection without wiping unrelated tables", async () => {

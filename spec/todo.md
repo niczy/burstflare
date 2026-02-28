@@ -6,7 +6,6 @@ This file lists the remaining work required to close the gap between the current
 
 ## 1. Highest-Priority Gaps
 
-- Finish the persistence cutover by replacing the current normalized state-projection layer with direct per-domain D1, KV, and R2 access, and retire the legacy fallback row completely.
 - Implement production-grade browser auth:
   - WebAuthn / passkeys
   - Turnstile production enablement with a configured client widget and secret
@@ -27,7 +26,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 02: Data Model And Migration Framework
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - migrations exist
   - D1 is provisioned and migrations run
@@ -36,11 +35,11 @@ This file lists the remaining work required to close the gap between the current
   - normalized writes now use row-level upserts and deletes instead of full-table rewrites
   - migration coverage now includes a Cloudflare-store cutover test
   - hot service paths now use scoped normalized-collection transactions instead of always loading every collection
+  - the runtime no longer uses the legacy `_burstflare_state` fallback row
+  - the legacy `_burstflare_state` table is dropped by migration
+  - Cloudflare schema validation now checks for drift and rejects a missing-or-stale normalized schema
 - Remaining:
-  - replace the current scoped normalized state-projection layer with direct table-oriented D1 access instead of cloning collection arrays through the shared state object
-  - move hot ephemeral indexes fully into KV-native access patterns instead of the current projected state model
-  - remove the legacy fallback row after the cutover is fully retired
-  - add stronger migration test coverage and drift checks
+  - optional future cleanup: replace the shared-state projection layer with direct repository-style per-table access if needed for further scale
 
 ### PR 03: Web Auth Foundations
 
