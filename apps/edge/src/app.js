@@ -108,7 +108,7 @@ function devicePage(code) {
 }
 
 function createObjectStore(options) {
-  if (!options.TEMPLATE_BUCKET && !options.BUILD_BUCKET) {
+  if (!options.TEMPLATE_BUCKET && !options.BUILD_BUCKET && !options.SNAPSHOT_BUCKET) {
     return null;
   }
 
@@ -160,6 +160,31 @@ function createObjectStore(options) {
         text: await object.text(),
         contentType: object.httpMetadata?.contentType || "text/plain; charset=utf-8",
         bytes: object.size ?? 0
+      };
+    },
+
+    async putSnapshot({ snapshot, body, contentType }) {
+      if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
+        return null;
+      }
+      await options.SNAPSHOT_BUCKET.put(snapshot.objectKey, body, {
+        httpMetadata: { contentType }
+      });
+      return { key: snapshot.objectKey };
+    },
+
+    async getSnapshot({ snapshot }) {
+      if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
+        return null;
+      }
+      const object = await options.SNAPSHOT_BUCKET.get(snapshot.objectKey);
+      if (!object) {
+        return null;
+      }
+      return {
+        body: await object.arrayBuffer(),
+        contentType: object.httpMetadata?.contentType || snapshot.contentType || "application/octet-stream",
+        bytes: object.size ?? snapshot.bytes
       };
     }
   };
@@ -782,6 +807,40 @@ export function createApp(options = {}) {
         }
         const body = await parseJson(await request.text());
         return toJson(await service.createSnapshot(token, sessionId, body));
+      })
+    },
+    {
+      method: "PUT",
+      pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/content",
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(
+          await service.uploadSnapshotContent(token, sessionId, snapshotId, {
+            body: await request.arrayBuffer(),
+            contentType: request.headers.get("content-type") || "application/octet-stream"
+          })
+        );
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/content",
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const content = await service.getSnapshotContent(token, sessionId, snapshotId);
+        return new Response(content.body, {
+          headers: {
+            "content-type": content.contentType,
+            "content-disposition": `inline; filename="${content.fileName}"`,
+            "content-length": String(content.bytes)
+          }
+        });
       })
     },
     {

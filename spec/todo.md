@@ -181,12 +181,16 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 14: Workspace Snapshots, Persisted Paths, And Restore
 
-- Status: not complete
+- Status: partially complete
+- Done:
+  - snapshot create/list metadata
+  - snapshot content upload and download routes
+  - R2-backed snapshot content storage
+  - CLI save and restore path for snapshot artifacts
 - Remaining:
   - persisted-path config in templates
-  - snapshot create/list/restore metadata
-  - container-side R2 upload/download
-  - manual save/restore controls in web and CLI
+  - container-side automatic snapshot upload/download
+  - richer manual save/restore controls in the web UI
   - restore safety checks
 
 ### PR 15: Usage Metering, Quotas, And Plan Enforcement

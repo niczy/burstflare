@@ -146,3 +146,14 @@ This file records what has already been implemented in the repository and what h
 - Added response headers for current rate-limit state on protected endpoints.
 - Backed rate limiting with Cloudflare KV in production and an in-memory fallback in local/test environments.
 - Verified the live Worker returns `429` after repeated device-start requests from the same client.
+
+## 16. R2-Backed Snapshot Content
+
+- Extended snapshot records to track stored object metadata.
+- Added authenticated snapshot-content upload routes.
+- Added authenticated snapshot-content download routes.
+- Added R2-backed snapshot storage through `SNAPSHOT_BUCKET`.
+- Added CLI support to:
+  - upload a file when creating a snapshot
+  - restore snapshot content to a local output path
+- Verified the live Worker can round-trip snapshot content through the public API.

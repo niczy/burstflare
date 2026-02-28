@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { runCli } from "../apps/cli/src/cli.js";
 import { createApp } from "../apps/edge/src/app.js";
 
@@ -69,13 +69,15 @@ function createBucket() {
 test("cli can run device flow, build processing, session lifecycle, and reporting", async () => {
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),
-    BUILD_BUCKET: createBucket()
+    BUILD_BUCKET: createBucket(),
+    SNAPSHOT_BUCKET: createBucket()
   });
   const fetchImpl = createFetch(app);
   const stdout = capture();
   const stderr = capture();
   const configPath = path.join(os.tmpdir(), `burstflare-cli-${Date.now()}.json`);
   const bundlePath = path.join(os.tmpdir(), `burstflare-bundle-${Date.now()}.txt`);
+  const restoredPath = path.join(os.tmpdir(), `burstflare-restored-${Date.now()}.txt`);
 
   try {
     await writeFile(bundlePath, "cli bundle payload");
@@ -194,6 +196,32 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["snapshot", "save", sessionId, "--label", "manual", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const snapshotOutput = JSON.parse(stdout.data.trim());
+    const snapshotId = snapshotOutput.snapshot.id;
+    assert.equal(snapshotOutput.snapshot.bytes, 18);
+
+    stdout.data = "";
+
+    code = await runCli(["snapshot", "get", sessionId, snapshotId, "--output", restoredPath, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const restoreOutput = JSON.parse(stdout.data.trim());
+    assert.equal(restoreOutput.bytes, 18);
+    assert.equal(await readFile(restoredPath, "utf8"), "cli bundle payload");
+
+    stdout.data = "";
+
     code = await runCli(["events", sessionId, "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -230,5 +258,6 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });
+    await rm(restoredPath, { force: true });
   }
 });

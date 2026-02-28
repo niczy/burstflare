@@ -131,8 +131,9 @@ function helpText() {
     "burstflare down <sessionId>",
     "burstflare restart <sessionId>",
     "burstflare delete <sessionId>",
-    "burstflare snapshot save <sessionId> [--label manual]",
+    "burstflare snapshot save <sessionId> [--label manual] [--file snapshot.tgz]",
     "burstflare snapshot list <sessionId>",
+    "burstflare snapshot get <sessionId> <snapshotId> [--output restored.bin]",
     "burstflare usage",
     "burstflare report",
     "burstflare reconcile",
@@ -621,7 +622,7 @@ export async function runCli(argv, dependencies = {}) {
     if (command === "snapshot") {
       if (subcommand === "save") {
         const sessionId = rest[0];
-        const data = await requestJson(
+        const created = await requestJson(
           `${baseUrl}/api/sessions/${sessionId}/snapshots`,
           {
             method: "POST",
@@ -630,7 +631,24 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        print(stdout, JSON.stringify(data, null, 2));
+        let result = created;
+        if (options.file) {
+          const snapshotBody = await readFile(options.file);
+          const uploaded = await requestJson(
+            `${baseUrl}/api/sessions/${sessionId}/snapshots/${created.snapshot.id}/content`,
+            {
+              method: "PUT",
+              headers: {
+                ...headers(token, false),
+                "content-type": options["content-type"] || "application/octet-stream"
+              },
+              body: snapshotBody
+            },
+            fetchImpl
+          );
+          result = uploaded;
+        }
+        print(stdout, JSON.stringify(result, null, 2));
         return 0;
       }
 
@@ -644,6 +662,36 @@ export async function runCli(argv, dependencies = {}) {
           fetchImpl
         );
         print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "get") {
+        const sessionId = rest[0];
+        const snapshotId = rest[1];
+        const response = await fetchImpl(`${baseUrl}/api/sessions/${sessionId}/snapshots/${snapshotId}/content`, {
+          headers: headers(token, false)
+        });
+        const body = new Uint8Array(await response.arrayBuffer());
+        if (!response.ok) {
+          throw new Error(new TextDecoder().decode(body) || `Request failed (${response.status})`);
+        }
+        if (options.output) {
+          await writeFile(options.output, body);
+          print(
+            stdout,
+            JSON.stringify(
+              {
+                snapshotId,
+                output: options.output,
+                bytes: body.byteLength
+              },
+              null,
+              2
+            )
+          );
+          return 0;
+        }
+        print(stdout, new TextDecoder().decode(body));
         return 0;
       }
     }

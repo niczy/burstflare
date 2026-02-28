@@ -57,7 +57,8 @@ async function requestJson(app, path, init = {}) {
 test("worker serves invite flow, bundle upload, build logs, session events, and runtime validation", async () => {
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),
-    BUILD_BUCKET: createBucket()
+    BUILD_BUCKET: createBucket(),
+    SNAPSHOT_BUCKET: createBucket()
   });
 
   const health = await requestJson(app, "/api/health");
@@ -189,6 +190,31 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: switchedHeaders
   });
   assert.ok(events.data.events.length >= 5);
+
+  const snapshot = await requestJson(app, `/api/sessions/${sessionId}/snapshots`, {
+    method: "POST",
+    headers: switchedHeaders,
+    body: JSON.stringify({ label: "autosave" })
+  });
+  assert.equal(snapshot.response.status, 200);
+
+  const snapshotUpload = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content`, {
+    method: "PUT",
+    headers: {
+      ...switchedHeaders,
+      "content-type": "text/plain"
+    },
+    body: "snapshot payload"
+  });
+  assert.equal(snapshotUpload.response.status, 200);
+
+  const snapshotDownload = await app.fetch(
+    new Request(`http://example.test/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content`, {
+      headers: switchedHeaders
+    })
+  );
+  assert.equal(snapshotDownload.status, 200);
+  assert.equal(await snapshotDownload.text(), "snapshot payload");
 
   const ssh = await requestJson(app, `/api/sessions/${sessionId}/ssh-token`, {
     method: "POST",

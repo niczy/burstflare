@@ -5,6 +5,7 @@ import { createBurstFlareService, createMemoryStore } from "../packages/shared/s
 function createObjectStore() {
   const bundles = new Map();
   const logs = new Map();
+  const snapshots = new Map();
   const decoder = new TextDecoder();
 
   return {
@@ -38,6 +39,23 @@ function createObjectStore() {
         text,
         contentType: "text/plain; charset=utf-8",
         bytes: new TextEncoder().encode(text).byteLength
+      };
+    },
+    async putSnapshot({ snapshot, body, contentType }) {
+      snapshots.set(snapshot.id, {
+        body: body.slice(),
+        contentType
+      });
+    },
+    async getSnapshot({ snapshot }) {
+      const entry = snapshots.get(snapshot.id);
+      if (!entry) {
+        return null;
+      }
+      return {
+        body: entry.body.slice(),
+        contentType: entry.contentType,
+        bytes: entry.body.byteLength
       };
     },
     readBundleText(templateVersionId) {
@@ -134,6 +152,13 @@ test("service covers invites, queued builds, releases, session events, usage, an
     label: "manual-save"
   });
   assert.equal(snapshot.snapshot.label, "manual-save");
+  const uploadedSnapshot = await service.uploadSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id, {
+    body: "workspace-state",
+    contentType: "text/plain"
+  });
+  assert.equal(uploadedSnapshot.snapshot.bytes, 15);
+  const downloadedSnapshot = await service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id);
+  assert.equal(new TextDecoder().decode(downloadedSnapshot.body), "workspace-state");
 
   const usage = await service.getUsage(owner.token);
   assert.deepEqual(usage.usage, {

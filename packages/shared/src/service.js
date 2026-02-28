@@ -53,6 +53,23 @@ function toUint8Array(value) {
   return new Uint8Array();
 }
 
+function toBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+function fromBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
 function ensure(condition, message, status = 400) {
   if (!condition) {
     const error = new Error(message);
@@ -1233,6 +1250,11 @@ export function createBurstFlareService(options = {}) {
           id: createId("snap"),
           sessionId: auth.session.id,
           label,
+          objectKey: `snapshots/${auth.workspace.id}/${auth.session.id}/${createId("obj")}.bin`,
+          uploadedAt: null,
+          contentType: null,
+          bytes: 0,
+          inlineContentBase64: null,
           createdAt: nowIso(clock)
         };
         state.snapshots.push(snapshot);
@@ -1254,11 +1276,86 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async uploadSnapshotContent(token, sessionId, snapshotId, { body, contentType = "application/octet-stream" } = {}) {
+      return store.transact(async (state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        ensure(auth.session.state !== "deleted", "Session deleted", 409);
+        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
+        ensure(snapshot, "Snapshot not found", 404);
+
+        const snapshotBody = toUint8Array(body);
+        ensure(snapshotBody.byteLength > 0, "Snapshot body is required");
+
+        snapshot.uploadedAt = nowIso(clock);
+        snapshot.contentType = contentType;
+        snapshot.bytes = snapshotBody.byteLength;
+
+        if (objects?.putSnapshot) {
+          await objects.putSnapshot({
+            workspace: auth.workspace,
+            session: auth.session,
+            snapshot,
+            body: snapshotBody,
+            contentType
+          });
+          snapshot.inlineContentBase64 = null;
+        } else {
+          snapshot.inlineContentBase64 = toBase64(snapshotBody);
+        }
+
+        writeAudit(state, clock, {
+          action: "snapshot.content_uploaded",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "snapshot",
+          targetId: snapshot.id,
+          details: {
+            contentType,
+            bytes: snapshot.bytes
+          }
+        });
+
+        return { snapshot };
+      });
+    },
+
     async listSnapshots(token, sessionId) {
       return store.transact((state) => {
         requireSessionAccess(state, token, sessionId, clock);
         return {
           snapshots: state.snapshots.filter((entry) => entry.sessionId === sessionId)
+        };
+      });
+    },
+
+    async getSnapshotContent(token, sessionId, snapshotId) {
+      return store.transact(async (state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
+        ensure(snapshot, "Snapshot not found", 404);
+        ensure(snapshot.uploadedAt, "Snapshot content not uploaded", 404);
+
+        if (objects?.getSnapshot) {
+          const content = await objects.getSnapshot({
+            workspace: auth.workspace,
+            session: auth.session,
+            snapshot
+          });
+          ensure(content, "Snapshot content not found", 404);
+          return {
+            body: content.body,
+            contentType: content.contentType || snapshot.contentType || "application/octet-stream",
+            bytes: content.bytes ?? snapshot.bytes,
+            fileName: `${snapshot.label || snapshot.id}.snapshot`
+          };
+        }
+
+        ensure(snapshot.inlineContentBase64, "Snapshot content not found", 404);
+        return {
+          body: fromBase64(snapshot.inlineContentBase64),
+          contentType: snapshot.contentType || "application/octet-stream",
+          bytes: snapshot.bytes,
+          fileName: `${snapshot.label || snapshot.id}.snapshot`
         };
       });
     },
