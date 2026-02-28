@@ -500,6 +500,9 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerHeaders
   });
   assert.equal(report.data.report.releases, 1);
+  assert.equal(report.data.report.buildsDeadLettered, 1);
+  assert.equal(report.data.report.sessionsSleeping, 1);
+  assert.equal(report.data.report.activeUploadGrants, 0);
 
   const enqueued = await requestJson(app, "/api/admin/reconcile/enqueue", {
     method: "POST",

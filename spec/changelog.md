@@ -322,3 +322,18 @@ This file records what has already been implemented in the repository and what h
   - stop the session into `sleeping`
   - purge it on reconcile after the TTL expires
   - return `404` for the purged session afterward
+
+## 30. Expanded Operator Reporting
+
+- Extended the admin report with additional operational counters:
+  - `templatesArchived`
+  - `buildsFailed`
+  - `buildsDeadLettered`
+  - `sessionsSleeping`
+  - `sessionsStaleEligible`
+  - `activeUploadGrants`
+- Kept the existing report route and CLI command shape stable while expanding the payload.
+- Verified the live Worker can surface:
+  - at least one dead-lettered build
+  - at least one sleeping session
+  - zero active upload grants after used grants have been consumed

@@ -224,9 +224,10 @@ This file lists the remaining work required to close the gap between the current
   - scheduled reconcile trigger
   - deleted-session purge and attached snapshot cleanup
   - stale sleeping-session cleanup with template-defined sleep TTLs
+  - richer admin report counters for current operator state
 - Remaining:
   - stuck-build recovery
-  - idempotent operator reports
+  - deeper idempotent operator workflows beyond the current read-only report
   - broader operator-facing recovery workflows and reporting
 
 ### PR 17: Security Hardening And Audit Completeness

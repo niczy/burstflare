@@ -347,6 +347,10 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const report = await service.getAdminReport(owner.token);
   assert.equal(report.report.members, 2);
   assert.equal(report.report.releases, 1);
+  assert.equal(report.report.buildsDeadLettered, 1);
+  assert.equal(report.report.sessionsTotal, 0);
+  assert.equal(report.report.sessionsSleeping, 0);
+  assert.equal(report.report.activeUploadGrants, 0);
 
   const audit = await service.getAudit(owner.token);
   assert.ok(audit.audit.length >= 10);

@@ -2116,19 +2116,61 @@ export function createBurstFlareService(options = {}) {
     async getAdminReport(token) {
       return store.transact((state) => {
         const auth = requireManageWorkspace(state, token, clock);
+        const reportAt = nowMs(clock);
         const report = {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           members: state.memberships.filter((entry) => entry.workspaceId === auth.workspace.id).length,
           templates: state.templates.filter((entry) => entry.workspaceId === auth.workspace.id).length,
+          templatesArchived: state.templates.filter(
+            (entry) => entry.workspaceId === auth.workspace.id && entry.archivedAt
+          ).length,
           buildsQueued: state.templateBuilds.filter((build) => {
             const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
             const template = version && state.templates.find((entry) => entry.id === version.templateId);
             return template && template.workspaceId === auth.workspace.id && ["queued", "retrying"].includes(build.status);
           }).length,
+          buildsFailed: state.templateBuilds.filter((build) => {
+            if (build.status !== "failed") {
+              return false;
+            }
+            const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+            const template = version && state.templates.find((entry) => entry.id === version.templateId);
+            return template && template.workspaceId === auth.workspace.id;
+          }).length,
+          buildsDeadLettered: state.templateBuilds.filter((build) => {
+            if (build.status !== "dead_lettered") {
+              return false;
+            }
+            const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+            const template = version && state.templates.find((entry) => entry.id === version.templateId);
+            return template && template.workspaceId === auth.workspace.id;
+          }).length,
           sessionsRunning: getRunningSessionCount(state, auth.workspace.id),
+          sessionsSleeping: state.sessions.filter(
+            (entry) => entry.workspaceId === auth.workspace.id && entry.state === "sleeping"
+          ).length,
+          sessionsStaleEligible: state.sessions.filter((entry) => {
+            if (entry.workspaceId !== auth.workspace.id || entry.state !== "sleeping") {
+              return false;
+            }
+            if (!Number.isInteger(entry.sleepTtlSeconds) || entry.sleepTtlSeconds <= 0) {
+              return false;
+            }
+            const referenceTime = entry.lastStoppedAt || entry.updatedAt || entry.createdAt;
+            if (!referenceTime) {
+              return false;
+            }
+            return reportAt - new Date(referenceTime).getTime() >= entry.sleepTtlSeconds * 1000;
+          }).length,
           sessionsTotal: state.sessions.filter(
             (entry) => entry.workspaceId === auth.workspace.id && entry.state !== "deleted"
           ).length,
+          activeUploadGrants: getUploadGrants(state).filter((entry) => {
+            if (entry.workspaceId !== auth.workspace.id || entry.usedAt) {
+              return false;
+            }
+            return new Date(entry.expiresAt).getTime() > reportAt;
+          }).length,
           releases: state.bindingReleases.filter((entry) => entry.workspaceId === auth.workspace.id).length
         };
         return { report };

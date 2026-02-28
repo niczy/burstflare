@@ -484,6 +484,9 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     const reportOutput = JSON.parse(stdout.data.trim());
     assert.equal(reportOutput.report.releases, 1);
+    assert.equal(reportOutput.report.buildsDeadLettered, 1);
+    assert.equal(reportOutput.report.sessionsSleeping, 1);
+    assert.equal(reportOutput.report.activeUploadGrants, 0);
 
     stdout.data = "";
 
