@@ -214,15 +214,14 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 15: Usage Metering, Quotas, And Plan Enforcement
 
-- Status: partially complete
+- Status: complete
 - Done:
   - usage and quota data structures exist
-  - some plan checks exist in the service layer
-- Remaining:
-  - complete runtime/storage/build metering
-  - rollups and reporting
-  - hard enforcement across all quota boundaries
-  - admin override surfaces
+  - effective plan limits now include dynamic quota overrides on the workspace record
+  - usage responses now include current storage metering and inventory rollups
+  - hard quota enforcement now covers template count, running sessions, runtime minutes, template versions, template builds, snapshot count, and storage bytes
+  - workspace quota overrides now exist across the service layer, API, and `flare` CLI
+  - admin report responses now expose the effective limits alongside the operational counters
 
 ### PR 16: Reliability Jobs, Reconciliation, And Cleanup
 
@@ -267,7 +266,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Finish PR 15 and PR 17 next. The largest remaining gaps are now quota enforcement and security hardening.
+1. Finish PR 17 next. The largest remaining gap is now security hardening.
 2. After that, tighten the earlier mostly-complete product surfaces in PR 04, PR 05, PR 06, and PR 07.
 3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
 

@@ -1280,3 +1280,25 @@ This file records what has already been implemented in the repository and what h
   - `POST /api/admin/reconcile/recover-builds` returns `recoveredStuckBuilds` and `buildIds`
   - `POST /api/admin/reconcile/purge-sleeping` returns `purgedStaleSleepingSessions`
   - `POST /api/admin/reconcile/purge-deleted` returns `purgedDeletedSessions`
+
+## 82. Quota Overrides And Storage Metering
+
+- Expanded the plan model with enforceable limits for:
+  - template count
+  - running sessions
+  - template versions per template
+  - snapshots per session
+  - total stored bytes
+  - runtime minutes
+  - template builds
+- Usage responses now include:
+  - current storage bytes for bundles, snapshots, and build artifacts
+  - total stored bytes
+  - current inventory counts for templates, template versions, sessions, and snapshots
+- Added workspace quota overrides across the service layer, API, and `flare` CLI via `workspace quota-overrides`.
+- Added hard enforcement on template creation, template version creation, session start/restart, snapshot creation, and bundle/snapshot uploads.
+- Verified locally with new service, Worker, and CLI coverage for quota overrides and enforcement.
+- Verified live on the public Cloudflare deployment that:
+  - `POST /api/workspaces/current/quota-overrides` updates effective limits
+  - `GET /api/usage` returns the override-aware limits and storage rollups
+  - clearing the overrides restores the default plan limits

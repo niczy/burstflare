@@ -106,6 +106,19 @@ function parseListOption(value) {
   return items.length ? items : undefined;
 }
 
+function parseIntegerOption(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    const error = new Error("Expected an integer option value");
+    error.status = 400;
+    throw error;
+  }
+  return parsed;
+}
+
 async function saveAuthConfig(configPath, config, baseUrl, payload) {
   await writeConfig(configPath, {
     ...config,
@@ -151,6 +164,7 @@ function helpText() {
     "workspace accept-invite --code invite_xxx",
     "workspace set-role <userId> --role viewer",
     "workspace plan <free|pro|enterprise>",
+    "workspace quota-overrides [--max-running-sessions 5] [--max-storage-bytes 1048576] [--clear]",
     "template create <name> [--description ...]",
     "template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
     "template promote <templateId> <versionId>",
@@ -626,6 +640,30 @@ export async function runCli(argv, dependencies = {}) {
             method: "POST",
             headers: headers(undefined),
             body: JSON.stringify({ plan })
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "quota-overrides") {
+        const payload = options.clear
+          ? { clear: true }
+          : {
+              maxTemplates: parseIntegerOption(options["max-templates"]),
+              maxRunningSessions: parseIntegerOption(options["max-running-sessions"]),
+              maxTemplateVersionsPerTemplate: parseIntegerOption(options["max-template-versions-per-template"]),
+              maxSnapshotsPerSession: parseIntegerOption(options["max-snapshots-per-session"]),
+              maxStorageBytes: parseIntegerOption(options["max-storage-bytes"]),
+              maxRuntimeMinutes: parseIntegerOption(options["max-runtime-minutes"]),
+              maxTemplateBuilds: parseIntegerOption(options["max-template-builds"])
+            };
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/quota-overrides`,
+          {
+            method: "POST",
+            headers: headers(undefined),
+            body: JSON.stringify(payload)
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

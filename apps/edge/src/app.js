@@ -1776,6 +1776,18 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "POST",
+      pattern: "/api/workspaces/current/quota-overrides",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.setWorkspaceQuotaOverrides(token, body));
+      })
+    },
+    {
       method: "GET",
       pattern: "/api/templates",
       handler: withErrorHandling(async (request) => {

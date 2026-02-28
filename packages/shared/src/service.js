@@ -16,15 +16,30 @@ const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
 const PLANS = {
   free: {
     maxTemplates: 10,
-    maxRunningSessions: 3
+    maxRunningSessions: 3,
+    maxTemplateVersionsPerTemplate: 25,
+    maxSnapshotsPerSession: 25,
+    maxStorageBytes: 25 * 1024 * 1024,
+    maxRuntimeMinutes: 500,
+    maxTemplateBuilds: 100
   },
   pro: {
     maxTemplates: 100,
-    maxRunningSessions: 20
+    maxRunningSessions: 20,
+    maxTemplateVersionsPerTemplate: 250,
+    maxSnapshotsPerSession: 250,
+    maxStorageBytes: 250 * 1024 * 1024,
+    maxRuntimeMinutes: 10_000,
+    maxTemplateBuilds: 2_000
   },
   enterprise: {
     maxTemplates: 1000,
-    maxRunningSessions: 200
+    maxRunningSessions: 200,
+    maxTemplateVersionsPerTemplate: 2500,
+    maxSnapshotsPerSession: 2_500,
+    maxStorageBytes: 2_500 * 1024 * 1024,
+    maxRuntimeMinutes: 100_000,
+    maxTemplateBuilds: 20_000
   }
 };
 
@@ -42,6 +57,43 @@ function futureIso(clock, durationMs) {
 
 function getPlan(name) {
   return PLANS[name] || PLANS.free;
+}
+
+const QUOTA_OVERRIDE_KEYS = [
+  "maxTemplates",
+  "maxRunningSessions",
+  "maxTemplateVersionsPerTemplate",
+  "maxSnapshotsPerSession",
+  "maxStorageBytes",
+  "maxRuntimeMinutes",
+  "maxTemplateBuilds"
+];
+
+function normalizeQuotaOverrides(overrides = {}) {
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
+    return {};
+  }
+  const normalized = {};
+  for (const key of QUOTA_OVERRIDE_KEYS) {
+    if (overrides[key] === undefined || overrides[key] === null || overrides[key] === "") {
+      continue;
+    }
+    const value = Number(overrides[key]);
+    ensure(Number.isInteger(value) && value > 0, `Quota override ${key} must be a positive integer`);
+    normalized[key] = value;
+  }
+  return normalized;
+}
+
+function getWorkspaceQuotaOverrides(workspace) {
+  return normalizeQuotaOverrides(workspace?.quotaOverrides || {});
+}
+
+function getEffectiveLimits(workspace) {
+  return {
+    ...getPlan(workspace?.plan),
+    ...getWorkspaceQuotaOverrides(workspace)
+  };
 }
 
 function toUint8Array(value) {
@@ -344,6 +396,9 @@ async function storeTemplateBundleUpload({
   const bundleBody = toUint8Array(body);
   ensure(bundleBody.byteLength > 0, "Bundle body is required");
   ensure(bundleBody.byteLength <= MAX_TEMPLATE_BUNDLE_BYTES, "Bundle exceeds size limit", 413);
+  const currentStorage = summarizeStorage(state, workspace.id);
+  const existingBytes = templateVersion.bundleBytes || 0;
+  ensureStorageWithinLimit(state, workspace, currentStorage.totalBytes - existingBytes + bundleBody.byteLength);
 
   templateVersion.bundleKey =
     templateVersion.bundleKey || `templates/${workspace.id}/${template.id}/${templateVersion.id}/bundle.bin`;
@@ -398,6 +453,9 @@ async function storeSnapshotUpload({
   const snapshotBody = toUint8Array(body);
   ensure(snapshotBody.byteLength > 0, "Snapshot body is required");
   ensure(snapshotBody.byteLength <= MAX_SNAPSHOT_BYTES, "Snapshot exceeds size limit", 413);
+  const currentStorage = summarizeStorage(state, workspace.id);
+  const existingBytes = snapshot.bytes || 0;
+  ensureStorageWithinLimit(state, workspace, currentStorage.totalBytes - existingBytes + snapshotBody.byteLength);
 
   snapshot.uploadedAt = nowIso(clock);
   snapshot.contentType = contentType;
@@ -478,6 +536,43 @@ function requireRuntimeToken(state, token, sessionId, clock) {
   return { auth, session };
 }
 
+function summarizeStorage(state, workspaceId) {
+  const storage = {
+    templateBundlesBytes: 0,
+    snapshotBytes: 0,
+    buildArtifactBytes: 0,
+    totalBytes: 0
+  };
+
+  for (const version of state.templateVersions) {
+    const template = state.templates.find((entry) => entry.id === version.templateId);
+    if (!template || template.workspaceId !== workspaceId) {
+      continue;
+    }
+    storage.templateBundlesBytes += version.bundleBytes || 0;
+  }
+
+  for (const snapshot of state.snapshots) {
+    const session = state.sessions.find((entry) => entry.id === snapshot.sessionId);
+    if (!session || session.workspaceId !== workspaceId) {
+      continue;
+    }
+    storage.snapshotBytes += snapshot.bytes || 0;
+  }
+
+  for (const build of state.templateBuilds) {
+    const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+    const template = version ? state.templates.find((entry) => entry.id === version.templateId) : null;
+    if (!template || template.workspaceId !== workspaceId) {
+      continue;
+    }
+    storage.buildArtifactBytes += build.artifactBytes || 0;
+  }
+
+  storage.totalBytes = storage.templateBundlesBytes + storage.snapshotBytes + storage.buildArtifactBytes;
+  return storage;
+}
+
 function summarizeUsage(state, workspaceId) {
   const usage = {
     runtimeMinutes: 0,
@@ -498,7 +593,27 @@ function summarizeUsage(state, workspaceId) {
       usage.templateBuilds += event.value;
     }
   }
-  return usage;
+  const sessions = state.sessions.filter((entry) => entry.workspaceId === workspaceId && entry.state !== "deleted");
+  const templates = state.templates.filter((entry) => entry.workspaceId === workspaceId);
+  const templateIds = new Set(templates.map((entry) => entry.id));
+  const templateVersions = state.templateVersions.filter((entry) => templateIds.has(entry.templateId));
+  const snapshots = state.snapshots.filter((entry) => sessions.some((session) => session.id === entry.sessionId));
+
+  return {
+    ...usage,
+    storage: summarizeStorage(state, workspaceId),
+    inventory: {
+      templates: templates.length,
+      templateVersions: templateVersions.length,
+      sessions: sessions.length,
+      snapshots: snapshots.length
+    }
+  };
+}
+
+function ensureStorageWithinLimit(state, workspace, nextTotalBytes) {
+  const limits = getEffectiveLimits(workspace);
+  ensure(nextTotalBytes <= limits.maxStorageBytes, "Workspace storage limit reached", 403);
 }
 
 function getActiveVersion(state, templateId) {
@@ -515,7 +630,16 @@ function getRunningSessionCount(state, workspaceId) {
 
 function formatWorkspace(state, workspace, role) {
   const memberCount = state.memberships.filter((entry) => entry.workspaceId === workspace.id).length;
-  return { ...workspace, role, memberCount };
+  return {
+    id: workspace.id,
+    name: workspace.name,
+    ownerUserId: workspace.ownerUserId,
+    plan: workspace.plan,
+    createdAt: workspace.createdAt,
+    quotaOverrides: getWorkspaceQuotaOverrides(workspace),
+    role,
+    memberCount
+  };
 }
 
 function formatTemplate(state, template) {
@@ -614,8 +738,9 @@ function applySessionTransition({ state, clock, auth, action, runtime = null }) 
   if (action === "start") {
     ensure(session.state !== "deleted", "Session deleted", 409);
     ensure(["created", "sleeping"].includes(session.state), "Session cannot be started", 409);
+    const limits = getEffectiveLimits(auth.workspace);
     const runningCount = getRunningSessionCount(state, auth.workspace.id);
-    ensure(runningCount < getPlan(auth.workspace.plan).maxRunningSessions, "Running session limit reached", 403);
+    ensure(runningCount < limits.maxRunningSessions, "Running session limit reached", 403);
 
     session.state = "starting";
     session.updatedAt = timestamp;
@@ -623,6 +748,8 @@ function applySessionTransition({ state, clock, auth, action, runtime = null }) 
 
     session.state = resolveSessionStateFromRuntime("start", runtime);
     if (session.state === "running") {
+      const usage = summarizeUsage(state, auth.workspace.id);
+      ensure(usage.runtimeMinutes < limits.maxRuntimeMinutes, "Runtime minute limit reached", 403);
       session.lastStartedAt = timestamp;
       writeUsage(state, clock, {
         workspaceId: auth.workspace.id,
@@ -676,8 +803,9 @@ function applySessionTransition({ state, clock, auth, action, runtime = null }) 
       writeSessionEvent(state, clock, session.id, "sleeping", { reason: "restart" });
     }
     ensure(["created", "sleeping"].includes(session.state), "Session cannot be restarted", 409);
+    const limits = getEffectiveLimits(auth.workspace);
     const runningCount = getRunningSessionCount(state, auth.workspace.id);
-    ensure(runningCount < getPlan(auth.workspace.plan).maxRunningSessions, "Running session limit reached", 403);
+    ensure(runningCount < limits.maxRunningSessions, "Running session limit reached", 403);
 
     session.state = "starting";
     session.updatedAt = timestamp;
@@ -685,6 +813,8 @@ function applySessionTransition({ state, clock, auth, action, runtime = null }) 
 
     session.state = resolveSessionStateFromRuntime("restart", runtime);
     if (session.state === "running") {
+      const usage = summarizeUsage(state, auth.workspace.id);
+      ensure(usage.runtimeMinutes < limits.maxRuntimeMinutes, "Runtime minute limit reached", 403);
       session.lastStartedAt = timestamp;
       writeUsage(state, clock, {
         workspaceId: auth.workspace.id,
@@ -2135,7 +2265,8 @@ export function createBurstFlareService(options = {}) {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           membership: auth.membership,
           usage: summarizeUsage(state, auth.workspace.id),
-          limits: getPlan(auth.workspace.plan),
+          limits: getEffectiveLimits(auth.workspace),
+          overrides: getWorkspaceQuotaOverrides(auth.workspace),
           pendingDeviceCodes: pendingDevices.length,
           pendingDevices: pendingDevices.map((entry) => ({
             id: entry.id,
@@ -2281,7 +2412,32 @@ export function createBurstFlareService(options = {}) {
         });
         return {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
-          limits: getPlan(plan)
+          limits: getEffectiveLimits(auth.workspace)
+        };
+      });
+    },
+
+    async setWorkspaceQuotaOverrides(token, overrides = {}) {
+      return transact(WORKSPACE_SCOPE, (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const clear = Boolean(overrides.clear);
+        const normalized = clear ? {} : normalizeQuotaOverrides(overrides);
+        auth.workspace.quotaOverrides = Object.keys(normalized).length > 0 ? normalized : null;
+        writeAudit(state, clock, {
+          action: "workspace.quota_overrides_updated",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id,
+          details: {
+            clear,
+            overrides: auth.workspace.quotaOverrides || {}
+          }
+        });
+        return {
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          limits: getEffectiveLimits(auth.workspace),
+          overrides: getWorkspaceQuotaOverrides(auth.workspace)
         };
       });
     },
@@ -2314,8 +2470,9 @@ export function createBurstFlareService(options = {}) {
       return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireWriteAccess(state, token, clock);
         ensure(name, "Template name is required");
+        const limits = getEffectiveLimits(auth.workspace);
         ensure(
-          state.templates.filter((entry) => entry.workspaceId === auth.workspace.id).length < getPlan(auth.workspace.plan).maxTemplates,
+          state.templates.filter((entry) => entry.workspaceId === auth.workspace.id).length < limits.maxTemplates,
           "Template limit reached",
           403
         );
@@ -2506,11 +2663,19 @@ export function createBurstFlareService(options = {}) {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
         ensure(version, "Version is required");
+        const limits = getEffectiveLimits(auth.workspace);
+        const usage = summarizeUsage(state, auth.workspace.id);
         validateTemplateManifest(manifest);
         ensure(
           !state.templateVersions.some((entry) => entry.templateId === templateId && entry.version === version),
           "Version already exists"
         );
+        ensure(
+          state.templateVersions.filter((entry) => entry.templateId === templateId).length < limits.maxTemplateVersionsPerTemplate,
+          "Template version limit reached",
+          403
+        );
+        ensure(usage.templateBuilds < limits.maxTemplateBuilds, "Template build limit reached", 403);
 
         const templateVersion = {
           id: createId("tplv"),
@@ -2611,6 +2776,8 @@ export function createBurstFlareService(options = {}) {
         if (bytes !== null) {
           ensure(Number.isInteger(bytes) && bytes > 0, "Upload bytes must be a positive integer");
           ensure(bytes <= MAX_TEMPLATE_BUNDLE_BYTES, "Bundle exceeds size limit", 413);
+          const currentStorage = summarizeStorage(state, auth.workspace.id);
+          ensureStorageWithinLimit(state, auth.workspace, currentStorage.totalBytes - (templateVersion.bundleBytes || 0) + bytes);
         }
 
         const uploadGrant = createUploadGrant(state, clock, {
@@ -3220,6 +3387,12 @@ export function createBurstFlareService(options = {}) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
+        const limits = getEffectiveLimits(auth.workspace);
+        ensure(
+          state.snapshots.filter((entry) => entry.sessionId === auth.session.id).length < limits.maxSnapshotsPerSession,
+          "Snapshot limit reached",
+          403
+        );
         const snapshot = {
           id: createId("snap"),
           sessionId: auth.session.id,
@@ -3284,6 +3457,8 @@ export function createBurstFlareService(options = {}) {
         if (bytes !== null) {
           ensure(Number.isInteger(bytes) && bytes > 0, "Upload bytes must be a positive integer");
           ensure(bytes <= MAX_SNAPSHOT_BYTES, "Snapshot exceeds size limit", 413);
+          const currentStorage = summarizeStorage(state, auth.workspace.id);
+          ensureStorageWithinLimit(state, auth.workspace, currentStorage.totalBytes - (snapshot.bytes || 0) + bytes);
         }
 
         const uploadGrant = createUploadGrant(state, clock, {
@@ -3578,7 +3753,8 @@ export function createBurstFlareService(options = {}) {
         const auth = requireAuth(state, token, clock);
         return {
           usage: summarizeUsage(state, auth.workspace.id),
-          limits: getPlan(auth.workspace.plan),
+          limits: getEffectiveLimits(auth.workspace),
+          overrides: getWorkspaceQuotaOverrides(auth.workspace),
           plan: auth.workspace.plan
         };
       });
@@ -3628,6 +3804,7 @@ export function createBurstFlareService(options = {}) {
             return new Date(entry.expiresAt).getTime() > reportAt;
           }).length,
           releases: state.bindingReleases.filter((entry) => entry.workspaceId === auth.workspace.id).length,
+          limits: getEffectiveLimits(auth.workspace),
           reconcileCandidates: {
             runningSessions: reconcileCandidates.runningSessions.length,
             stuckBuilds: reconcileCandidates.stuckBuilds.length,

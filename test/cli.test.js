@@ -113,6 +113,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["workspace", "quota-overrides", "--max-running-sessions", "4", "--max-storage-bytes", "2048", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const quotaOverrideOutput = JSON.parse(stdout.data.trim());
+    assert.equal(quotaOverrideOutput.limits.maxRunningSessions, 4);
+    assert.equal(quotaOverrideOutput.overrides.maxStorageBytes, 2048);
+
+    stdout.data = "";
+
     code = await runCli(["auth", "device-start", "--email", "cli@example.com", "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -564,6 +577,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(reportOutput.report.buildsDeadLettered, 0);
     assert.equal(reportOutput.report.sessionsSleeping, 1);
     assert.equal(reportOutput.report.activeUploadGrants, 0);
+    assert.equal(reportOutput.report.limits.maxRunningSessions, 4);
 
     stdout.data = "";
 
@@ -733,6 +747,18 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const recoveredConfig = JSON.parse(await readFile(configPath, "utf8"));
     assert.notEqual(recoveredConfig.token, "");
     assert.notEqual(recoveredConfig.refreshToken, "");
+
+    stdout.data = "";
+
+    code = await runCli(["workspace", "quota-overrides", "--clear", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const clearedOverrides = JSON.parse(stdout.data.trim());
+    assert.deepEqual(clearedOverrides.overrides, {});
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });

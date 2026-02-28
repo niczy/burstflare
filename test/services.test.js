@@ -485,11 +485,21 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.ok((await service.authenticate(ownerSecondLogin.token)).user.id);
 
   const usage = await service.getUsage(ownerSecondLogin.token);
-  assert.deepEqual(usage.usage, {
-    runtimeMinutes: 3,
-    snapshots: 3,
-    templateBuilds: 4
-  });
+  assert.equal(usage.usage.runtimeMinutes, 3);
+  assert.equal(usage.usage.snapshots, 3);
+  assert.equal(usage.usage.templateBuilds, 4);
+  assert.equal(usage.usage.storage.templateBundlesBytes > 0, true);
+  assert.equal(usage.usage.storage.snapshotBytes >= 0, true);
+  assert.equal(
+    usage.usage.storage.totalBytes,
+    usage.usage.storage.templateBundlesBytes +
+      usage.usage.storage.snapshotBytes +
+      usage.usage.storage.buildArtifactBytes
+  );
+  assert.equal(usage.usage.inventory.templates >= 1, true);
+  assert.equal(usage.limits.maxRunningSessions, 20);
+  assert.equal(usage.plan, "pro");
+  assert.deepEqual(usage.overrides, {});
 
   const refreshed = await service.refreshSession(ownerSecondLogin.refreshToken);
   assert.ok(refreshed.token);
@@ -722,6 +732,124 @@ test("service exposes targeted operator reconcile workflows", async () => {
   assert.equal(report.report.reconcileCandidates.deletedSessions, 0);
   assert.equal(report.report.reconcileCandidates.staleSleepingSessions, 0);
   assert.equal(report.report.reconcileCandidates.queuedBuilds, 1);
+});
+
+test("service enforces quota overrides and storage limits", async () => {
+  let tick = Date.parse("2026-02-28T13:00:00.000Z");
+  const objects = createObjectStore();
+  const store = createMemoryStore();
+  const service = createBurstFlareService({
+    store,
+    objects,
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "quota-owner@example.com",
+    name: "Quota Owner"
+  });
+
+  const overrides = await service.setWorkspaceQuotaOverrides(owner.token, {
+    maxTemplates: 1,
+    maxRunningSessions: 1,
+    maxTemplateVersionsPerTemplate: 1,
+    maxSnapshotsPerSession: 1,
+    maxStorageBytes: 20,
+    maxRuntimeMinutes: 1,
+    maxTemplateBuilds: 1
+  });
+  assert.equal(overrides.limits.maxTemplates, 1);
+  assert.equal(overrides.overrides.maxStorageBytes, 20);
+
+  const template = await service.createTemplate(owner.token, {
+    name: "quota-template",
+    description: "Quota test template"
+  });
+  await assert.rejects(
+    () =>
+      service.createTemplate(owner.token, {
+        name: "quota-template-2",
+        description: "blocked by template limit"
+      }),
+    /Template limit reached/
+  );
+
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: { image: "registry.cloudflare.com/test/quota-template:1.0.0" }
+  });
+  await assert.rejects(
+    () =>
+      service.addTemplateVersion(owner.token, template.template.id, {
+        version: "1.0.1",
+        manifest: { image: "registry.cloudflare.com/test/quota-template:1.0.1" }
+      }),
+    /Template version limit reached/
+  );
+
+  await assert.rejects(
+    () =>
+      service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
+        body: "012345678901234567890",
+        contentType: "text/plain"
+      }),
+    /Workspace storage limit reached/
+  );
+
+  const raisedStorage = await service.setWorkspaceQuotaOverrides(owner.token, {
+    maxTemplates: 1,
+    maxRunningSessions: 1,
+    maxTemplateVersionsPerTemplate: 1,
+    maxSnapshotsPerSession: 1,
+    maxStorageBytes: 512,
+    maxRuntimeMinutes: 1,
+    maxTemplateBuilds: 1
+  });
+  assert.equal(raisedStorage.limits.maxStorageBytes, 512);
+
+  await service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
+    body: "small-bundle",
+    contentType: "text/plain"
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const session = await service.createSession(owner.token, {
+    name: "quota-session",
+    templateId: template.template.id
+  });
+  const started = await service.startSession(owner.token, session.session.id);
+  assert.equal(started.session.state, "running");
+
+  const secondSession = await service.createSession(owner.token, {
+    name: "quota-session-2",
+    templateId: template.template.id
+  });
+  await assert.rejects(() => service.startSession(owner.token, secondSession.session.id), /Running session limit reached/);
+  await service.stopSession(owner.token, session.session.id);
+
+  const snapshot = await service.createSnapshot(owner.token, session.session.id, {
+    label: "quota-snap"
+  });
+  assert.ok(snapshot.snapshot.id);
+  await assert.rejects(
+    () =>
+      service.createSnapshot(owner.token, session.session.id, {
+        label: "quota-snap-2"
+      }),
+    /Snapshot limit reached/
+  );
+
+  const usage = await service.getUsage(owner.token);
+  assert.equal(usage.limits.maxRunningSessions, 1);
+  assert.equal(usage.overrides.maxTemplateBuilds, 1);
+
+  const cleared = await service.setWorkspaceQuotaOverrides(owner.token, { clear: true });
+  assert.deepEqual(cleared.overrides, {});
+  assert.equal(cleared.limits.maxRunningSessions, 3);
 });
 
 test("service can persist runtime state from a durable-object-driven session transition", async () => {

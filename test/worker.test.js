@@ -1154,6 +1154,104 @@ test("worker exposes targeted operator reconcile endpoints", async () => {
   assert.equal(report.data.report.reconcileCandidates.deletedSessions, 0);
 });
 
+test("worker exposes quota overrides and richer usage data", async () => {
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket(),
+    SNAPSHOT_BUCKET: createBucket()
+  });
+
+  const owner = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "quota-worker@example.com", name: "Quota Worker" })
+  });
+  const ownerHeaders = {
+    authorization: `Bearer ${owner.data.token}`
+  };
+
+  const overrides = await requestJson(app, "/api/workspaces/current/quota-overrides", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      maxTemplates: 1,
+      maxStorageBytes: 8
+    })
+  });
+  assert.equal(overrides.response.status, 200);
+  assert.equal(overrides.data.limits.maxTemplates, 1);
+  assert.equal(overrides.data.overrides.maxStorageBytes, 8);
+
+  const template = await requestJson(app, "/api/templates", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "quota-worker-template",
+      description: "quota test"
+    })
+  });
+  assert.equal(template.response.status, 200);
+
+  const blockedTemplate = await requestJson(app, "/api/templates", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "quota-worker-template-2",
+      description: "blocked"
+    })
+  });
+  assert.equal(blockedTemplate.response.status, 403);
+
+  const version = await requestJson(app, `/api/templates/${template.data.template.id}/versions`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      version: "1.0.0",
+      manifest: {
+        image: "registry.cloudflare.com/example/quota-worker:1.0.0"
+      }
+    })
+  });
+  assert.equal(version.response.status, 200);
+
+  const blockedUpload = await requestJson(app, `/api/templates/${template.data.template.id}/versions/${version.data.templateVersion.id}/bundle`, {
+    method: "PUT",
+    headers: {
+      ...ownerHeaders,
+      "content-type": "text/plain"
+    },
+    body: "too-large"
+  });
+  assert.equal(blockedUpload.response.status, 403);
+
+  const raised = await requestJson(app, "/api/workspaces/current/quota-overrides", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      maxTemplates: 1,
+      maxStorageBytes: 1024
+    })
+  });
+  assert.equal(raised.response.status, 200);
+
+  const uploaded = await requestJson(app, `/api/templates/${template.data.template.id}/versions/${version.data.templateVersion.id}/bundle`, {
+    method: "PUT",
+    headers: {
+      ...ownerHeaders,
+      "content-type": "text/plain"
+    },
+    body: "ok"
+  });
+  assert.equal(uploaded.response.status, 200);
+
+  const usage = await requestJson(app, "/api/usage", {
+    headers: ownerHeaders
+  });
+  assert.equal(usage.response.status, 200);
+  assert.equal(usage.data.limits.maxTemplates, 1);
+  assert.equal(usage.data.overrides.maxStorageBytes, 1024);
+  assert.equal(usage.data.usage.storage.templateBundlesBytes, 2);
+});
+
 test("runtime-aware reconcile stops running sessions and persists runtime state", async () => {
   const service = createWorkerService();
   const owner = await service.registerUser({
