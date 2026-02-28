@@ -7,6 +7,7 @@ const REFRESH_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const RUNTIME_TOKEN_TTL_MS = 1000 * 60 * 15;
 const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
 const UPLOAD_GRANT_TTL_MS = 1000 * 60 * 10;
+const MAX_BUILD_ATTEMPTS = 3;
 const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
@@ -470,13 +471,46 @@ function buildTemplateBuildLog(build, template, templateVersion) {
     `bundle_key=${templateVersion.bundleKey || ""}`,
     `build_status=${build.status}`,
     `attempts=${build.attempts}`,
+    `last_error=${build.lastError || ""}`,
+    `last_failure_at=${build.lastFailureAt || ""}`,
+    `dead_lettered_at=${build.deadLetteredAt || ""}`,
     `started_at=${build.startedAt || ""}`,
     `finished_at=${build.finishedAt || ""}`
   ];
   return `${lines.join("\n")}\n`;
 }
 
-async function processBuildRecord({ state, clock, objects, build, template, templateVersion, source = "manual", actorUserId = null }) {
+function getBuildFailureReason(templateVersion) {
+  if (templateVersion?.manifest?.simulateFailure) {
+    return "Simulated builder failure";
+  }
+  return null;
+}
+
+async function persistBuildLog({ objects, template, templateVersion, build, log }) {
+  if (!objects?.putBuildLog) {
+    return;
+  }
+  await objects.putBuildLog({
+    workspace: { id: template.workspaceId },
+    template,
+    templateVersion,
+    build,
+    log
+  });
+}
+
+async function processBuildRecord({
+  state,
+  clock,
+  objects,
+  jobs,
+  build,
+  template,
+  templateVersion,
+  source = "manual",
+  actorUserId = null
+}) {
   if (!["queued", "retrying"].includes(build.status)) {
     return null;
   }
@@ -487,22 +521,106 @@ async function processBuildRecord({ state, clock, objects, build, template, temp
   build.attempts += 1;
   templateVersion.status = "building";
 
+  const failureReason = getBuildFailureReason(templateVersion);
+  if (failureReason) {
+    build.finishedAt = nowIso(clock);
+    build.updatedAt = nowIso(clock);
+    build.lastError = failureReason;
+    build.lastFailureAt = build.finishedAt;
+    templateVersion.status = "failed";
+    templateVersion.builtAt = null;
+
+    if (source === "queue" && build.attempts < MAX_BUILD_ATTEMPTS) {
+      build.status = "retrying";
+      if (jobs?.enqueueBuild) {
+        await jobs.enqueueBuild(build.id);
+      }
+      writeAudit(state, clock, {
+        action: "template.build_retry_scheduled",
+        actorUserId,
+        workspaceId: template.workspaceId,
+        targetType: "template_build",
+        targetId: build.id,
+        details: {
+          templateId: template.id,
+          templateVersionId: templateVersion.id,
+          source,
+          attempts: build.attempts,
+          maxAttempts: MAX_BUILD_ATTEMPTS,
+          error: failureReason
+        }
+      });
+    } else if (build.attempts >= MAX_BUILD_ATTEMPTS) {
+      build.status = "dead_lettered";
+      build.deadLetteredAt = build.finishedAt;
+      writeAudit(state, clock, {
+        action: "template.build_dead_lettered",
+        actorUserId,
+        workspaceId: template.workspaceId,
+        targetType: "template_build",
+        targetId: build.id,
+        details: {
+          templateId: template.id,
+          templateVersionId: templateVersion.id,
+          source,
+          attempts: build.attempts,
+          maxAttempts: MAX_BUILD_ATTEMPTS,
+          error: failureReason
+        }
+      });
+    } else {
+      build.status = "failed";
+      build.deadLetteredAt = null;
+      writeAudit(state, clock, {
+        action: "template.build_failed",
+        actorUserId,
+        workspaceId: template.workspaceId,
+        targetType: "template_build",
+        targetId: build.id,
+        details: {
+          templateId: template.id,
+          templateVersionId: templateVersion.id,
+          source,
+          attempts: build.attempts,
+          maxAttempts: MAX_BUILD_ATTEMPTS,
+          error: failureReason
+        }
+      });
+    }
+
+    const failedBuildLog = buildTemplateBuildLog(build, template, templateVersion);
+    await persistBuildLog({
+      objects,
+      template,
+      templateVersion,
+      build,
+      log: failedBuildLog
+    });
+
+    return {
+      ...build,
+      templateId: template.id,
+      templateVersionId: templateVersion.id
+    };
+  }
+
   build.status = "succeeded";
   build.finishedAt = nowIso(clock);
   build.updatedAt = nowIso(clock);
+  build.lastError = null;
+  build.lastFailureAt = null;
+  build.deadLetteredAt = null;
   templateVersion.status = "ready";
   templateVersion.builtAt = nowIso(clock);
 
   const buildLog = buildTemplateBuildLog(build, template, templateVersion);
-  if (objects?.putBuildLog) {
-    await objects.putBuildLog({
-      workspace: { id: template.workspaceId },
-      template,
-      templateVersion,
-      build,
-      log: buildLog
-    });
-  }
+  await persistBuildLog({
+    objects,
+    template,
+    templateVersion,
+    build,
+    log: buildLog
+  });
 
   writeUsage(state, clock, {
     workspaceId: template.workspaceId,
@@ -1195,6 +1313,9 @@ export function createBurstFlareService(options = {}) {
           status: "queued",
           builderImage: "burstflare/builder:local",
           attempts: 0,
+          lastError: null,
+          lastFailureAt: null,
+          deadLetteredAt: null,
           createdAt: nowIso(clock),
           updatedAt: nowIso(clock),
           startedAt: null,
@@ -1340,6 +1461,7 @@ export function createBurstFlareService(options = {}) {
             state,
             clock,
             objects,
+            jobs,
             build,
             template,
             templateVersion: version,
@@ -1367,6 +1489,7 @@ export function createBurstFlareService(options = {}) {
           state,
           clock,
           objects,
+          jobs,
           build,
           template,
           templateVersion,
@@ -1426,8 +1549,10 @@ export function createBurstFlareService(options = {}) {
         ensure(version, "Template version missing", 404);
         const template = state.templates.find((entry) => entry.id === version.templateId);
         ensure(template && template.workspaceId === auth.workspace.id, "Build not found", 404);
+        ensure(["failed", "dead_lettered"].includes(build.status), "Build is not retryable", 409);
         build.status = "retrying";
         build.updatedAt = nowIso(clock);
+        build.deadLetteredAt = null;
         version.status = "queued";
         writeAudit(state, clock, {
           action: "template.build_retried",
@@ -2037,20 +2162,20 @@ export function createBurstFlareService(options = {}) {
           if (workspaceId && template.workspaceId !== workspaceId) {
             continue;
           }
-          build.status = "succeeded";
-          build.attempts += 1;
-          build.startedAt = build.startedAt || nowIso(clock);
-          build.finishedAt = nowIso(clock);
-          build.updatedAt = nowIso(clock);
-          version.status = "ready";
-          version.builtAt = nowIso(clock);
-          writeUsage(state, clock, {
-            workspaceId: template.workspaceId,
-            kind: "template_build",
-            value: 1,
-            details: { templateId: template.id, templateVersionId: version.id, source: "reconcile" }
+          const processedBuild = await processBuildRecord({
+            state,
+            clock,
+            objects,
+            jobs,
+            build,
+            template,
+            templateVersion: version,
+            source: "reconcile",
+            actorUserId: auth?.user.id || null
           });
-          processedBuilds += 1;
+          if (processedBuild) {
+            processedBuilds += 1;
+          }
         }
 
         const deletedSessionIds = new Set(

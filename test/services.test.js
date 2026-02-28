@@ -188,6 +188,38 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const buildLog = await service.getTemplateBuildLog(owner.token, version.build.id);
   assert.match(buildLog.text, /bundle_uploaded=true/);
 
+  const failingVersion = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.2.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/node-dev:1.2.0",
+      simulateFailure: true
+    }
+  });
+  const failedOnce = await service.processTemplateBuildById(failingVersion.build.id, {
+    source: "manual",
+    actorUserId: owner.user.id
+  });
+  assert.equal(failedOnce.build.status, "failed");
+  assert.match(failedOnce.build.lastError, /Simulated builder failure/);
+
+  await service.retryTemplateBuild(owner.token, failingVersion.build.id);
+  const failedTwice = await service.processTemplateBuildById(failingVersion.build.id, {
+    source: "manual",
+    actorUserId: owner.user.id
+  });
+  assert.equal(failedTwice.build.status, "failed");
+
+  await service.retryTemplateBuild(owner.token, failingVersion.build.id);
+  const deadLettered = await service.processTemplateBuildById(failingVersion.build.id, {
+    source: "manual",
+    actorUserId: owner.user.id
+  });
+  assert.equal(deadLettered.build.status, "dead_lettered");
+
+  const failedBuildLog = await service.getTemplateBuildLog(owner.token, failingVersion.build.id);
+  assert.match(failedBuildLog.text, /build_status=dead_lettered/);
+  await assert.rejects(() => service.retryTemplateBuild(owner.token, version.build.id), /Build is not retryable/);
+
   const promoted = await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
   assert.equal(promoted.activeVersion.id, version.templateVersion.id);
   assert.ok(promoted.release.id);

@@ -213,6 +213,65 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(buildLog.status, 200);
   assert.match(await buildLog.text(), /bundle_uploaded=true/);
 
+  const failingVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      version: "2.1.0",
+      manifest: {
+        image: "registry.cloudflare.com/test/python-dev:2.1.0",
+        simulateFailure: true
+      }
+    })
+  });
+  assert.equal(failingVersion.response.status, 200);
+
+  const failedProcess = await requestJson(app, "/api/template-builds/process", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(failedProcess.response.status, 200);
+  assert.equal(failedProcess.data.processed, 1);
+
+  const failedBuildLog = await app.fetch(
+    new Request(`http://example.test/api/template-builds/${failingVersion.data.build.id}/log`, {
+      headers: ownerHeaders
+    })
+  );
+  assert.equal(failedBuildLog.status, 200);
+  assert.match(await failedBuildLog.text(), /build_status=failed/);
+
+  const retryOne = await requestJson(app, `/api/template-builds/${failingVersion.data.build.id}/retry`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(retryOne.response.status, 200);
+
+  const failedProcessTwo = await requestJson(app, "/api/template-builds/process", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(failedProcessTwo.response.status, 200);
+
+  const retryTwo = await requestJson(app, `/api/template-builds/${failingVersion.data.build.id}/retry`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(retryTwo.response.status, 200);
+
+  const deadLetterProcess = await requestJson(app, "/api/template-builds/process", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(deadLetterProcess.response.status, 200);
+
+  const allBuilds = await requestJson(app, "/api/template-builds", {
+    headers: ownerHeaders
+  });
+  const deadLetterBuild = allBuilds.data.builds.find((entry) => entry.id === failingVersion.data.build.id);
+  assert.equal(deadLetterBuild.status, "dead_lettered");
+  assert.equal(deadLetterBuild.attempts, 3);
+
   const promoted = await requestJson(app, `/api/templates/${templateId}/promote`, {
     method: "POST",
     headers: ownerHeaders,

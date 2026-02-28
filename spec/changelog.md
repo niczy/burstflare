@@ -290,3 +290,21 @@ This file records what has already been implemented in the repository and what h
   - return `409` when deleting a template that still has an active session
   - delete a disposable template successfully
   - remove the deleted template from the template list
+
+## 28. Build Failure Retries And Dead-Letter Handling
+
+- Added explicit build failure detection through a template manifest flag for controlled failure-path testing.
+- Added build failure metadata on build records:
+  - `lastError`
+  - `lastFailureAt`
+  - `deadLetteredAt`
+- Added bounded build retry handling with a three-attempt cap.
+- Added automatic queue-side retry scheduling for failed queue builds until the cap is reached.
+- Added `dead_lettered` as the terminal build state after retry exhaustion.
+- Added richer build logs with failure and dead-letter fields.
+- Restricted manual `build retry` to failed or dead-lettered builds only.
+- Verified the live Worker can:
+  - process a queue-backed failing build
+  - retry it automatically through the build queue
+  - move it to `dead_lettered` after three attempts
+  - expose the dead-letter status and failure reason in the build log

@@ -212,6 +212,105 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(
+      [
+        "template",
+        "upload",
+        templateId,
+        "--version",
+        "2.0.0",
+        "--file",
+        bundlePath,
+        "--content-type",
+        "text/plain",
+        "--simulate-failure",
+        "--url",
+        "http://local"
+      ],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
+    assert.equal(code, 0);
+    const failingVersionOutput = JSON.parse(stdout.data.trim());
+
+    stdout.data = "";
+
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["build", "log", failingVersionOutput.build.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    assert.match(stdout.data, /build_status=failed/);
+
+    stdout.data = "";
+
+    code = await runCli(["build", "retry", failingVersionOutput.build.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["build", "retry", failingVersionOutput.build.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["build", "log", failingVersionOutput.build.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    assert.match(stdout.data, /build_status=dead_lettered/);
+
+    stdout.data = "";
+
     code = await runCli(["template", "promote", templateId, versionId, "--url", "http://local"], {
       fetchImpl,
       stdout,
