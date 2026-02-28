@@ -188,6 +188,7 @@ This file lists the remaining work required to close the gap between the current
 - Done:
   - snapshot create/list metadata
   - snapshot content upload and download routes
+  - snapshot deletion route and artifact cleanup
   - R2-backed snapshot content storage
   - CLI save and restore path for snapshot artifacts
 - Remaining:

@@ -25,6 +25,9 @@ function createBucket() {
         contentType: options.httpMetadata?.contentType || "application/octet-stream"
       });
     },
+    async delete(key) {
+      values.delete(key);
+    },
     async get(key) {
       const entry = values.get(key);
       if (!entry) {
@@ -229,6 +232,19 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   );
   assert.equal(snapshotDownload.status, 200);
   assert.equal(await snapshotDownload.text(), "snapshot payload");
+
+  const snapshotDelete = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}`, {
+    method: "DELETE",
+    headers: switchedHeaders
+  });
+  assert.equal(snapshotDelete.response.status, 200);
+
+  const snapshotMissing = await app.fetch(
+    new Request(`http://example.test/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content`, {
+      headers: switchedHeaders
+    })
+  );
+  assert.equal(snapshotMissing.status, 404);
 
   const ssh = await requestJson(app, `/api/sessions/${sessionId}/ssh-token`, {
     method: "POST",

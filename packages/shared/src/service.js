@@ -1512,6 +1512,36 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async deleteSnapshot(token, sessionId, snapshotId) {
+      return store.transact(async (state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        const index = state.snapshots.findIndex((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
+        ensure(index >= 0, "Snapshot not found", 404);
+        const snapshot = state.snapshots[index];
+
+        if (objects?.deleteSnapshot) {
+          await objects.deleteSnapshot({
+            workspace: auth.workspace,
+            session: auth.session,
+            snapshot
+          });
+        }
+
+        state.snapshots.splice(index, 1);
+        writeAudit(state, clock, {
+          action: "snapshot.deleted",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "snapshot",
+          targetId: snapshot.id
+        });
+        return {
+          ok: true,
+          snapshotId: snapshot.id
+        };
+      });
+    },
+
     async issueRuntimeToken(token, sessionId) {
       return store.transact((state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);

@@ -58,6 +58,9 @@ function createObjectStore() {
         bytes: entry.body.byteLength
       };
     },
+    async deleteSnapshot({ snapshot }) {
+      snapshots.delete(snapshot.id);
+    },
     readBundleText(templateVersionId) {
       const entry = bundles.get(templateVersionId);
       return entry ? decoder.decode(entry.body) : null;
@@ -178,6 +181,9 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(uploadedSnapshot.snapshot.bytes, 15);
   const downloadedSnapshot = await service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id);
   assert.equal(new TextDecoder().decode(downloadedSnapshot.body), "workspace-state");
+  const deletedSnapshot = await service.deleteSnapshot(switched.token, session.session.id, snapshot.snapshot.id);
+  assert.equal(deletedSnapshot.ok, true);
+  await assert.rejects(() => service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id), /Snapshot not found/);
 
   const usage = await service.getUsage(owner.token);
   assert.deepEqual(usage.usage, {

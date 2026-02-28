@@ -47,6 +47,9 @@ function createBucket() {
         contentType: options.httpMetadata?.contentType || "application/octet-stream"
       });
     },
+    async delete(key) {
+      values.delete(key);
+    },
     async get(key) {
       const entry = values.get(key);
       if (!entry) {
@@ -254,6 +257,18 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const restoreOutput = JSON.parse(stdout.data.trim());
     assert.equal(restoreOutput.bytes, 18);
     assert.equal(await readFile(restoredPath, "utf8"), "cli bundle payload");
+
+    stdout.data = "";
+
+    code = await runCli(["snapshot", "delete", sessionId, snapshotId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const deletedSnapshot = JSON.parse(stdout.data.trim());
+    assert.equal(deletedSnapshot.ok, true);
 
     stdout.data = "";
 

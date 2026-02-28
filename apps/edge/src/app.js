@@ -186,6 +186,14 @@ function createObjectStore(options) {
         contentType: object.httpMetadata?.contentType || snapshot.contentType || "application/octet-stream",
         bytes: object.size ?? snapshot.bytes
       };
+    },
+
+    async deleteSnapshot({ snapshot }) {
+      if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
+        return null;
+      }
+      await options.SNAPSHOT_BUCKET.delete(snapshot.objectKey);
+      return { key: snapshot.objectKey };
     }
   };
 }
@@ -926,6 +934,17 @@ export function createApp(options = {}) {
             "content-length": String(content.bytes)
           }
         });
+      })
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/sessions/:sessionId/snapshots/:snapshotId",
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.deleteSnapshot(token, sessionId, snapshotId));
       })
     },
     {

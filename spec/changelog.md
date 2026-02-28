@@ -212,3 +212,13 @@ This file records what has already been implemented in the repository and what h
 - Added web-app automatic token refresh on `401` responses.
 - Added an explicit logout control in the web app.
 - Verified the local CLI can recover against the live Worker after the stored access token is deliberately corrupted, using only the saved refresh token.
+
+## 22. Snapshot Deletion And Artifact Cleanup
+
+- Added authenticated snapshot deletion routes.
+- Added R2-backed snapshot artifact deletion when a snapshot is removed.
+- Added CLI support for `snapshot delete`.
+- Verified the live Worker can:
+  - delete a stored snapshot
+  - remove it from the snapshot list
+  - return `404` for the deleted snapshot content
