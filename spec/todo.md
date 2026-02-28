@@ -23,9 +23,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 01: Monorepo, Tooling, And Baseline Cloudflare App
 
-- Status: mostly complete
-- Remaining:
-  - add staging/production environment separation that matches the plan more closely
+- Status: complete
 
 ### PR 02: Data Model And Migration Framework
 
@@ -246,6 +244,7 @@ This file lists the remaining work required to close the gap between the current
 - Status: not complete
 - Done:
   - baseline synthetic smoke coverage exists for auth, build, session, snapshot, and report flows
+  - production and staging deployment modes are now separated in the Cloudflare tooling
 - Remaining:
   - operator runbooks
   - incident procedures

@@ -122,6 +122,8 @@ async function main() {
   }
 
   const state = {
+    environment: config.environment,
+    workerName: config.workerName,
     accountId: config.accountId,
     zoneId: config.zoneId,
     domain: config.domain,
@@ -175,7 +177,7 @@ async function main() {
     }
   };
 
-  await writeProvisionState(state);
+  await writeProvisionState(state, config.stateFile);
 
   process.stdout.write(
     JSON.stringify(

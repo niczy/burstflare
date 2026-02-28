@@ -41,7 +41,7 @@ async function applyMigration(client, databaseId, name, sql) {
 
 async function main() {
   const config = await loadCloudflareConfig();
-  const state = await readProvisionState();
+  const state = await readProvisionState(config.stateFile);
   if (!state?.resources?.d1?.id) {
     throw new Error("Missing provisioned D1 database. Run npm run cf:provision first.");
   }

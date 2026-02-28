@@ -7,6 +7,8 @@ async function main() {
   process.stdout.write(
     JSON.stringify(
       {
+        environment: config.environment,
+        workerName: config.workerName,
         accountId: config.accountId,
         zoneId: config.zoneId,
         domain: config.domain,

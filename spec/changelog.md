@@ -463,3 +463,24 @@ This file records what has already been implemented in the repository and what h
 - Verified the smoke flow passes:
   - locally against the dev server
   - remotely against the deployed Worker
+
+## 40. Staging And Production Cloudflare Separation
+
+- Added explicit Cloudflare environment selection through `CLOUDFLARE_ENVIRONMENT`.
+- The Cloudflare tooling now supports:
+  - `production` with the existing worker name and state file
+  - `staging` with a separate worker name, separate state file, and separate resource-name prefix
+- Added environment-aware worker naming in generated Wrangler output.
+- Added environment-aware `BURSTFLARE_DATA_FILE` and `CLOUDFLARE_ENVIRONMENT` vars in generated Wrangler output.
+- Added convenience scripts for:
+  - `cf:generate:production`
+  - `cf:generate:staging`
+  - `cf:verify:staging`
+  - `cf:provision:staging`
+  - `cf:migrate:staging`
+- Kept the current production deploy path backward-compatible with the existing `.local/cloudflare-state.json`.
+- Verified:
+  - production config generation still targets `burstflare`
+  - staging config generation targets `burstflare-staging`
+  - production deploy still succeeds
+  - local and remote smoke flows still pass after the tooling change

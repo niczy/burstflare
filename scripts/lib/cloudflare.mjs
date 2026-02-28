@@ -4,6 +4,18 @@ import { getRequiredEnv, loadEnv, mergeEnv, slugifyDomain } from "./env.mjs";
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
 
+function normalizeEnvironment(value = "production") {
+  const normalized = String(value || "production").trim().toLowerCase();
+  if (!["production", "staging"].includes(normalized)) {
+    throw new Error(`Unsupported Cloudflare environment: ${value}`);
+  }
+  return normalized;
+}
+
+function getStateFileForEnvironment(environment) {
+  return environment === "production" ? ".local/cloudflare-state.json" : `.local/cloudflare-state.${environment}.json`;
+}
+
 async function requestJson(url, init) {
   const response = await fetch(url, init);
   const data = await response.json().catch(() => ({}));
@@ -23,6 +35,7 @@ async function requestJson(url, init) {
 export async function loadCloudflareConfig() {
   const dotEnv = await loadEnv(".env");
   const env = mergeEnv(dotEnv);
+  const environment = normalizeEnvironment(env.CLOUDFLARE_ENVIRONMENT || "production");
   return {
     accountId: getRequiredEnv(env, "CLOUDFLARE_ACCOUNT_ID", ["account_id"]),
     zoneId: getRequiredEnv(env, "CLOUDFLARE_ZONE_ID", ["zone_id"]),
@@ -30,7 +43,10 @@ export async function loadCloudflareConfig() {
     apiToken: getRequiredEnv(env, "CLOUDFLARE_API_TOKEN"),
     enableContainers: env.CLOUDFLARE_ENABLE_CONTAINERS === "1" || Boolean(env.CLOUDFLARE_CONTAINER_IMAGE),
     containerImage: env.CLOUDFLARE_CONTAINER_IMAGE || "",
-    slug: slugifyDomain(getRequiredEnv(env, "CLOUDFLARE_DOMAIN", ["domain"]))
+    slug: slugifyDomain(getRequiredEnv(env, "CLOUDFLARE_DOMAIN", ["domain"])),
+    environment,
+    workerName: environment === "production" ? "burstflare" : `burstflare-${environment}`,
+    stateFile: getStateFileForEnvironment(environment)
   };
 }
 
@@ -125,9 +141,9 @@ export function createCloudflareClient(config) {
 }
 
 export function desiredResourceNames(config) {
-  const prefix = config.slug;
+  const prefix = config.environment === "production" ? config.slug : `${config.slug}-${config.environment}`;
   return {
-    d1: `${prefix}-prod`,
+    d1: config.environment === "production" ? `${prefix}-prod` : `${prefix}-db`,
     kv: {
       auth: `${prefix}-auth`,
       cache: `${prefix}-cache`

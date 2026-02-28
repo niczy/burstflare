@@ -3,12 +3,17 @@ import { loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
 function renderWrangler(state, config) {
   const { resources } = state;
   const containerImage = config.containerImage || "./containers/session/Dockerfile";
-  const lines = [`name = "burstflare"
+  const dataFile =
+    config.environment === "production"
+      ? ".local/burstflare-data.json"
+      : `.local/burstflare-data.${config.environment}.json`;
+  const lines = [`name = "${config.workerName}"
 main = "apps/edge/src/worker.js"
 compatibility_date = "2026-02-27"
 
 [vars]
-BURSTFLARE_DATA_FILE = ".local/burstflare-data.json"
+BURSTFLARE_DATA_FILE = "${dataFile}"
+CLOUDFLARE_ENVIRONMENT = "${config.environment}"
 CLOUDFLARE_DOMAIN = "${state.domain}"
 
 [[d1_databases]]
@@ -70,11 +75,11 @@ crons = ["*/15 * * * *"]`);
 }
 
 async function main() {
-  const state = await readProvisionState();
-  if (!state) {
-    throw new Error("Missing .local/cloudflare-state.json. Run npm run cf:provision first.");
-  }
   const config = await loadCloudflareConfig();
+  const state = await readProvisionState(config.stateFile);
+  if (!state) {
+    throw new Error(`Missing ${config.stateFile}. Run npm run cf:provision first.`);
+  }
   const output = renderWrangler(state, config);
   process.stdout.write(output);
 }

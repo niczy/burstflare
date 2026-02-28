@@ -44,6 +44,46 @@ async function waitForHealthy(baseUrl) {
   throw lastError || new Error("Health check did not become ready");
 }
 
+async function getBuildById(baseUrl, headers, buildId) {
+  const payload = await requestJson(baseUrl, "/api/template-builds", {
+    headers
+  });
+  return payload.builds.find((entry) => entry.id === buildId) || null;
+}
+
+async function waitForBuildReady(baseUrl, headers, buildId) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const build = await getBuildById(baseUrl, headers, buildId);
+    if (build?.status === "succeeded") {
+      return {
+        build,
+        processed: 0
+      };
+    }
+    if (build?.status === "dead_lettered" || build?.status === "failed") {
+      throw new Error(`Build ${buildId} ended in ${build.status}`);
+    }
+    if (attempt === 4) {
+      const processed = await requestJson(baseUrl, "/api/template-builds/process", {
+        method: "POST",
+        headers
+      });
+      if (processed.processed > 0) {
+        const retriedBuild = await getBuildById(baseUrl, headers, buildId);
+        if (retriedBuild?.status === "succeeded") {
+          return {
+            build: retriedBuild,
+            processed: processed.processed
+          };
+        }
+      }
+    }
+    await sleep(250);
+  }
+  const build = await getBuildById(baseUrl, headers, buildId);
+  throw new Error(`Build ${buildId} did not become ready (last status: ${build?.status || "missing"})`);
+}
+
 async function main() {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
   await waitForHealthy(baseUrl);
@@ -96,10 +136,7 @@ async function main() {
     })
   });
 
-  const processed = await requestJson(baseUrl, "/api/template-builds/process", {
-    method: "POST",
-    headers: authHeaders
-  });
+  const buildResult = await waitForBuildReady(baseUrl, authHeaders, version.build.id);
 
   const promoted = await requestJson(baseUrl, `/api/templates/${template.template.id}/promote`, {
     method: "POST",
@@ -141,7 +178,8 @@ async function main() {
         baseUrl,
         email,
         authSessions: authSessions.sessions.length,
-        processedBuilds: processed.processed,
+        buildStatus: buildResult.build.status,
+        processedBuilds: buildResult.processed,
         activeVersionId: promoted.activeVersion.id,
         sessionState: started.session.state,
         snapshotId: snapshot.snapshot.id,
