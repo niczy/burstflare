@@ -81,10 +81,10 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
   const fetchImpl = createFetch(app);
   const stdout = capture();
   const stderr = capture();
-  const configPath = path.join(os.tmpdir(), `burstflare-cli-${Date.now()}.json`);
-  const bundlePath = path.join(os.tmpdir(), `burstflare-bundle-${Date.now()}.txt`);
-  const restoredPath = path.join(os.tmpdir(), `burstflare-restored-${Date.now()}.txt`);
-  const exportPath = path.join(os.tmpdir(), `burstflare-export-${Date.now()}.json`);
+  const configPath = path.join(os.tmpdir(), `flare-cli-${Date.now()}.json`);
+  const bundlePath = path.join(os.tmpdir(), `flare-bundle-${Date.now()}.txt`);
+  const restoredPath = path.join(os.tmpdir(), `flare-restored-${Date.now()}.txt`);
+  const exportPath = path.join(os.tmpdir(), `flare-export-${Date.now()}.json`);
 
   try {
     await writeFile(bundlePath, "cli bundle payload");
@@ -767,8 +767,8 @@ test("cli can roll back a template to a prior release", async () => {
   const fetchImpl = createFetch(app);
   const stdout = capture();
   const stderr = capture();
-  const configPath = path.join(os.tmpdir(), `burstflare-cli-rollback-${Date.now()}.json`);
-  const bundlePath = path.join(os.tmpdir(), `burstflare-rollback-bundle-${Date.now()}.txt`);
+  const configPath = path.join(os.tmpdir(), `flare-cli-rollback-${Date.now()}.json`);
+  const bundlePath = path.join(os.tmpdir(), `flare-rollback-bundle-${Date.now()}.txt`);
 
   try {
     await writeFile(bundlePath, "rollback bundle payload");

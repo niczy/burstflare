@@ -26,7 +26,7 @@ function parseArgs(argv) {
 }
 
 function defaultConfigPath(env = process.env) {
-  return env.FLARE_CONFIG || env.BURSTFLARE_CONFIG || path.join(os.homedir(), ".config", CLI_NAME, "config.json");
+  return env.FLARE_CONFIG || path.join(os.homedir(), ".config", CLI_NAME, "config.json");
 }
 
 async function readConfig(configPath) {

@@ -33,6 +33,7 @@ This file records what has already been implemented in the repository and what h
 
 - Implemented the web UI served by the Worker.
 - Implemented the `flare` CLI with auth and session-oriented commands.
+- Finalized the CLI rename by switching the default config path to `~/.config/flare/config.json`, requiring `FLARE_CONFIG`, and renaming the workspace package to `@burstflare/flare`.
 - Added device-flow support between the web app and CLI.
 - Added basic dashboard and management surfaces for templates, builds, sessions, and preview access.
 

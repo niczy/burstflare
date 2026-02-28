@@ -1,5 +1,5 @@
 {
-  "name": "@burstflare/cli",
+  "name": "@burstflare/flare",
   "private": true,
   "type": "module",
   "bin": {
