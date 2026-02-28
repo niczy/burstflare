@@ -29,7 +29,7 @@ export class BaseStore {
       const state = await this.load();
       const draft = clone(state);
       const result = await work(draft);
-      await this.save(draft);
+      await this.save(draft, state);
       return result;
     });
     this.#queue = next.then(

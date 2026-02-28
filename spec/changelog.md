@@ -772,3 +772,21 @@ This file records what has already been implemented in the repository and what h
   - `restartedState`
   - `detailState`
 - Verified locally by running the updated smoke flow against the dev server and confirming the stricter lifecycle assertions passed.
+
+## 58. Normalized D1 Persistence Cutover
+
+- Added a third D1 migration in `infra/migrations/0003_normalized_state.sql` for normalized state tables and indexes.
+- Refactored the Cloudflare state store so the legacy `_burstflare_state` blob is no longer on the normal write path.
+- The Cloudflare store now:
+  - treats the legacy blob as a read fallback during cutover
+  - promotes normalized D1 tables to the canonical persisted state after the first successful normalized save
+  - performs row-level upserts and deletes for normalized collections instead of rewriting entire tables on every mutation
+- Added a dedicated store test that verifies:
+  - legacy-state loading
+  - normalized-table projection on save
+  - stable array ordering across the cutover
+- Applied the new migration to the live D1 database.
+- Verified the live Worker can:
+  - complete the first post-deploy register call that triggers the normalized cutover
+  - complete the public smoke flow after cutover
+  - complete a traced end-to-end flow across auth, template creation, build completion, session lifecycle, snapshot creation, and admin reporting
