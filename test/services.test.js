@@ -325,6 +325,12 @@ test("service covers invites, queued builds, releases, session events, usage, an
   await assert.rejects(() => service.getSession(switched.token, session.session.id), /Session not found/);
   await assert.rejects(() => service.getSession(switched.token, staleSession.session.id), /Session not found/);
 
+  const logoutAll = await service.logoutAllSessions(switched.token);
+  assert.equal(logoutAll.ok, true);
+  assert.ok(logoutAll.revokedTokens >= 2);
+  await assert.rejects(() => service.authenticate(switched.token), /Unauthorized/);
+  await assert.rejects(() => service.authenticate(teammate.token), /Unauthorized/);
+
   const usage = await service.getUsage(owner.token);
   assert.deepEqual(usage.usage, {
     runtimeMinutes: 3,

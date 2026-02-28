@@ -946,6 +946,35 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async logoutAllSessions(token) {
+      return store.transact((state) => {
+        const auth = requireAuth(state, token, clock);
+        const revokedAt = nowIso(clock);
+        let revokedTokens = 0;
+        for (const record of state.authTokens) {
+          if (record.userId !== auth.user.id || record.revokedAt || record.kind === "runtime") {
+            continue;
+          }
+          record.revokedAt = revokedAt;
+          revokedTokens += 1;
+        }
+        writeAudit(state, clock, {
+          action: "auth.logout_all",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "user",
+          targetId: auth.user.id,
+          details: {
+            revokedTokens
+          }
+        });
+        return {
+          ok: true,
+          revokedTokens
+        };
+      });
+    },
+
     async authenticate(token) {
       return store.transact((state) => {
         const auth = requireAuth(state, token, clock);

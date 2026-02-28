@@ -571,6 +571,18 @@ export function createApp(options = {}) {
     },
     {
       method: "POST",
+      pattern: "/api/auth/logout-all",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const result = await service.logoutAllSessions(token);
+        return toJsonWithCookies(result, clearAuthCookies(service));
+      })
+    },
+    {
+      method: "POST",
       pattern: "/api/auth/switch-workspace",
       handler: withErrorHandling(async (request) => {
         const token = requireToken(request, service);

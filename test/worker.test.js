@@ -611,6 +611,21 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: switchedHeaders
   });
   assert.equal(removedStaleSession.response.status, 404);
+
+  const logoutAll = await requestJson(app, "/api/auth/logout-all", {
+    method: "POST",
+    headers: switchedHeaders
+  });
+  assert.equal(logoutAll.response.status, 200);
+  assert.ok(logoutAll.data.revokedTokens >= 2);
+  const revokedSwitched = await requestJson(app, "/api/auth/me", {
+    headers: switchedHeaders
+  });
+  assert.equal(revokedSwitched.response.status, 401);
+  const revokedTeammate = await requestJson(app, "/api/auth/me", {
+    headers: teammateHeaders
+  });
+  assert.equal(revokedTeammate.response.status, 401);
 });
 
 test("worker scheduled handler enqueues reconcile jobs", async () => {

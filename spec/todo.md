@@ -51,6 +51,7 @@ This file lists the remaining work required to close the gap between the current
   - basic registration and token-based auth flows exist
   - refresh-token rotation
   - explicit logout for issued access tokens
+  - logout-all revokes all current user sessions across access and refresh tokens
   - browser client token refresh and logout UX
   - browser session and CSRF cookies are issued on auth success paths
   - cookie-authenticated mutating requests require a matching CSRF token
@@ -59,7 +60,7 @@ This file lists the remaining work required to close the gap between the current
   - WebAuthn
   - Turnstile
   - recovery codes
-  - immediate revocation semantics across browser sessions
+  - deeper device/session management UX beyond the current logout-all path
 
 ### PR 04: Workspace And Membership Model
 

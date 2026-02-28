@@ -577,6 +577,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     const reconcileOutput = JSON.parse(stdout.data.trim());
     assert.equal(reconcileOutput.queued, true);
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "logout-all", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const clearedAll = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(clearedAll.token, "");
+    assert.equal(clearedAll.refreshToken, "");
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });

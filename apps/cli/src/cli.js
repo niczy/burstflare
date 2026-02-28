@@ -121,6 +121,7 @@ function helpText() {
     "burstflare auth login --email you@example.com",
     "burstflare auth refresh",
     "burstflare auth logout",
+    "burstflare auth logout-all",
     "burstflare auth device-start --email you@example.com",
     "burstflare auth device-approve --code device_xxx",
     "burstflare auth device-exchange --code device_xxx",
@@ -384,6 +385,28 @@ export async function runCli(argv, dependencies = {}) {
             method: "POST",
             headers: headers(undefined),
             body: JSON.stringify({ refreshToken })
+          }
+        );
+        await clearAuthConfig(configPath, authConfig, baseUrl);
+        authConfig = {
+          ...authConfig,
+          baseUrl,
+          token: "",
+          refreshToken: "",
+          workspaceId: ""
+        };
+        token = "";
+        refreshToken = "";
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "logout-all") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/auth/logout-all`,
+          {
+            method: "POST",
+            headers: headers(undefined, false)
           }
         );
         await clearAuthConfig(configPath, authConfig, baseUrl);

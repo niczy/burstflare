@@ -375,3 +375,15 @@ This file records what has already been implemented in the repository and what h
   - retains CSRF header wiring
   - does not inject `Authorization` headers
   - does not reference `state.token`
+
+## 34. Cross-Session Logout All
+
+- Added `logout-all` support in the auth service.
+- Added an authenticated `POST /api/auth/logout-all` route.
+- Added CLI support for `burstflare auth logout-all`.
+- Revokes all non-runtime tokens for the current user across sessions.
+- Clears browser auth cookies on the `logout-all` path.
+- Verified the live Worker can:
+  - revoke at least two access tokens and two refresh tokens for the same user
+  - reject both old access tokens after revocation
+  - reject both old refresh tokens after revocation
