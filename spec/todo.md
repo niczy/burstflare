@@ -49,10 +49,11 @@ This file lists the remaining work required to close the gap between the current
   - the web app now runs without storing bearer access tokens in local storage
   - auth-session list and targeted revoke APIs exist
   - CLI support exists for listing and revoking individual auth sessions
+  - browser recovery-code generation and recovery controls now exist
 - Remaining:
   - WebAuthn
   - Turnstile production enablement with a configured `TURNSTILE_SECRET` and real client widget flow
-  - richer browser-facing auth/device management UX beyond the current logout-all, auth-session list-revoke, and device-approval controls
+  - richer browser-facing auth/device management UX beyond the current logout-all, auth-session list-revoke, device-approval, and recovery-code controls
 
 ### PR 04: Workspace And Membership Model
 

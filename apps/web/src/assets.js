@@ -207,10 +207,19 @@ export const html = `<!doctype html>
           <div class="row">
             <button id="registerButton">Register</button>
             <button class="secondary" id="loginButton">Login</button>
+            <button class="secondary" id="recoverButton">Recover</button>
             <button class="secondary" id="logoutButton">Logout</button>
+          </div>
+          <div>
+            <label for="recoveryCode">Recovery Code</label>
+            <input id="recoveryCode" type="text" placeholder="recovery_..." />
+          </div>
+          <div class="row">
+            <button class="secondary" id="recoveryCodesButton">New Recovery Codes</button>
           </div>
           <div class="muted" id="identity">Not signed in</div>
           <div class="muted" id="lastRefresh">Last refresh: never</div>
+          <pre id="recoveryCodes">No recovery codes generated.</pre>
           <div class="error" id="errors"></div>
         </div>
       </section>
@@ -418,6 +427,12 @@ function setDeviceStatus(message) {
 
 function setLastRefresh(value) {
   byId("lastRefresh").textContent = value ? 'Last refresh: ' + value : 'Last refresh: never';
+}
+
+function setRecoveryCodes(codes = []) {
+  byId("recoveryCodes").textContent = Array.isArray(codes) && codes.length
+    ? codes.join("\\n")
+    : "No recovery codes generated.";
 }
 
 function appendTerminalOutput(message) {
@@ -759,6 +774,7 @@ function clearPanels() {
   byId("snapshotList").textContent = "";
   byId("snapshotContentPreview").textContent = "No snapshot content loaded.";
   setLastRefresh("");
+  setRecoveryCodes();
   byId("usage").textContent = "";
   byId("report").textContent = "";
   byId("releases").textContent = "";
@@ -876,6 +892,21 @@ byId("loginButton").addEventListener("click", async () => {
   });
 });
 
+byId("recoverButton").addEventListener("click", async () => {
+  await perform(async () => {
+    const data = await api('/api/auth/recover', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: byId("email").value,
+        code: byId("recoveryCode").value,
+        turnstileToken: byId("turnstileToken").value
+      })
+    });
+    setAuth(data.refreshToken, data.csrfToken || "");
+    byId("recoveryCode").value = "";
+  });
+});
+
 byId("logoutButton").addEventListener("click", async () => {
   setError("");
   try {
@@ -894,6 +925,16 @@ byId("logoutButton").addEventListener("click", async () => {
     renderIdentity();
     clearPanels();
   }
+});
+
+byId("recoveryCodesButton").addEventListener("click", async () => {
+  await perform(async () => {
+    const data = await api('/api/auth/recovery-codes/generate', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    setRecoveryCodes(data.recoveryCodes || []);
+  });
 });
 
 byId("logoutAllButton").addEventListener("click", async () => {

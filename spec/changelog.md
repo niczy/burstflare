@@ -679,3 +679,22 @@ This file records what has already been implemented in the repository and what h
   - attach to the public SSH WebSocket route
   - receive the container shell welcome banner
   - return `/workspace` for `pwd`
+
+## 53. Browser Recovery Code Controls
+
+- Added browser-shell recovery-code controls to the auth panel.
+- The web app now includes:
+  - a recovery-code input
+  - a `Recover` action
+  - a `New Recovery Codes` action
+  - an inline recovery-code output panel
+- The browser bundle now calls:
+  - `POST /api/auth/recover`
+  - `POST /api/auth/recovery-codes/generate`
+- Recovery actions reuse the existing auth cookie, refresh-token, and CSRF flow instead of introducing a parallel browser auth path.
+- Added Worker test coverage for the new recovery UI markup and client-side wiring.
+- Verified the live Worker can:
+  - serve the recovery controls in the browser shell
+  - expose the recovery endpoints in the live app bundle
+  - generate recovery codes
+  - complete a recovery-code login
