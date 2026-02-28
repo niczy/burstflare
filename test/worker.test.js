@@ -89,6 +89,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(rootHtml, /Approve Device Code/);
   assert.match(rootHtml, /Recovery Code/);
   assert.match(rootHtml, /New Recovery Codes/);
+  assert.match(rootHtml, /Turnstile is not configured for this deployment/);
   assert.match(rootHtml, /deviceStatus/);
   assert.match(rootHtml, /lastRefresh/);
   assert.match(rootHtml, /terminalOutput/);
@@ -103,6 +104,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /x-burstflare-csrf/);
   assert.match(appScript, /api\/auth\/recover/);
   assert.match(appScript, /api\/auth\/recovery-codes\/generate/);
+  assert.match(appScript, /turnstileWidget/);
   assert.match(appScript, /api\/auth\/sessions/);
   assert.match(appScript, /api\/cli\/device\/approve/);
   assert.match(appScript, /api\/workspaces\/current\/settings/);
@@ -110,6 +112,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /pendingDeviceCodes/);
   assert.match(appScript, /setLastRefresh/);
   assert.match(appScript, /setRecoveryCodes/);
+  assert.match(appScript, /mountTurnstile/);
   assert.match(appScript, /startAutoRefresh/);
   assert.match(appScript, /setInterval/);
   assert.match(appScript, /terminalSendButton/);
@@ -123,6 +126,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
 
   const turnstileApp = createApp({
     TURNSTILE_SECRET: "secret",
+    TURNSTILE_SITE_KEY: "sitekey",
     fetchImpl: async (_url, init) => {
       const params = new URLSearchParams(init.body);
       const success = params.get("response") === "valid-turnstile";
@@ -140,6 +144,16 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const strictHealth = await requestJson(turnstileApp, "/api/health");
   assert.equal(strictHealth.response.status, 200);
   assert.equal(strictHealth.data.runtime.turnstileEnabled, true);
+
+  const strictRootResponse = await turnstileApp.fetch(new Request("http://example.test/"));
+  assert.equal(strictRootResponse.status, 200);
+  const strictRootHtml = await strictRootResponse.text();
+  assert.match(strictRootHtml, /challenges\.cloudflare\.com\/turnstile/);
+
+  const strictAppScriptResponse = await turnstileApp.fetch(new Request("http://example.test/app.js"));
+  assert.equal(strictAppScriptResponse.status, 200);
+  const strictAppScript = await strictAppScriptResponse.text();
+  assert.match(strictAppScript, /const TURNSTILE_SITE_KEY = "sitekey"/);
 
   const strictMissing = await requestJson(turnstileApp, "/api/auth/register", {
     method: "POST",

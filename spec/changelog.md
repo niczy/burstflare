@@ -698,3 +698,23 @@ This file records what has already been implemented in the repository and what h
   - expose the recovery endpoints in the live app bundle
   - generate recovery codes
   - complete a recovery-code login
+
+## 54. Browser Turnstile Widget Wiring
+
+- Added real browser-side Turnstile widget wiring to the web shell.
+- The Worker now dynamically injects:
+  - the Turnstile script tag when `TURNSTILE_SITE_KEY` is configured
+  - the current `TURNSTILE_SITE_KEY` value into the served browser bundle
+- The browser app now:
+  - mounts the Turnstile widget when a site key is present
+  - auto-fills the hidden/manual token field from widget callbacks
+  - resets the challenge after register, login, and recovery attempts
+  - keeps the manual token input as a fallback when Turnstile is unconfigured or unavailable
+- The Wrangler generator now includes `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in Worker vars when they are present in `.env`.
+- Added Worker test coverage for:
+  - script injection when Turnstile is configured
+  - dynamic site-key injection in `/app.js`
+- Verified the live Worker can:
+  - serve the Turnstile widget container without leaking HTML placeholders
+  - serve the dynamic Turnstile client wiring in the public app bundle
+  - continue to accept auth flows in the no-key fallback mode

@@ -50,9 +50,10 @@ This file lists the remaining work required to close the gap between the current
   - auth-session list and targeted revoke APIs exist
   - CLI support exists for listing and revoking individual auth sessions
   - browser recovery-code generation and recovery controls now exist
+  - browser Turnstile widget wiring now exists with a manual-token fallback path
 - Remaining:
   - WebAuthn
-  - Turnstile production enablement with a configured `TURNSTILE_SECRET` and real client widget flow
+  - Turnstile production enablement with configured `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in the live deployment
   - richer browser-facing auth/device management UX beyond the current logout-all, auth-session list-revoke, device-approval, and recovery-code controls
 
 ### PR 04: Workspace And Membership Model

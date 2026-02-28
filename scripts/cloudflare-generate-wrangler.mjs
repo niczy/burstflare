@@ -7,14 +7,24 @@ function renderWrangler(state, config) {
     config.environment === "production"
       ? ".local/burstflare-data.json"
       : `.local/burstflare-data.${config.environment}.json`;
+  const vars = [
+    `BURSTFLARE_DATA_FILE = "${dataFile}"`,
+    `CLOUDFLARE_ENVIRONMENT = "${config.environment}"`,
+    `CLOUDFLARE_DOMAIN = "${state.domain}"`
+  ];
+  if (config.turnstileSiteKey) {
+    vars.push(`TURNSTILE_SITE_KEY = "${config.turnstileSiteKey}"`);
+  }
+  if (config.turnstileSecret) {
+    vars.push(`TURNSTILE_SECRET = "${config.turnstileSecret}"`);
+  }
+
   const lines = [`name = "${config.workerName}"
 main = "apps/edge/src/worker.js"
 compatibility_date = "2026-02-27"
 
 [vars]
-BURSTFLARE_DATA_FILE = "${dataFile}"
-CLOUDFLARE_ENVIRONMENT = "${config.environment}"
-CLOUDFLARE_DOMAIN = "${state.domain}"
+${vars.join("\n")}
 
 [[d1_databases]]
 binding = "DB"

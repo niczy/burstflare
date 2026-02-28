@@ -43,6 +43,8 @@ export async function loadCloudflareConfig() {
     apiToken: getRequiredEnv(env, "CLOUDFLARE_API_TOKEN"),
     enableContainers: env.CLOUDFLARE_ENABLE_CONTAINERS === "1" || Boolean(env.CLOUDFLARE_CONTAINER_IMAGE),
     containerImage: env.CLOUDFLARE_CONTAINER_IMAGE || "",
+    turnstileSiteKey: env.TURNSTILE_SITE_KEY || "",
+    turnstileSecret: env.TURNSTILE_SECRET || "",
     slug: slugifyDomain(getRequiredEnv(env, "CLOUDFLARE_DOMAIN", ["domain"])),
     environment,
     workerName: environment === "production" ? "burstflare" : `burstflare-${environment}`,

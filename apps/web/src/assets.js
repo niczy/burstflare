@@ -163,6 +163,14 @@ pre {
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
 }
 
+.turnstile-shell {
+  min-height: 72px;
+  border-radius: 14px;
+  border: 1px dashed var(--border);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .muted { color: var(--muted); }
 .error { color: #9d2500; min-height: 1.25em; }
 
@@ -178,6 +186,7 @@ export const html = `<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BurstFlare</title>
     <link rel="stylesheet" href="/styles.css" />
+    __BURSTFLARE_TURNSTILE_SCRIPT__
   </head>
   <body>
     <main>
@@ -201,8 +210,12 @@ export const html = `<!doctype html>
             </div>
           </div>
           <div>
+            <label>Turnstile</label>
+            <div class="turnstile-shell muted" id="turnstileWidget">Turnstile is not configured for this deployment.</div>
+          </div>
+          <div>
             <label for="turnstileToken">Turnstile Token</label>
-            <input id="turnstileToken" type="text" placeholder="Optional when Turnstile is enabled" />
+            <input id="turnstileToken" type="text" placeholder="Auto-filled when the widget is active; manual fallback otherwise" />
           </div>
           <div class="row">
             <button id="registerButton">Register</button>
@@ -392,12 +405,15 @@ export const html = `<!doctype html>
 </html>`;
 
 export const appJs = `
+const TURNSTILE_SITE_KEY = __BURSTFLARE_TURNSTILE_SITE_KEY__;
+
 const state = {
   refreshToken: localStorage.getItem("burstflare_refresh_token") || "",
   csrfToken: localStorage.getItem("burstflare_csrf") || "",
   me: null,
   terminalSocket: null,
   terminalSessionId: "",
+  turnstileWidgetId: "",
   refreshTimer: null,
   refreshPending: false
 };
@@ -433,6 +449,49 @@ function setRecoveryCodes(codes = []) {
   byId("recoveryCodes").textContent = Array.isArray(codes) && codes.length
     ? codes.join("\\n")
     : "No recovery codes generated.";
+}
+
+function resetTurnstile() {
+  byId("turnstileToken").value = "";
+  if (TURNSTILE_SITE_KEY && state.turnstileWidgetId && globalThis.turnstile?.reset) {
+    globalThis.turnstile.reset(state.turnstileWidgetId);
+  }
+}
+
+function mountTurnstile() {
+  const host = byId("turnstileWidget");
+  if (!host) {
+    return;
+  }
+  if (!TURNSTILE_SITE_KEY) {
+    host.textContent = "Turnstile is not configured for this deployment.";
+    return;
+  }
+  if (!globalThis.turnstile?.render) {
+    host.textContent = "Loading Turnstile widget...";
+    setTimeout(mountTurnstile, 250);
+    return;
+  }
+  if (state.turnstileWidgetId) {
+    return;
+  }
+  host.textContent = "";
+  state.turnstileWidgetId = globalThis.turnstile.render(host, {
+    sitekey: TURNSTILE_SITE_KEY,
+    theme: "light",
+    callback(token) {
+      byId("turnstileToken").value = token;
+    },
+    "expired-callback"() {
+      byId("turnstileToken").value = "";
+    },
+    "error-callback"() {
+      byId("turnstileToken").value = "";
+      host.textContent = "Turnstile challenge failed. You can still paste a token manually.";
+      state.turnstileWidgetId = "";
+      setTimeout(mountTurnstile, 500);
+    }
+  });
 }
 
 function appendTerminalOutput(message) {
@@ -775,6 +834,7 @@ function clearPanels() {
   byId("snapshotContentPreview").textContent = "No snapshot content loaded.";
   setLastRefresh("");
   setRecoveryCodes();
+  resetTurnstile();
   byId("usage").textContent = "";
   byId("report").textContent = "";
   byId("releases").textContent = "";
@@ -866,44 +926,56 @@ async function perform(action) {
 
 byId("registerButton").addEventListener("click", async () => {
   await perform(async () => {
-    const data = await api('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: byId("email").value,
-        name: byId("name").value,
-        turnstileToken: byId("turnstileToken").value
-      })
-    });
-    setAuth(data.refreshToken, data.csrfToken || "");
+    try {
+      const data = await api('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: byId("email").value,
+          name: byId("name").value,
+          turnstileToken: byId("turnstileToken").value
+        })
+      });
+      setAuth(data.refreshToken, data.csrfToken || "");
+    } finally {
+      resetTurnstile();
+    }
   });
 });
 
 byId("loginButton").addEventListener("click", async () => {
   await perform(async () => {
-    const data = await api('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: byId("email").value,
-        kind: 'browser',
-        turnstileToken: byId("turnstileToken").value
-      })
-    });
-    setAuth(data.refreshToken, data.csrfToken || "");
+    try {
+      const data = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: byId("email").value,
+          kind: 'browser',
+          turnstileToken: byId("turnstileToken").value
+        })
+      });
+      setAuth(data.refreshToken, data.csrfToken || "");
+    } finally {
+      resetTurnstile();
+    }
   });
 });
 
 byId("recoverButton").addEventListener("click", async () => {
   await perform(async () => {
-    const data = await api('/api/auth/recover', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: byId("email").value,
-        code: byId("recoveryCode").value,
-        turnstileToken: byId("turnstileToken").value
-      })
-    });
-    setAuth(data.refreshToken, data.csrfToken || "");
-    byId("recoveryCode").value = "";
+    try {
+      const data = await api('/api/auth/recover', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: byId("email").value,
+          code: byId("recoveryCode").value,
+          turnstileToken: byId("turnstileToken").value
+        })
+      });
+      setAuth(data.refreshToken, data.csrfToken || "");
+      byId("recoveryCode").value = "";
+    } finally {
+      resetTurnstile();
+    }
   });
 });
 
@@ -1119,6 +1191,8 @@ byId("reconcileButton").addEventListener("click", async () => {
 });
 
 byId("reportButton").addEventListener("click", () => perform(async () => {}));
+
+mountTurnstile();
 
 if (state.refreshToken || state.csrfToken) {
   refresh().catch((error) => {

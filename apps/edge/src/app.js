@@ -455,6 +455,17 @@ export function createApp(options = {}) {
     return sshCommand.replace("ws://localhost:8787", `wss://${host}`);
   }
 
+  function renderShellHtml() {
+    const turnstileScript = options.TURNSTILE_SITE_KEY
+      ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>'
+      : "";
+    return html.replace("__BURSTFLARE_TURNSTILE_SCRIPT__", turnstileScript);
+  }
+
+  function renderShellJs() {
+    return appJs.replace("__BURSTFLARE_TURNSTILE_SITE_KEY__", JSON.stringify(String(options.TURNSTILE_SITE_KEY || "")));
+  }
+
   function createRuntimeSshBridge(sessionId) {
     if (typeof options.createWebSocketPair === "function") {
       return options.createWebSocketPair(sessionId);
@@ -516,7 +527,7 @@ export function createApp(options = {}) {
       method: "GET",
       pattern: "/",
       handler: () =>
-        new Response(html, {
+        new Response(renderShellHtml(), {
           headers: { "content-type": "text/html; charset=utf-8" }
         })
     },
@@ -524,7 +535,7 @@ export function createApp(options = {}) {
       method: "GET",
       pattern: "/app.js",
       handler: () =>
-        new Response(appJs, {
+        new Response(renderShellJs(), {
           headers: { "content-type": "application/javascript; charset=utf-8" }
         })
     },
