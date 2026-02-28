@@ -889,3 +889,32 @@ This file records what has already been implemented in the repository and what h
     - `dispatchMode = workflow`
     - `workflowStatus = succeeded`
     - `executionSource = workflow`
+
+## 63. Runtime-First Session State Persistence
+
+- Refactored session lifecycle state transitions behind a shared transition helper in the service layer.
+- Session records now persist the last known runtime snapshot fields:
+  - `runtimeDesiredState`
+  - `runtimeStatus`
+  - `runtimeState`
+  - `runtimeUpdatedAt`
+- Added a runtime-coupled session transition path in the service layer so a caller can:
+  - execute the runtime transition first
+  - persist the resulting session state and runtime snapshot in the same transaction
+- Updated the session lifecycle routes to use the runtime-coupled transition path whenever the session container Durable Object binding is present.
+- The Durable Object is now the source of truth for the route-level lifecycle result on:
+  - start
+  - stop
+  - restart
+  - delete
+- Kept the previous non-container fallback behavior unchanged for local and non-runtime environments.
+- Added test coverage for:
+  - service-level persistence of runtime state from a runtime-driven transition callback
+  - Worker lifecycle responses carrying the persisted `session.runtimeStatus` fields alongside live runtime data
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - a started session now returns `session.runtimeStatus = running` on the start response
+  - `GET /api/sessions/:id` returns the persisted runtime snapshot fields and the live attached runtime object
+  - the live session detail reports:
+    - `session.state = running`
+    - `session.runtimeStatus = running`
+    - `session.runtimeState = healthy`

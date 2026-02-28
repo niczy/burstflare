@@ -1135,6 +1135,8 @@ test("worker coordinates session lifecycle through the session container durable
   });
   assert.equal(started.response.status, 200);
   assert.equal(started.data.session.state, "running");
+  assert.equal(started.data.session.runtimeStatus, "running");
+  assert.equal(started.data.session.runtimeState, "healthy");
   assert.equal(started.data.runtime.status, "running");
   assert.equal(started.data.runtime.bootCount, 1);
 
@@ -1142,6 +1144,7 @@ test("worker coordinates session lifecycle through the session container durable
     headers: authHeaders
   });
   assert.equal(detail.response.status, 200);
+  assert.equal(detail.data.session.runtimeStatus, "running");
   assert.equal(detail.data.session.runtime.status, "running");
   assert.equal(detail.data.session.runtime.runtimeState, "healthy");
 
@@ -1158,6 +1161,7 @@ test("worker coordinates session lifecycle through the session container durable
   });
   assert.equal(stopped.response.status, 200);
   assert.equal(stopped.data.session.state, "sleeping");
+  assert.equal(stopped.data.session.runtimeStatus, "sleeping");
   assert.equal(stopped.data.runtime.status, "sleeping");
   assert.equal(stopped.data.runtime.lastStopReason, "session_stop");
 
@@ -1167,6 +1171,7 @@ test("worker coordinates session lifecycle through the session container durable
   });
   assert.equal(restarted.response.status, 200);
   assert.equal(restarted.data.session.state, "running");
+  assert.equal(restarted.data.session.runtimeStatus, "running");
   assert.equal(restarted.data.runtime.status, "running");
   assert.equal(restarted.data.runtime.bootCount, 2);
 
@@ -1176,6 +1181,7 @@ test("worker coordinates session lifecycle through the session container durable
   });
   assert.equal(deleted.response.status, 200);
   assert.equal(deleted.data.session.state, "deleted");
+  assert.equal(deleted.data.session.runtimeStatus, "deleted");
   assert.equal(deleted.data.runtime.status, "deleted");
 
   assert.deepEqual(calls, [

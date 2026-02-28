@@ -513,6 +513,158 @@ function formatSession(state, session) {
   };
 }
 
+function syncSessionRuntimeSnapshot(session, runtime, clock) {
+  if (!runtime) {
+    return;
+  }
+  session.runtimeDesiredState = runtime.desiredState || session.runtimeDesiredState || null;
+  session.runtimeStatus = runtime.status || session.runtimeStatus || null;
+  session.runtimeState = runtime.runtimeState || session.runtimeState || null;
+  session.runtimeUpdatedAt = nowIso(clock);
+}
+
+function resolveSessionStateFromRuntime(action, runtime) {
+  const runtimeStatus = runtime?.status || null;
+  if (action === "delete") {
+    return "deleted";
+  }
+  if (action === "stop") {
+    return "sleeping";
+  }
+  if (action === "start" || action === "restart") {
+    if (!runtimeStatus) {
+      return "running";
+    }
+    if (runtimeStatus === "running") {
+      return "running";
+    }
+    if (runtimeStatus === "deleted") {
+      return "deleted";
+    }
+    if (runtimeStatus === "sleeping") {
+      return "sleeping";
+    }
+    return "starting";
+  }
+  return null;
+}
+
+function applySessionTransition({ state, clock, auth, action, runtime = null }) {
+  const session = auth.session;
+  const timestamp = nowIso(clock);
+  syncSessionRuntimeSnapshot(session, runtime, clock);
+
+  if (action === "start") {
+    ensure(session.state !== "deleted", "Session deleted", 409);
+    ensure(["created", "sleeping"].includes(session.state), "Session cannot be started", 409);
+    const runningCount = getRunningSessionCount(state, auth.workspace.id);
+    ensure(runningCount < getPlan(auth.workspace.plan).maxRunningSessions, "Running session limit reached", 403);
+
+    session.state = "starting";
+    session.updatedAt = timestamp;
+    writeSessionEvent(state, clock, session.id, "starting");
+
+    session.state = resolveSessionStateFromRuntime("start", runtime);
+    if (session.state === "running") {
+      session.lastStartedAt = timestamp;
+      writeUsage(state, clock, {
+        workspaceId: auth.workspace.id,
+        kind: "runtime_minutes",
+        value: 1,
+        details: { sessionId: session.id }
+      });
+    }
+    session.updatedAt = timestamp;
+    writeSessionEvent(state, clock, session.id, session.state);
+    writeAudit(state, clock, {
+      action: "session.started",
+      actorUserId: auth.user.id,
+      workspaceId: auth.workspace.id,
+      targetType: "session",
+      targetId: session.id
+    });
+    return { session: formatSession(state, session), runtime };
+  }
+
+  if (action === "stop") {
+    ensure(session.state !== "deleted", "Session deleted", 409);
+    ensure(["running", "starting"].includes(session.state), "Session cannot be stopped", 409);
+    session.state = "stopping";
+    session.updatedAt = timestamp;
+    writeSessionEvent(state, clock, session.id, "stopping");
+
+    session.state = resolveSessionStateFromRuntime("stop", runtime);
+    session.lastStoppedAt = timestamp;
+    session.updatedAt = timestamp;
+    writeSessionEvent(state, clock, session.id, session.state);
+    writeAudit(state, clock, {
+      action: "session.stopped",
+      actorUserId: auth.user.id,
+      workspaceId: auth.workspace.id,
+      targetType: "session",
+      targetId: session.id
+    });
+    return { session: formatSession(state, session), runtime };
+  }
+
+  if (action === "restart") {
+    ensure(session.state !== "deleted", "Session deleted", 409);
+    if (session.state === "running") {
+      session.state = "stopping";
+      session.updatedAt = timestamp;
+      writeSessionEvent(state, clock, session.id, "stopping", { reason: "restart" });
+      session.state = "sleeping";
+      session.lastStoppedAt = timestamp;
+      session.updatedAt = timestamp;
+      writeSessionEvent(state, clock, session.id, "sleeping", { reason: "restart" });
+    }
+    ensure(["created", "sleeping"].includes(session.state), "Session cannot be restarted", 409);
+    const runningCount = getRunningSessionCount(state, auth.workspace.id);
+    ensure(runningCount < getPlan(auth.workspace.plan).maxRunningSessions, "Running session limit reached", 403);
+
+    session.state = "starting";
+    session.updatedAt = timestamp;
+    writeSessionEvent(state, clock, session.id, "starting", { reason: "restart" });
+
+    session.state = resolveSessionStateFromRuntime("restart", runtime);
+    if (session.state === "running") {
+      session.lastStartedAt = timestamp;
+      writeUsage(state, clock, {
+        workspaceId: auth.workspace.id,
+        kind: "runtime_minutes",
+        value: 1,
+        details: { sessionId: session.id, restart: true }
+      });
+    }
+    session.updatedAt = timestamp;
+    writeSessionEvent(state, clock, session.id, session.state, { reason: "restart" });
+    writeAudit(state, clock, {
+      action: "session.restarted",
+      actorUserId: auth.user.id,
+      workspaceId: auth.workspace.id,
+      targetType: "session",
+      targetId: session.id
+    });
+    return { session: formatSession(state, session), runtime };
+  }
+
+  if (action === "delete") {
+    session.state = resolveSessionStateFromRuntime("delete", runtime);
+    session.updatedAt = timestamp;
+    writeSessionEvent(state, clock, session.id, "deleted");
+    writeAudit(state, clock, {
+      action: "session.deleted",
+      actorUserId: auth.user.id,
+      workspaceId: auth.workspace.id,
+      targetType: "session",
+      targetId: session.id
+    });
+    return { session: formatSession(state, session), runtime };
+  }
+
+  throw new Error(`Unsupported session action: ${action}`);
+}
+
 function buildTemplateBuildLog(build, template, templateVersion) {
   const lines = [
     `build_id=${build.id}`,
@@ -2231,6 +2383,10 @@ export function createBurstFlareService(options = {}) {
           updatedAt: nowIso(clock),
           lastStartedAt: null,
           lastStoppedAt: null,
+          runtimeDesiredState: null,
+          runtimeStatus: null,
+          runtimeState: null,
+          runtimeUpdatedAt: null,
           sleepTtlSeconds: activeVersion.manifest?.sleepTtlSeconds || null,
           previewUrl: null
         };
@@ -2252,114 +2408,63 @@ export function createBurstFlareService(options = {}) {
     async startSession(token, sessionId) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        ensure(auth.session.state !== "deleted", "Session deleted", 409);
-        ensure(["created", "sleeping"].includes(auth.session.state), "Session cannot be started", 409);
-        const runningCount = getRunningSessionCount(state, auth.workspace.id);
-        ensure(runningCount < getPlan(auth.workspace.plan).maxRunningSessions, "Running session limit reached", 403);
-
-        auth.session.state = "starting";
-        auth.session.updatedAt = nowIso(clock);
-        writeSessionEvent(state, clock, auth.session.id, "starting");
-
-        auth.session.state = "running";
-        auth.session.lastStartedAt = nowIso(clock);
-        auth.session.updatedAt = nowIso(clock);
-        writeSessionEvent(state, clock, auth.session.id, "running");
-        writeUsage(state, clock, {
-          workspaceId: auth.workspace.id,
-          kind: "runtime_minutes",
-          value: 1,
-          details: { sessionId }
+        return applySessionTransition({
+          state,
+          clock,
+          auth,
+          action: "start"
         });
-        writeAudit(state, clock, {
-          action: "session.started",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "session",
-          targetId: auth.session.id
-        });
-        return { session: formatSession(state, auth.session) };
       });
     },
 
     async stopSession(token, sessionId) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        ensure(auth.session.state !== "deleted", "Session deleted", 409);
-        ensure(["running", "starting"].includes(auth.session.state), "Session cannot be stopped", 409);
-        auth.session.state = "stopping";
-        auth.session.updatedAt = nowIso(clock);
-        writeSessionEvent(state, clock, auth.session.id, "stopping");
-
-        auth.session.state = "sleeping";
-        auth.session.lastStoppedAt = nowIso(clock);
-        auth.session.updatedAt = nowIso(clock);
-        writeSessionEvent(state, clock, auth.session.id, "sleeping");
-        writeAudit(state, clock, {
-          action: "session.stopped",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "session",
-          targetId: auth.session.id
+        return applySessionTransition({
+          state,
+          clock,
+          auth,
+          action: "stop"
         });
-        return { session: formatSession(state, auth.session) };
       });
     },
 
     async restartSession(token, sessionId) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        ensure(auth.session.state !== "deleted", "Session deleted", 409);
-        if (auth.session.state === "running") {
-          auth.session.state = "stopping";
-          auth.session.updatedAt = nowIso(clock);
-          writeSessionEvent(state, clock, auth.session.id, "stopping", { reason: "restart" });
-          auth.session.state = "sleeping";
-          auth.session.lastStoppedAt = nowIso(clock);
-          auth.session.updatedAt = nowIso(clock);
-          writeSessionEvent(state, clock, auth.session.id, "sleeping", { reason: "restart" });
-        }
-        ensure(["created", "sleeping"].includes(auth.session.state), "Session cannot be restarted", 409);
-        const runningCount = getRunningSessionCount(state, auth.workspace.id);
-        ensure(runningCount < getPlan(auth.workspace.plan).maxRunningSessions, "Running session limit reached", 403);
-        auth.session.state = "starting";
-        auth.session.updatedAt = nowIso(clock);
-        writeSessionEvent(state, clock, auth.session.id, "starting", { reason: "restart" });
-        auth.session.state = "running";
-        auth.session.lastStartedAt = nowIso(clock);
-        auth.session.updatedAt = nowIso(clock);
-        writeSessionEvent(state, clock, auth.session.id, "running", { reason: "restart" });
-        writeUsage(state, clock, {
-          workspaceId: auth.workspace.id,
-          kind: "runtime_minutes",
-          value: 1,
-          details: { sessionId, restart: true }
+        return applySessionTransition({
+          state,
+          clock,
+          auth,
+          action: "restart"
         });
-        writeAudit(state, clock, {
-          action: "session.restarted",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "session",
-          targetId: auth.session.id
-        });
-        return { session: formatSession(state, auth.session) };
       });
     },
 
     async deleteSession(token, sessionId) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        auth.session.state = "deleted";
-        auth.session.updatedAt = nowIso(clock);
-        writeSessionEvent(state, clock, auth.session.id, "deleted");
-        writeAudit(state, clock, {
-          action: "session.deleted",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "session",
-          targetId: auth.session.id
+        return applySessionTransition({
+          state,
+          clock,
+          auth,
+          action: "delete"
         });
-        return { session: formatSession(state, auth.session) };
+      });
+    },
+
+    async transitionSessionWithRuntime(token, sessionId, action, applyRuntime) {
+      return transact(SESSION_SCOPE, async (state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        ensure(typeof applyRuntime === "function", "Runtime transition handler is required");
+        const runtime = await applyRuntime(formatSession(state, auth.session));
+        return applySessionTransition({
+          state,
+          clock,
+          auth,
+          action,
+          runtime
+        });
       });
     },
 

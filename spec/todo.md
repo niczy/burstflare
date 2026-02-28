@@ -10,7 +10,7 @@ This file lists the remaining work required to close the gap between the current
   - enable live Turnstile enforcement by configuring `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in the production deployment
 - Implement real asynchronous build execution:
   - real image build metadata
-- Finish moving the session lifecycle under a real Durable Object state machine and per-session locking.
+- Finish the remaining distributed locking and reconciliation work around the Durable Object-backed session state machine.
 - Replace the current container-backed shell bridge with a standards-compliant `sshd`-backed SSH proxy.
 - Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
 - Implement real container-side snapshot upload, restore, and persisted-path behavior for running containers.
@@ -147,16 +147,17 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 10: Session API And Durable Object State Machine
 
-- Status: partially complete
+- Status: mostly complete
 - Done:
   - session APIs
   - lifecycle transitions
   - start/stop-style control paths
   - lifecycle routes now coordinate through the session container Durable Object
   - per-session runtime coordinator state is now persisted and exposed on session detail and session list responses
+  - lifecycle routes now use the Durable Object runtime transition result as the source of truth before persisting the session transition
+  - session records now persist the last-known runtime snapshot fields (`runtimeStatus`, `runtimeState`, `runtimeDesiredState`, `runtimeUpdatedAt`)
 - Remaining:
-  - move service-side state transitions under the Durable Object lock for full per-session serialization
-  - stronger concurrent-request protection across state persistence and runtime coordination
+  - stronger distributed concurrent-request protection across state persistence and runtime coordination
   - persistent session reconciliation behavior
 
 ### PR 11: Cloudflare Container Runtime Bootstrap
@@ -275,7 +276,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Finish PR 10, PR 12, and PR 14 first. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
+1. Finish PR 12 and PR 14 first, then close the remaining PR 10 concurrency/reconciliation gap. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
 2. Then finish the remaining PR 08 builder work plus PR 15, PR 16, and PR 17 so the platform has real execution, enforcement, cleanup, and security controls.
 3. Enable live Turnstile keys for PR 03 and finish PR 18 last, once the runtime and platform guarantees are stable.
 

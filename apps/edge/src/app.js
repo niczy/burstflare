@@ -759,6 +759,26 @@ export function createApp(options = {}) {
     return getSessionRuntimeState(session.id);
   }
 
+  async function transitionSession(token, sessionId, action) {
+    if (!hasContainerBinding()) {
+      if (action === "start") {
+        return service.startSession(token, sessionId);
+      }
+      if (action === "stop") {
+        return service.stopSession(token, sessionId);
+      }
+      if (action === "restart") {
+        return service.restartSession(token, sessionId);
+      }
+      if (action === "delete") {
+        return service.deleteSession(token, sessionId);
+      }
+      throw new Error(`Unsupported session action: ${action}`);
+    }
+
+    return service.transitionSessionWithRuntime(token, sessionId, action, (session) => syncSessionRuntime(action, session));
+  }
+
   async function attachRuntimeToSession(session) {
     const runtime = await getSessionRuntimeState(session.id);
     return runtime ? { ...session, runtime } : session;
@@ -1663,9 +1683,7 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        const result = await service.startSession(token, sessionId);
-        const runtime = await syncSessionRuntime("start", result.session);
-        return toJson(runtime ? { ...result, runtime } : result);
+        return toJson(await transitionSession(token, sessionId, "start"));
       })
     },
     {
@@ -1676,9 +1694,7 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        const result = await service.stopSession(token, sessionId);
-        const runtime = await syncSessionRuntime("stop", result.session);
-        return toJson(runtime ? { ...result, runtime } : result);
+        return toJson(await transitionSession(token, sessionId, "stop"));
       })
     },
     {
@@ -1689,9 +1705,7 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        const result = await service.restartSession(token, sessionId);
-        const runtime = await syncSessionRuntime("restart", result.session);
-        return toJson(runtime ? { ...result, runtime } : result);
+        return toJson(await transitionSession(token, sessionId, "restart"));
       })
     },
     {
@@ -1702,9 +1716,7 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        const result = await service.deleteSession(token, sessionId);
-        const runtime = await syncSessionRuntime("delete", result.session);
-        return toJson(runtime ? { ...result, runtime } : result);
+        return toJson(await transitionSession(token, sessionId, "delete"));
       })
     },
     {

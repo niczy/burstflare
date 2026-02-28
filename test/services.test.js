@@ -541,3 +541,41 @@ test("service records workflow dispatch metadata and workflow-driven build compl
   assert.equal(processed.build.workflowStatus, "succeeded");
   assert.equal(processed.build.dispatchMode, "workflow");
 });
+
+test("service can persist runtime state from a durable-object-driven session transition", async () => {
+  const service = createBurstFlareService();
+  const owner = await service.registerUser({
+    email: "runtime-sync@example.com",
+    name: "Runtime Sync"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "runtime-sync",
+    description: "Runtime sync template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/runtime-sync:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+  const created = await service.createSession(owner.token, {
+    name: "runtime-sync-session",
+    templateId: template.template.id
+  });
+
+  const started = await service.transitionSessionWithRuntime(owner.token, created.session.id, "start", async () => ({
+    desiredState: "running",
+    status: "running",
+    runtimeState: "healthy"
+  }));
+  assert.equal(started.session.state, "running");
+  assert.equal(started.runtime.status, "running");
+  assert.equal(started.session.runtimeStatus, "running");
+  assert.equal(started.session.runtimeState, "healthy");
+
+  const detail = await service.getSession(owner.token, created.session.id);
+  assert.equal(detail.session.runtimeStatus, "running");
+  assert.equal(detail.session.runtimeState, "healthy");
+});
