@@ -222,6 +222,38 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["template", "archive", templateId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["up", "blocked-shell", "--template", templateId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 1);
+    assert.match(stderr.data, /Template is archived/);
+
+    stdout.data = "";
+    stderr.data = "";
+
+    code = await runCli(["template", "restore", templateId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
     code = await runCli(["up", "my-shell", "--template", templateId, "--url", "http://local"], {
       fetchImpl,
       stdout,

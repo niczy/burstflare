@@ -244,3 +244,19 @@ This file records what has already been implemented in the repository and what h
 - Verified the live Worker returns:
   - `400` for invalid manifest features
   - `413` for oversized template-bundle uploads
+
+## 25. Template Archive And Restore Controls
+
+- Added template archive support in the service layer.
+- Added template restore support in the service layer.
+- Blocked new session creation from archived templates.
+- Added authenticated archive and restore API routes.
+- Added CLI support for:
+  - `template archive <templateId>`
+  - `template restore <templateId>`
+- Added web UI controls to archive and restore templates.
+- Verified the live Worker can:
+  - archive a promoted template
+  - return `409` with `Template is archived` when session creation is attempted
+  - restore the template
+  - allow session creation again after restore

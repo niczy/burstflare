@@ -135,6 +135,8 @@ function helpText() {
     "burstflare template create <name> [--description ...]",
     "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...]",
     "burstflare template promote <templateId> <versionId>",
+    "burstflare template archive <templateId>",
+    "burstflare template restore <templateId>",
     "burstflare template list",
     "burstflare build list",
     "burstflare build log <buildId>",
@@ -552,6 +554,32 @@ export async function runCli(argv, dependencies = {}) {
             method: "POST",
             headers: headers(undefined),
             body: JSON.stringify({ versionId })
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "archive") {
+        const templateId = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/templates/${templateId}/archive`,
+          {
+            method: "POST",
+            headers: headers(undefined)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "restore") {
+        const templateId = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/templates/${templateId}/restore`,
+          {
+            method: "POST",
+            headers: headers(undefined)
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

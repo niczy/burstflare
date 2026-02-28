@@ -211,12 +211,32 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(promoted.response.status, 200);
 
+  const archived = await requestJson(app, `/api/templates/${templateId}/archive`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(archived.response.status, 200);
+
   const session = await requestJson(app, "/api/sessions", {
     method: "POST",
     headers: switchedHeaders,
     body: JSON.stringify({ name: "feature-x", templateId })
   });
-  const sessionId = session.data.session.id;
+  assert.equal(session.response.status, 409);
+
+  const restoredTemplate = await requestJson(app, `/api/templates/${templateId}/restore`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(restoredTemplate.response.status, 200);
+
+  const restoredSession = await requestJson(app, "/api/sessions", {
+    method: "POST",
+    headers: switchedHeaders,
+    body: JSON.stringify({ name: "feature-x", templateId })
+  });
+  assert.equal(restoredSession.response.status, 200);
+  const sessionId = restoredSession.data.session.id;
 
   const started = await requestJson(app, `/api/sessions/${sessionId}/start`, {
     method: "POST",

@@ -96,7 +96,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 07: Template Catalog CRUD And R2 Storage
 
-- Status: partially complete
+- Status: mostly complete
 - Done:
   - template records
   - template version records
@@ -105,6 +105,8 @@ This file lists the remaining work required to close the gap between the current
   - authenticated bundle download endpoint
   - R2-backed template-bundle storage
   - manifest validation and upload size limits
+  - template archive and restore controls
+  - archived templates block new session creation
 - Remaining:
   - signed R2 upload URLs
   - admin-grade template management UX

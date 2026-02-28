@@ -166,6 +166,18 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const promoted = await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
   assert.equal(promoted.activeVersion.id, version.templateVersion.id);
   assert.ok(promoted.release.id);
+  const archived = await service.archiveTemplate(owner.token, template.template.id);
+  assert.ok(archived.template.archivedAt);
+  await assert.rejects(
+    () =>
+      service.createSession(switched.token, {
+        name: "blocked",
+        templateId: template.template.id
+      }),
+    /Template is archived/
+  );
+  const restoredTemplate = await service.restoreTemplate(owner.token, template.template.id);
+  assert.equal(restoredTemplate.template.archivedAt, null);
 
   const session = await service.createSession(switched.token, {
     name: "demo",

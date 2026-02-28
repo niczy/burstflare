@@ -409,9 +409,26 @@ function renderTemplates(templates) {
   byId("templates").innerHTML = templates.map((template) => {
     const active = template.activeVersion ? template.activeVersion.version : "none";
     const versions = template.versions.map((entry) => entry.version + ' (' + entry.status + ')').join(", ") || "no versions";
+    const status = template.archivedAt ? 'archived' : 'active';
+    const action = template.archivedAt
+      ? '<button class="secondary" data-template-restore="' + template.id + '">Restore</button>'
+      : '<button class="secondary" data-template-archive="' + template.id + '">Archive</button>';
     return '<div class="item"><strong>' + template.name + '</strong><br><span class="muted">' + template.id +
-      '</span><br><span class="muted">active: ' + active + '</span><br><span class="muted">versions: ' + versions + '</span></div>';
+      '</span><br><span class="muted">status: ' + status + '</span><br><span class="muted">active: ' + active +
+      '</span><br><span class="muted">versions: ' + versions + '</span><div class="row" style="margin-top:8px">' + action + '</div></div>';
   }).join("");
+
+  document.querySelectorAll("[data-template-archive]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => api('/api/templates/' + button.dataset.templateArchive + '/archive', { method: 'POST' }));
+    });
+  });
+
+  document.querySelectorAll("[data-template-restore]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => api('/api/templates/' + button.dataset.templateRestore + '/restore', { method: 'POST' }));
+    });
+  });
 }
 
 function renderSessions(sessions) {

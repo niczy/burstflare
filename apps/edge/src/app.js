@@ -729,6 +729,28 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "POST",
+      pattern: "/api/templates/:templateId/archive",
+      handler: withErrorHandling(async (request, { templateId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.archiveTemplate(token, templateId));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/templates/:templateId/restore",
+      handler: withErrorHandling(async (request, { templateId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.restoreTemplate(token, templateId));
+      })
+    },
+    {
       method: "GET",
       pattern: "/api/template-builds",
       handler: withErrorHandling(async (request) => {

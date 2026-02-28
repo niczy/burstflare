@@ -287,7 +287,7 @@ function summarizeUsage(state, workspaceId) {
 
 function getActiveVersion(state, templateId) {
   const template = state.templates.find((entry) => entry.id === templateId);
-  if (!template || !template.activeVersionId) {
+  if (!template || template.archivedAt || !template.activeVersionId) {
     return null;
   }
   return state.templateVersions.find((entry) => entry.id === template.activeVersionId) || null;
@@ -873,6 +873,8 @@ export function createBurstFlareService(options = {}) {
           name,
           description,
           activeVersionId: null,
+          archivedAt: null,
+          archivedByUserId: null,
           createdByUserId: auth.user.id,
           createdAt: nowIso(clock)
         };
@@ -886,6 +888,46 @@ export function createBurstFlareService(options = {}) {
           details: { name }
         });
         return { template: formatTemplate(state, template) };
+      });
+    },
+
+    async archiveTemplate(token, templateId) {
+      return store.transact((state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
+        ensure(!auth.template.archivedAt, "Template already archived", 409);
+        auth.template.archivedAt = nowIso(clock);
+        auth.template.archivedByUserId = auth.user.id;
+        writeAudit(state, clock, {
+          action: "template.archived",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "template",
+          targetId: auth.template.id
+        });
+        return {
+          template: formatTemplate(state, auth.template)
+        };
+      });
+    },
+
+    async restoreTemplate(token, templateId) {
+      return store.transact((state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
+        ensure(auth.template.archivedAt, "Template is not archived", 409);
+        auth.template.archivedAt = null;
+        auth.template.archivedByUserId = null;
+        writeAudit(state, clock, {
+          action: "template.restored",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "template",
+          targetId: auth.template.id
+        });
+        return {
+          template: formatTemplate(state, auth.template)
+        };
       });
     },
 
@@ -1237,6 +1279,7 @@ export function createBurstFlareService(options = {}) {
         ensure(name, "Session name is required");
         const template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
         ensure(template, "Template not found", 404);
+        ensure(!template.archivedAt, "Template is archived", 409);
         ensure(getActiveVersion(state, template.id), "Template has no promoted version", 409);
         ensure(
           !state.sessions.some(
