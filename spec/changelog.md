@@ -632,3 +632,24 @@ This file records what has already been implemented in the repository and what h
   - the `Last refresh: never` placeholder before initial sync
   - browser bundle wiring for `setLastRefresh(...)`
   - explicit empty-state text for no-session scenarios
+
+## 51. Snapshot Restore Controls And Safety Checks
+
+- Added `POST /api/sessions/:sessionId/snapshots/:snapshotId/restore`.
+- Snapshot restore now rejects:
+  - missing snapshot artifacts
+  - deleted sessions
+  - session states that are not restore-safe
+- Restoring a snapshot now records:
+  - `lastRestoredSnapshotId`
+  - `lastRestoredAt`
+  - a `restored` session event
+  - a `snapshot.restored` audit entry
+- Added CLI support for `burstflare snapshot restore <sessionId> <snapshotId>`.
+- Added a browser `Restore` action in the snapshot list and surfaced the last restored snapshot ID on session cards.
+- Expanded service, Worker, and CLI test coverage for the restore flow.
+- Verified the live Worker can:
+  - create a snapshot
+  - upload snapshot content
+  - restore that snapshot
+  - return the restored snapshot ID on the updated session record

@@ -111,6 +111,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /parsePersistedPaths/);
   assert.match(appScript, /refreshSnapshots/);
   assert.match(appScript, /data-snapshot-download/);
+  assert.match(appScript, /data-snapshot-restore/);
   assert.match(appScript, /logout-all/);
   assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
   assert.doesNotMatch(appScript, /state\.token/);
@@ -563,6 +564,13 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   );
   assert.equal(snapshotDownload.status, 200);
   assert.equal(await snapshotDownload.text(), "snapshot payload");
+
+  const snapshotRestore = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/restore`, {
+    method: "POST",
+    headers: switchedHeaders
+  });
+  assert.equal(snapshotRestore.response.status, 200);
+  assert.equal(snapshotRestore.data.session.lastRestoredSnapshotId, snapshot.data.snapshot.id);
 
   const snapshotDelete = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}`, {
     method: "DELETE",

@@ -2290,6 +2290,38 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async restoreSnapshot(token, sessionId, snapshotId) {
+      return store.transact(async (state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        ensure(auth.session.state !== "deleted", "Session deleted", 409);
+        ensure(["created", "running", "sleeping"].includes(auth.session.state), "Session cannot restore snapshots", 409);
+        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
+        ensure(snapshot, "Snapshot not found", 404);
+        ensure(snapshot.uploadedAt, "Snapshot content not uploaded", 404);
+
+        auth.session.lastRestoredSnapshotId = snapshot.id;
+        auth.session.lastRestoredAt = nowIso(clock);
+        auth.session.updatedAt = nowIso(clock);
+        writeSessionEvent(state, clock, auth.session.id, "restored", {
+          snapshotId: snapshot.id
+        });
+        writeAudit(state, clock, {
+          action: "snapshot.restored",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "snapshot",
+          targetId: snapshot.id,
+          details: {
+            sessionId: auth.session.id
+          }
+        });
+        return {
+          session: formatSession(state, auth.session),
+          snapshot
+        };
+      });
+    },
+
     async deleteSnapshot(token, sessionId, snapshotId) {
       return store.transact(async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);

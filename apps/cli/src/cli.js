@@ -172,6 +172,7 @@ function helpText() {
     "burstflare delete <sessionId>",
     "burstflare snapshot save <sessionId> [--label manual] [--file snapshot.tgz]",
     "burstflare snapshot list <sessionId>",
+    "burstflare snapshot restore <sessionId> <snapshotId>",
     "burstflare snapshot delete <sessionId> <snapshotId>",
     "burstflare snapshot get <sessionId> <snapshotId> [--output restored.bin]",
     "burstflare usage",
@@ -988,6 +989,20 @@ export async function runCli(argv, dependencies = {}) {
           {
             method: "DELETE",
             headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "restore") {
+        const sessionId = rest[0];
+        const snapshotId = rest[1];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/sessions/${sessionId}/snapshots/${snapshotId}/restore`,
+          {
+            method: "POST",
+            headers: headers(undefined)
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

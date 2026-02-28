@@ -17,7 +17,7 @@ This file lists the remaining work required to close the gap between the current
 - Replace the current session lifecycle shim with a real Durable Object state machine and per-session locking.
 - Replace the current SSH WebSocket bridge stub with a real container-backed SSH proxy.
 - Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
-- Implement real snapshot upload, restore, and persisted-path behavior for running containers.
+- Implement real container-side snapshot upload, restore, and persisted-path behavior for running containers.
 
 ## 2. PR Plan Status
 
@@ -198,9 +198,11 @@ This file lists the remaining work required to close the gap between the current
   - CLI save and restore path for snapshot artifacts
   - richer manual snapshot save/list/view/delete controls in the web UI
   - persisted-path config is now exposed in CLI and web template version inputs
+  - explicit snapshot restore route with restore-state safety checks
+  - browser restore control and restored-snapshot visibility in the session UI
 - Remaining:
   - container-side automatic snapshot upload/download
-  - restore safety checks
+  - container-side restore into the runtime filesystem
 
 ### PR 15: Usage Metering, Quotas, And Plan Enforcement
 

@@ -1223,6 +1223,17 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "POST",
+      pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/restore",
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.restoreSnapshot(token, sessionId, snapshotId));
+      })
+    },
+    {
       method: "DELETE",
       pattern: "/api/sessions/:sessionId/snapshots/:snapshotId",
       handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {

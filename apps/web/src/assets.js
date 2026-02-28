@@ -672,8 +672,11 @@ function renderTemplates(templates) {
 
 function renderSessions(sessions) {
   const items = sessions.map((session) => {
+    const restoreMeta = session.lastRestoredSnapshotId
+      ? '<br><span class="muted">restored: ' + session.lastRestoredSnapshotId + '</span>'
+      : '';
     return '<div class="item"><strong>' + session.name + '</strong><br><span class="muted">' + session.id +
-      '</span><br><span class="muted">' + session.templateName + ' / ' + session.state + '</span><div class="row" style="margin-top:8px">' +
+      '</span><br><span class="muted">' + session.templateName + ' / ' + session.state + '</span>' + restoreMeta + '<div class="row" style="margin-top:8px">' +
       '<button data-start="' + session.id + '">Start</button>' +
       '<button class="secondary" data-stop="' + session.id + '">Stop</button>' +
       '<button class="secondary" data-restart="' + session.id + '">Restart</button>' +
@@ -690,6 +693,7 @@ function renderSnapshots(snapshots) {
     return '<div class="item"><strong>' + snapshot.label + '</strong><br><span class="muted">' + snapshot.id +
       '</span><br><span class="muted">' + (snapshot.bytes || 0) + ' bytes</span><div class="row" style="margin-top:8px">' +
       '<button class="secondary" data-snapshot-download="' + snapshot.id + '">View</button>' +
+      '<button class="secondary" data-snapshot-restore="' + snapshot.id + '">Restore</button>' +
       '<button class="secondary" data-snapshot-delete="' + snapshot.id + '">Delete</button></div></div>';
   });
   byId("snapshotList").innerHTML = items.length ? items.join("") : '<div class="item muted">No snapshots for this session.</div>';
@@ -711,6 +715,17 @@ function renderSnapshots(snapshots) {
         const sessionId = byId("snapshotSession").value;
         await api('/api/sessions/' + sessionId + '/snapshots/' + button.dataset.snapshotDelete, {
           method: 'DELETE'
+        });
+      });
+    });
+  });
+
+  document.querySelectorAll("[data-snapshot-restore]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => {
+        const sessionId = byId("snapshotSession").value;
+        await api('/api/sessions/' + sessionId + '/snapshots/' + button.dataset.snapshotRestore + '/restore', {
+          method: 'POST'
         });
       });
     });

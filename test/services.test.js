@@ -334,6 +334,13 @@ test("service covers invites, queued builds, releases, session events, usage, an
     label: "manual-save"
   });
   assert.equal(snapshot.snapshot.label, "manual-save");
+  const emptySnapshot = await service.createSnapshot(switched.token, session.session.id, {
+    label: "empty"
+  });
+  await assert.rejects(
+    () => service.restoreSnapshot(switched.token, session.session.id, emptySnapshot.snapshot.id),
+    /Snapshot content not uploaded/
+  );
   const snapshotBody = "workspace-state";
   const snapshotGrant = await service.createSnapshotUploadGrant(switched.token, session.session.id, snapshot.snapshot.id, {
     contentType: "text/plain",
@@ -347,6 +354,8 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(uploadedSnapshot.snapshot.bytes, 15);
   const downloadedSnapshot = await service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id);
   assert.equal(new TextDecoder().decode(downloadedSnapshot.body), "workspace-state");
+  const restoredSnapshot = await service.restoreSnapshot(switched.token, session.session.id, snapshot.snapshot.id);
+  assert.equal(restoredSnapshot.session.lastRestoredSnapshotId, snapshot.snapshot.id);
   const deletedSnapshot = await service.deleteSnapshot(switched.token, session.session.id, snapshot.snapshot.id);
   assert.equal(deletedSnapshot.ok, true);
   await assert.rejects(() => service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id), /Snapshot not found/);
@@ -362,7 +371,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const cleanup = await service.reconcile(owner.token);
   assert.equal(cleanup.purgedDeletedSessions, 1);
   assert.equal(cleanup.purgedStaleSleepingSessions, 1);
-  assert.equal(cleanup.purgedSnapshots, 1);
+  assert.equal(cleanup.purgedSnapshots, 2);
   await assert.rejects(() => service.getSession(switched.token, session.session.id), /Session not found/);
   await assert.rejects(() => service.getSession(switched.token, staleSession.session.id), /Session not found/);
 
@@ -390,7 +399,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const usage = await service.getUsage(ownerSecondLogin.token);
   assert.deepEqual(usage.usage, {
     runtimeMinutes: 3,
-    snapshots: 2,
+    snapshots: 3,
     templateBuilds: 4
   });
 

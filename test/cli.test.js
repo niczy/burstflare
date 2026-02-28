@@ -495,6 +495,18 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["snapshot", "restore", sessionId, snapshotId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const restoreSnapshotOutput = JSON.parse(stdout.data.trim());
+    assert.equal(restoreSnapshotOutput.session.lastRestoredSnapshotId, snapshotId);
+
+    stdout.data = "";
+
     code = await runCli(["snapshot", "delete", sessionId, snapshotId, "--url", "http://local"], {
       fetchImpl,
       stdout,
