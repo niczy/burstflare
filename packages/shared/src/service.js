@@ -258,12 +258,27 @@ function writeSessionEvent(state, clock, sessionId, stateName, details = {}) {
   });
 }
 
-function writeBindingRelease(state, clock, workspaceId, templateId, templateVersionId) {
+function createBindingManifest(template, templateVersion, build) {
+  return {
+    image: templateVersion?.manifest?.image || null,
+    features: templateVersion?.manifest?.features || [],
+    persistedPaths: templateVersion?.manifest?.persistedPaths || [],
+    bundleUploaded: Boolean(templateVersion?.bundleUploadedAt),
+    artifactKey: build?.artifactKey || null,
+    artifactSource: build?.artifactSource || null,
+    artifactDigest: build?.artifactDigest || null,
+    artifactBuiltAt: build?.artifactBuiltAt || null,
+    templateName: template?.name || "unknown"
+  };
+}
+
+function writeBindingRelease(state, clock, workspaceId, templateId, templateVersionId, binding = null) {
   const release = {
     id: createId("rel"),
     workspaceId,
     templateId,
     templateVersionId,
+    binding,
     createdAt: nowIso(clock)
   };
   state.bindingReleases.push(release);
@@ -2504,8 +2519,16 @@ export function createBurstFlareService(options = {}) {
         const version = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
         ensure(version, "Template version not found", 404);
         ensure(version.status === "ready", "Template version is not build-ready", 409);
+        const build = state.templateBuilds.find((entry) => entry.templateVersionId === version.id) || null;
         auth.template.activeVersionId = version.id;
-        const release = writeBindingRelease(state, clock, auth.workspace.id, auth.template.id, version.id);
+        const release = writeBindingRelease(
+          state,
+          clock,
+          auth.workspace.id,
+          auth.template.id,
+          version.id,
+          createBindingManifest(auth.template, version, build)
+        );
         writeAudit(state, clock, {
           action: "template.promoted",
           actorUserId: auth.user.id,
@@ -2530,8 +2553,10 @@ export function createBurstFlareService(options = {}) {
           .map((entry) => {
             const version = state.templateVersions.find((candidate) => candidate.id === entry.templateVersionId);
             const template = state.templates.find((candidate) => candidate.id === entry.templateId);
+            const build = version ? state.templateBuilds.find((candidate) => candidate.templateVersionId === version.id) : null;
             return {
               ...entry,
+              binding: entry.binding || createBindingManifest(template, version, build),
               templateName: template?.name || "unknown",
               version: version?.version || "unknown"
             };

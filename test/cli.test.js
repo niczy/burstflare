@@ -389,6 +389,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       configPath
     });
     assert.equal(code, 0);
+    const promoteOutput = JSON.parse(stdout.data.trim());
+    assert.equal(promoteOutput.release.binding.artifactSource, "bundle");
 
     stdout.data = "";
 

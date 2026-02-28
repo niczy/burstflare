@@ -342,6 +342,9 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const promoted = await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
   assert.equal(promoted.activeVersion.id, version.templateVersion.id);
   assert.ok(promoted.release.id);
+  assert.equal(promoted.release.binding.templateName, "node-dev");
+  assert.equal(promoted.release.binding.artifactSource, "bundle");
+  assert.equal(promoted.release.binding.artifactDigest, parsedBuildArtifact.sourceSha256);
   const archived = await service.archiveTemplate(owner.token, template.template.id);
   assert.ok(archived.template.archivedAt);
   await assert.rejects(

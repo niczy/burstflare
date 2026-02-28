@@ -1013,3 +1013,23 @@ This file records what has already been implemented in the repository and what h
     - `sourceBytes`
     - `sourceSha256`
     - `lineCount`
+
+## 68. Artifact-Backed Release Binding Manifests
+
+- Template promotion now stores a concrete binding manifest on each release record.
+- The release binding manifest is derived from the promoted template version and its build output, including:
+  - image
+  - features
+  - persisted paths
+  - bundle-upload presence
+  - artifact source
+  - artifact digest
+  - artifact build timestamp
+  - template name
+- `GET /api/releases` now returns the persisted release binding payload and backfills it for older release records when needed.
+- This makes template promotion the canonical source for the control-plane runtime binding description instead of only a tuple of ids.
+- Added test coverage across the service, Worker, and CLI flows to prove promoted releases carry the artifact-backed binding manifest.
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - the live promote response now returns `release.binding`
+  - the live releases list returns the same binding payload
+  - the live binding payload includes `artifactSource`, `artifactDigest`, and `persistedPaths`

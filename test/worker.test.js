@@ -590,6 +590,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     body: JSON.stringify({ versionId: version.data.templateVersion.id })
   });
   assert.equal(promoted.response.status, 200);
+  assert.equal(promoted.data.release.binding.artifactSource, "bundle");
+  assert.equal(promoted.data.release.binding.templateName, "python-dev");
 
   const archived = await requestJson(app, `/api/templates/${templateId}/archive`, {
     method: "POST",
