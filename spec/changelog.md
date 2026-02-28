@@ -1085,3 +1085,15 @@ This file records what has already been implemented in the repository and what h
     - `session.state = sleeping`
     - `session.runtime.status = sleeping`
     - `session.runtimeStatus = sleeping`
+
+## 72. Live Turnstile Production Enablement
+
+- Added the real production Turnstile site key and secret to the local Cloudflare deploy configuration.
+- Redeployed the live Worker so the public web shell now injects the Turnstile script and a non-empty site key.
+- Verified in the live Cloudflare deployment that:
+  - `/api/health` now reports `turnstileEnabled = true`
+  - the root HTML now includes the Turnstile script loader
+  - the browser bundle now contains a non-empty injected Turnstile site key
+  - `POST /api/auth/register` without a Turnstile token now returns `400` with `Turnstile token is required`
+  - `POST /api/auth/register` with a bogus token now returns `400` with `invalid-input-response`
+- This closes the remaining PR 03 gap; Turnstile is now active in the production deployment rather than only wired in code.

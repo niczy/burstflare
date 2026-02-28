@@ -6,8 +6,6 @@ This file lists the remaining work required to close the gap between the current
 
 ## 1. Highest-Priority Gaps
 
-- Implement production-grade browser auth:
-  - enable live Turnstile enforcement by configuring `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in the production deployment
 - Implement real asynchronous build execution:
   - real image build metadata
 - Finish the remaining distributed locking and reconciliation work around the Durable Object-backed session state machine.
@@ -40,7 +38,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 03: Web Auth Foundations
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - basic registration and token-based auth flows exist
   - refresh-token rotation
@@ -58,8 +56,7 @@ This file lists the remaining work required to close the gap between the current
   - browser passkey controls now exist for register, login, and delete
   - browser auth state now surfaces passkeys and actionable pending device approvals
   - server-side passkey assertion validation now verifies challenge, origin, and signatures
-- Remaining:
-  - Turnstile production enablement with configured `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in the live deployment
+  - live Turnstile enforcement is now enabled in the production deployment with configured keys and server-side verification
 
 ### PR 04: Workspace And Membership Model
 
@@ -284,7 +281,7 @@ This file lists the remaining work required to close the gap between the current
 
 1. Finish PR 12 and PR 14 first, then close the remaining PR 10 concurrency/reconciliation gap. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
 2. Then finish the remaining PR 08 builder work plus PR 15, PR 16, and PR 17 so the platform has real execution, enforcement, cleanup, and security controls.
-3. Enable live Turnstile keys for PR 03 and finish PR 18 last, once the runtime and platform guarantees are stable.
+3. Finish PR 18 last, once the runtime and platform guarantees are stable.
 
 ## 4. CI And Test Work Still Needed
 
