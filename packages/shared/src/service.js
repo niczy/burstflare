@@ -687,6 +687,11 @@ function buildTemplateBuildLog(build, template, templateVersion) {
     `workflow_queued_at=${build.workflowQueuedAt || ""}`,
     `workflow_started_at=${build.workflowStartedAt || ""}`,
     `workflow_finished_at=${build.workflowFinishedAt || ""}`,
+    `artifact_key=${build.artifactKey || ""}`,
+    `artifact_source=${build.artifactSource || ""}`,
+    `artifact_digest=${build.artifactDigest || ""}`,
+    `artifact_bytes=${build.artifactBytes || 0}`,
+    `artifact_built_at=${build.artifactBuiltAt || ""}`,
     `started_at=${build.startedAt || ""}`,
     `finished_at=${build.finishedAt || ""}`
   ];
@@ -711,6 +716,97 @@ async function persistBuildLog({ objects, template, templateVersion, build, log 
     build,
     log
   });
+}
+
+async function sha256Hex(value) {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", toUint8Array(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function tryDecodeText(value) {
+  try {
+    return new TextDecoder().decode(toUint8Array(value));
+  } catch (_error) {
+    return "";
+  }
+}
+
+async function loadBuildInput({ objects, template, templateVersion }) {
+  if (templateVersion.bundleUploadedAt && objects?.getTemplateVersionBundle) {
+    const bundle = await objects.getTemplateVersionBundle({
+      workspace: { id: template.workspaceId },
+      template,
+      templateVersion
+    });
+    if (bundle?.body) {
+      return {
+        source: "bundle",
+        body: bundle.body,
+        bytes: bundle.bytes ?? toUint8Array(bundle.body).byteLength,
+        contentType: bundle.contentType || templateVersion.bundleContentType || "application/octet-stream"
+      };
+    }
+  }
+
+  const fallback = JSON.stringify(
+    {
+      image: templateVersion.manifest?.image || null,
+      features: templateVersion.manifest?.features || [],
+      persistedPaths: templateVersion.manifest?.persistedPaths || []
+    },
+    null,
+    2
+  );
+  return {
+    source: "manifest",
+    body: fallback,
+    bytes: new TextEncoder().encode(fallback).byteLength,
+    contentType: "application/json; charset=utf-8"
+  };
+}
+
+async function buildTemplateArtifact({ template, templateVersion, build, input, clock }) {
+  const text = tryDecodeText(input.body);
+  const lineCount = text ? text.split(/\r?\n/).length : 0;
+  const artifact = {
+    buildId: build.id,
+    templateId: template.id,
+    templateName: template.name,
+    templateVersionId: templateVersion.id,
+    version: templateVersion.version,
+    image: templateVersion.manifest?.image || null,
+    features: templateVersion.manifest?.features || [],
+    persistedPaths: templateVersion.manifest?.persistedPaths || [],
+    source: input.source,
+    sourceContentType: input.contentType,
+    sourceBytes: input.bytes,
+    sourceSha256: await sha256Hex(input.body),
+    lineCount,
+    builtAt: nowIso(clock)
+  };
+  return {
+    json: JSON.stringify(artifact, null, 2),
+    artifact
+  };
+}
+
+async function persistBuildArtifact({ objects, build, artifactJson }) {
+  if (!objects?.putBuildArtifact) {
+    return;
+  }
+  await objects.putBuildArtifact({
+    build,
+    artifact: artifactJson
+  });
+}
+
+async function clearBuildArtifact({ objects, build }) {
+  if (!objects?.deleteBuildArtifact || !build?.artifactKey) {
+    return;
+  }
+  await objects.deleteBuildArtifact({ build });
 }
 
 function isAsyncBuildSource(source) {
@@ -794,8 +890,13 @@ async function processBuildRecord({
     build.updatedAt = nowIso(clock);
     build.lastError = failureReason;
     build.lastFailureAt = build.finishedAt;
+    build.artifactDigest = null;
+    build.artifactBytes = 0;
+    build.artifactBuiltAt = null;
+    build.artifactSource = null;
     templateVersion.status = "failed";
     templateVersion.builtAt = null;
+    await clearBuildArtifact({ objects, build });
 
     if (isAsyncBuildSource(source) && build.attempts < MAX_BUILD_ATTEMPTS) {
       build.status = "retrying";
@@ -886,6 +987,28 @@ async function processBuildRecord({
   if (source === "workflow" || build.dispatchMode === "workflow") {
     markBuildWorkflowState(build, "succeeded", clock);
   }
+
+  const buildInput = await loadBuildInput({
+    objects,
+    template,
+    templateVersion
+  });
+  const builtArtifact = await buildTemplateArtifact({
+    template,
+    templateVersion,
+    build,
+    input: buildInput,
+    clock
+  });
+  build.artifactSource = builtArtifact.artifact.source;
+  build.artifactDigest = builtArtifact.artifact.sourceSha256;
+  build.artifactBytes = new TextEncoder().encode(builtArtifact.json).byteLength;
+  build.artifactBuiltAt = builtArtifact.artifact.builtAt;
+  await persistBuildArtifact({
+    objects,
+    build,
+    artifactJson: builtArtifact.json
+  });
 
   const buildLog = buildTemplateBuildLog(build, template, templateVersion);
   await persistBuildLog({
@@ -1865,6 +1988,7 @@ export function createBurstFlareService(options = {}) {
         const templateVersionIds = new Set(templateVersions.map((entry) => entry.id));
 
         for (const templateVersion of templateVersions) {
+          const build = state.templateBuilds.find((entry) => entry.templateVersionId === templateVersion.id);
           if (objects?.deleteTemplateVersionBundle) {
             await objects.deleteTemplateVersionBundle({
               workspace: auth.workspace,
@@ -1877,6 +2001,14 @@ export function createBurstFlareService(options = {}) {
               workspace: auth.workspace,
               template: auth.template,
               templateVersion
+            });
+          }
+          if (build && objects?.deleteBuildArtifact) {
+            await objects.deleteBuildArtifact({
+              workspace: auth.workspace,
+              template: auth.template,
+              templateVersion,
+              build
             });
           }
         }
@@ -1984,6 +2116,11 @@ export function createBurstFlareService(options = {}) {
           templateVersionId: templateVersion.id,
           status: "queued",
           builderImage: "burstflare/builder:local",
+          artifactKey: `artifacts/${templateId}/${version}.json`,
+          artifactSource: null,
+          artifactDigest: null,
+          artifactBytes: 0,
+          artifactBuiltAt: null,
           dispatchMode: jobs?.buildStrategy || null,
           executionSource: null,
           lastQueuedAt: null,
@@ -2244,6 +2381,54 @@ export function createBurstFlareService(options = {}) {
           buildLogKey: templateVersion.buildLogKey,
           contentType: "text/plain; charset=utf-8",
           text: buildTemplateBuildLog(build, template, templateVersion)
+        };
+      });
+    },
+
+    async getTemplateBuildArtifact(token, buildId) {
+      return transact(TEMPLATE_SCOPE, async (state) => {
+        const auth = requireAuth(state, token, clock);
+        const build = state.templateBuilds.find((entry) => entry.id === buildId);
+        ensure(build, "Build not found", 404);
+        const templateVersion = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+        ensure(templateVersion, "Template version missing", 404);
+        const template = state.templates.find((entry) => entry.id === templateVersion.templateId);
+        ensure(template && template.workspaceId === auth.workspace.id, "Build not found", 404);
+
+        if (objects?.getBuildArtifact) {
+          const artifact = await objects.getBuildArtifact({
+            workspace: auth.workspace,
+            template,
+            templateVersion,
+            build
+          });
+          if (artifact?.text) {
+            return {
+              buildId,
+              artifactKey: build.artifactKey,
+              contentType: artifact.contentType || "application/json; charset=utf-8",
+              text: artifact.text
+            };
+          }
+        }
+
+        const fallback = JSON.stringify(
+          {
+            buildId,
+            templateId: template.id,
+            templateVersionId: templateVersion.id,
+            source: build.artifactSource || "unknown",
+            sourceSha256: build.artifactDigest || null,
+            builtAt: build.artifactBuiltAt || null
+          },
+          null,
+          2
+        );
+        return {
+          buildId,
+          artifactKey: build.artifactKey,
+          contentType: "application/json; charset=utf-8",
+          text: fallback
         };
       });
     },

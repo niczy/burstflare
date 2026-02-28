@@ -982,3 +982,34 @@ This file records what has already been implemented in the repository and what h
 - Verified locally through `npm run ci` and in the live Cloudflare deployment that:
   - restoring a snapshot on a non-running session does not apply it immediately
   - the first preview request can now boot the container and still render the restored snapshot id
+
+## 67. Real Build Artifact Generation
+
+- Added a real builder-output step to successful template builds.
+- Successful builds now:
+  - load the uploaded bundle when present
+  - fall back to manifest-derived input when no bundle is uploaded
+  - compute a SHA-256 digest of the build input
+  - derive a structured build artifact with source metadata
+  - store that artifact in `BUILD_BUCKET`
+- Build records now persist artifact metadata, including:
+  - `artifactKey`
+  - `artifactSource`
+  - `artifactDigest`
+  - `artifactBytes`
+  - `artifactBuiltAt`
+- Build logs now include the persisted artifact metadata for operator inspection.
+- Added `GET /api/template-builds/:buildId/artifact`.
+- Added CLI support for `burstflare build artifact <buildId>`.
+- Template deletion now also cleans up stored build artifacts.
+- Added local test coverage across the service, Worker, and CLI flows for:
+  - artifact generation from bundle-backed builds
+  - artifact retrieval through the API
+  - artifact retrieval through the CLI
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - a workflow-driven build now produces a stored artifact
+  - the live artifact endpoint returns:
+    - `source = bundle`
+    - `sourceBytes`
+    - `sourceSha256`
+    - `lineCount`

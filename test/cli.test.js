@@ -257,6 +257,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["build", "artifact", versionOutput.build.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const buildArtifactOutput = JSON.parse(stdout.data.trim());
+    assert.equal(buildArtifactOutput.source, "bundle");
+    assert.equal(buildArtifactOutput.templateVersionId, versionOutput.templateVersion.id);
+
+    stdout.data = "";
+
     code = await runCli(
       [
         "template",

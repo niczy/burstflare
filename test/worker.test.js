@@ -507,6 +507,15 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   );
   assert.equal(buildLog.status, 200);
   assert.match(await buildLog.text(), /bundle_uploaded=true/);
+  const buildArtifact = await app.fetch(
+    new Request(`http://example.test/api/template-builds/${version.data.build.id}/artifact`, {
+      headers: ownerHeaders
+    })
+  );
+  assert.equal(buildArtifact.status, 200);
+  const parsedBuildArtifact = JSON.parse(await buildArtifact.text());
+  assert.equal(parsedBuildArtifact.source, "bundle");
+  assert.equal(parsedBuildArtifact.templateVersionId, version.data.templateVersion.id);
 
   const failingVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
     method: "POST",

@@ -5,6 +5,7 @@ import { createBurstFlareService, createMemoryStore } from "../packages/shared/s
 function createObjectStore() {
   const bundles = new Map();
   const logs = new Map();
+  const artifacts = new Map();
   const snapshots = new Map();
   const decoder = new TextDecoder();
 
@@ -47,6 +48,23 @@ function createObjectStore() {
     async deleteBuildLog({ templateVersion }) {
       logs.delete(templateVersion.id);
     },
+    async putBuildArtifact({ build, artifact }) {
+      artifacts.set(build.id, artifact);
+    },
+    async getBuildArtifact({ build }) {
+      const text = artifacts.get(build.id);
+      if (!text) {
+        return null;
+      }
+      return {
+        text,
+        contentType: "application/json; charset=utf-8",
+        bytes: new TextEncoder().encode(text).byteLength
+      };
+    },
+    async deleteBuildArtifact({ build }) {
+      artifacts.delete(build.id);
+    },
     async putSnapshot({ snapshot, body, contentType }) {
       snapshots.set(snapshot.id, {
         body: body.slice(),
@@ -73,6 +91,9 @@ function createObjectStore() {
     },
     readBuildLogText(templateVersionId) {
       return logs.get(templateVersionId) || null;
+    },
+    readBuildArtifactText(buildId) {
+      return artifacts.get(buildId) || null;
     }
   };
 }
@@ -260,6 +281,13 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(processed.processed, 1);
   const buildLog = await service.getTemplateBuildLog(owner.token, version.build.id);
   assert.match(buildLog.text, /bundle_uploaded=true/);
+  assert.match(buildLog.text, /artifact_source=bundle/);
+  const buildArtifact = await service.getTemplateBuildArtifact(owner.token, version.build.id);
+  const parsedBuildArtifact = JSON.parse(buildArtifact.text);
+  assert.equal(parsedBuildArtifact.source, "bundle");
+  assert.equal(parsedBuildArtifact.sourceBytes, signedBundleBody.length);
+  assert.equal(parsedBuildArtifact.templateVersionId, version.templateVersion.id);
+  assert.equal(objects.readBuildArtifactText(version.build.id) !== null, true);
 
   const stuckVersion = await service.addTemplateVersion(owner.token, template.template.id, {
     version: "1.1.1",
@@ -345,6 +373,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(deletedTemplate.deletedVersions, 1);
   assert.equal(objects.readBundleText(disposableVersion.templateVersion.id), null);
   assert.equal(objects.readBuildLogText(disposableVersion.templateVersion.id), null);
+  assert.equal(objects.readBuildArtifactText(disposableVersion.build.id), null);
   const templateList = await service.listTemplates(owner.token);
   assert.equal(
     templateList.templates.some((entry) => entry.id === disposableTemplate.template.id),

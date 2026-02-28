@@ -223,6 +223,39 @@ function createObjectStore(options) {
       return { key: templateVersion.buildLogKey };
     },
 
+    async putBuildArtifact({ build, artifact }) {
+      if (!options.BUILD_BUCKET || !build.artifactKey) {
+        return null;
+      }
+      await options.BUILD_BUCKET.put(build.artifactKey, artifact, {
+        httpMetadata: { contentType: "application/json; charset=utf-8" }
+      });
+      return { key: build.artifactKey };
+    },
+
+    async getBuildArtifact({ build }) {
+      if (!options.BUILD_BUCKET || !build.artifactKey) {
+        return null;
+      }
+      const object = await options.BUILD_BUCKET.get(build.artifactKey);
+      if (!object) {
+        return null;
+      }
+      return {
+        text: await object.text(),
+        contentType: object.httpMetadata?.contentType || "application/json; charset=utf-8",
+        bytes: object.size ?? 0
+      };
+    },
+
+    async deleteBuildArtifact({ build }) {
+      if (!options.BUILD_BUCKET || !build.artifactKey) {
+        return null;
+      }
+      await options.BUILD_BUCKET.delete(build.artifactKey);
+      return { key: build.artifactKey };
+    },
+
     async putSnapshot({ snapshot, body, contentType }) {
       if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
         return null;
@@ -1707,6 +1740,22 @@ export function createApp(options = {}) {
         return new Response(log.text, {
           headers: {
             "content-type": log.contentType
+          }
+        });
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/api/template-builds/:buildId/artifact",
+      handler: withErrorHandling(async (request, { buildId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const artifact = await service.getTemplateBuildArtifact(token, buildId);
+        return new Response(artifact.text, {
+          headers: {
+            "content-type": artifact.contentType
           }
         });
       })

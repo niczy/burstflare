@@ -130,8 +130,10 @@ This file lists the remaining work required to close the gap between the current
   - workflow-backed build orchestration through a live `BUILD_WORKFLOW` binding
   - workflow metadata on build records and build logs
   - workflow-preserving reconcile redispatch for queued/retrying builds
+  - successful builds now produce and store real build artifacts with digest and source metadata
+  - build artifacts are retrievable through API and CLI
 - Remaining:
-  - real builder execution
+  - richer builder semantics beyond the current bundle/manifest artifact compiler
   - richer DLQ operator workflows beyond the current dead-letter state
 
 ### PR 09: Generated Runtime Binding Catalog And Deploy Automation

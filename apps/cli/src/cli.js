@@ -158,6 +158,7 @@ function helpText() {
     "burstflare template list",
     "burstflare build list",
     "burstflare build log <buildId>",
+    "burstflare build artifact <buildId>",
     "burstflare build process",
     "burstflare build retry <buildId>",
     "burstflare build retry-dead-lettered",
@@ -767,6 +768,18 @@ export async function runCli(argv, dependencies = {}) {
         const buildId = rest[0];
         const data = await requestTextAuthed(
           `${baseUrl}/api/template-builds/${buildId}/log`,
+          {
+            headers: headers(undefined, false)
+          }
+        );
+        print(stdout, data.trimEnd());
+        return 0;
+      }
+
+      if (subcommand === "artifact") {
+        const buildId = rest[0];
+        const data = await requestTextAuthed(
+          `${baseUrl}/api/template-builds/${buildId}/artifact`,
           {
             headers: headers(undefined, false)
           }
