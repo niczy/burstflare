@@ -790,3 +790,21 @@ This file records what has already been implemented in the repository and what h
   - complete the first post-deploy register call that triggers the normalized cutover
   - complete the public smoke flow after cutover
   - complete a traced end-to-end flow across auth, template creation, build completion, session lifecycle, snapshot creation, and admin reporting
+
+## 59. Scoped Normalized D1 Transactions
+
+- Added collection-scoped transactions to the shared store base so a store can load and save only the collections a service method actually needs.
+- Extended the Cloudflare store with:
+  - `loadCollections(...)` support for normalized D1 state
+  - scoped normalized-table reads
+  - scoped normalized-table saves that preserve unrelated tables
+- Switched the hot control-plane service paths onto scoped collection sets, including:
+  - auth and device flows
+  - workspace membership and settings flows
+  - template CRUD, versioning, build, and release flows
+  - session and snapshot flows
+  - admin reporting, export, and reconcile enqueue
+- Added store coverage that verifies a scoped normalized save updates the targeted collection without wiping unrelated normalized rows.
+- Verified the live Worker can:
+  - pass the public smoke flow after the scoped-load refactor
+  - complete a traced end-to-end flow across auth, templates, async builds, sessions, snapshots, and admin reporting with the new scoped transaction path

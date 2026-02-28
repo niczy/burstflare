@@ -208,3 +208,94 @@ test("cloudflare store projects legacy state into normalized tables on save and 
   const normalizedUsers = await db.prepare("SELECT payload_json FROM bf_users ORDER BY position ASC, row_key ASC").all();
   assert.equal(normalizedUsers.results.length, 2);
 });
+
+test("cloudflare store can load and save a scoped normalized collection without wiping unrelated tables", async () => {
+  const db = new MockD1Database();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_state_meta (key, value, updated_at)
+        VALUES (?, ?, ?)
+      `
+    )
+    .bind("schema_version", "1", "2026-02-28T00:00:00.000Z")
+    .run();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_users (row_key, position, email, created_at, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "usr_1",
+      0,
+      "alpha@example.com",
+      "2026-02-28T00:00:00.000Z",
+      JSON.stringify({
+        id: "usr_1",
+        email: "alpha@example.com",
+        name: "Alpha",
+        createdAt: "2026-02-28T00:00:00.000Z"
+      }),
+      "2026-02-28T00:00:00.000Z"
+    )
+    .run();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_templates (row_key, position, workspace_id, active_version_id, archived_at, created_by_user_id, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "tpl_1",
+      0,
+      "ws_1",
+      null,
+      null,
+      "usr_1",
+      JSON.stringify({
+        id: "tpl_1",
+        workspaceId: "ws_1",
+        name: "Keep Me",
+        description: "",
+        activeVersionId: null,
+        archivedAt: null,
+        archivedByUserId: null,
+        createdByUserId: "usr_1",
+        createdAt: "2026-02-28T00:00:00.000Z"
+      }),
+      "2026-02-28T00:00:00.000Z"
+    )
+    .run();
+
+  const store = createCloudflareStateStore(db);
+  const state = await store.loadCollections(["users"]);
+
+  assert.deepEqual(state.users.map((entry) => entry.id), ["usr_1"]);
+  assert.deepEqual(state.templates, []);
+
+  state.users[0].name = "Alpha Updated";
+  await store.save(state, {
+    users: [
+      {
+        id: "usr_1",
+        email: "alpha@example.com",
+        name: "Alpha",
+        createdAt: "2026-02-28T00:00:00.000Z"
+      }
+    ]
+  }, {
+    collections: ["users"]
+  });
+
+  const users = await db.prepare("SELECT payload_json FROM bf_users ORDER BY position ASC, row_key ASC").all();
+  const templates = await db.prepare("SELECT payload_json FROM bf_templates ORDER BY position ASC, row_key ASC").all();
+
+  assert.equal(JSON.parse(users.results[0].payload_json).name, "Alpha Updated");
+  assert.equal(JSON.parse(templates.results[0].payload_json).name, "Keep Me");
+});

@@ -672,12 +672,25 @@ export function createBurstFlareService(options = {}) {
   const clock = options.clock || (() => Date.now());
   const objects = options.objects || null;
   const jobs = options.jobs || null;
+  const AUTH_SCOPE = ["users", "workspaces", "memberships", "authTokens", "auditLogs"];
+  const AUTH_DEVICE_SCOPE = [...AUTH_SCOPE, "deviceCodes", "usageEvents"];
+  const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE, "workspaceInvites"];
+  const TEMPLATE_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
+  const SESSION_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
+  const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "workspaceInvites", "sessionEvents", "snapshots", "usageEvents"];
+
+  function transact(collections, work) {
+    if (typeof store.transactCollections === "function") {
+      return store.transactCollections(collections, work);
+    }
+    return store.transact(work);
+  }
 
   return {
     sessionCookieName: SESSION_COOKIE,
 
     async registerUser({ email, name }) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         ensure(email, "Email is required");
         let user = findUserByEmail(state, email);
         if (!user) {
@@ -734,7 +747,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async login({ email, kind = "browser", workspaceId = null }) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         ensure(email, "Email is required");
         const user = findUserByEmail(state, email);
         ensure(user, "User not found", 404);
@@ -772,7 +785,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async generateRecoveryCodes(token, { count = 8 } = {}) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         ensure(Number.isInteger(count) && count >= 4 && count <= 12, "Recovery code count must be between 4 and 12");
         const recoveryCodes = Array.from({ length: count }, () => ({
@@ -798,7 +811,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async recoverWithCode({ email, code, workspaceId = null }) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         ensure(email, "Email is required");
         ensure(code, "Recovery code is required");
         const user = findUserByEmail(state, email);
@@ -841,7 +854,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async switchWorkspace(token, workspaceId) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
         ensure(workspace, "Workspace not found", 404);
@@ -871,7 +884,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async deviceStart({ email, workspaceId = null }) {
-      return store.transact((state) => {
+      return transact(AUTH_DEVICE_SCOPE, (state) => {
         const user = findUserByEmail(state, email);
         ensure(user, "User not found", 404);
         const workspace = workspaceId
@@ -905,7 +918,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async deviceApprove(browserToken, deviceCodeValue) {
-      return store.transact((state) => {
+      return transact(AUTH_DEVICE_SCOPE, (state) => {
         const auth = requireAuth(state, browserToken, clock);
         const deviceCode = state.deviceCodes.find((entry) => entry.code === deviceCodeValue);
         ensure(deviceCode, "Device code not found", 404);
@@ -927,7 +940,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async deviceExchange(deviceCodeValue) {
-      return store.transact((state) => {
+      return transact(AUTH_DEVICE_SCOPE, (state) => {
         const deviceCode = state.deviceCodes.find((entry) => entry.code === deviceCodeValue);
         ensure(deviceCode, "Device code not found", 404);
         ensure(new Date(deviceCode.expiresAt).getTime() > nowMs(clock), "Device code expired", 400);
@@ -965,7 +978,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async refreshSession(refreshTokenValue) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const refreshRecord = getTokenRecord(state, refreshTokenValue);
         ensure(refreshRecord && new Date(refreshRecord.expiresAt).getTime() > nowMs(clock), "Unauthorized", 401);
         ensure(refreshRecord.kind === "refresh", "Refresh token required", 401);
@@ -1003,7 +1016,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async logout(token, refreshTokenValue = null) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         auth.auth.revokedAt = nowIso(clock);
         let revokedRefreshTokens = 0;
@@ -1039,7 +1052,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async logoutAllSessions(token) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const revokedAt = nowIso(clock);
         let revokedTokens = 0;
@@ -1068,7 +1081,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listAuthSessions(token) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const groups = new Map();
         for (const record of state.authTokens) {
@@ -1110,7 +1123,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async revokeAuthSession(token, authSessionId) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         ensure(authSessionId, "Auth session id is required");
         let revokedTokens = 0;
@@ -1143,7 +1156,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async authenticate(token) {
-      return store.transact((state) => {
+      return transact(AUTH_DEVICE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const pendingDeviceCodes = state.deviceCodes.filter(
           (entry) =>
@@ -1163,7 +1176,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listWorkspaces(token) {
-      return store.transact((state) => {
+      return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const workspaces = state.memberships
           .filter((entry) => entry.userId === auth.user.id)
@@ -1177,7 +1190,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listWorkspaceMembers(token) {
-      return store.transact((state) => {
+      return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const members = state.memberships
           .filter((entry) => entry.workspaceId === auth.workspace.id)
@@ -1196,7 +1209,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async createWorkspaceInvite(token, { email, role = "member" }) {
-      return store.transact((state) => {
+      return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         ensure(email, "Email is required");
         ensure(["admin", "member", "viewer"].includes(role), "Invalid role");
@@ -1229,7 +1242,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async acceptWorkspaceInvite(token, inviteCode) {
-      return store.transact((state) => {
+      return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const invite = state.workspaceInvites.find((entry) => entry.code === inviteCode);
         ensure(invite, "Invite not found", 404);
@@ -1262,7 +1275,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async updateWorkspaceMemberRole(token, userId, role) {
-      return store.transact((state) => {
+      return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         ensure(["admin", "member", "viewer"].includes(role), "Invalid role");
         const membership = getMembership(state, userId, auth.workspace.id);
@@ -1282,7 +1295,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async setWorkspacePlan(token, plan) {
-      return store.transact((state) => {
+      return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         ensure(PLANS[plan], "Invalid plan");
         auth.workspace.plan = plan;
@@ -1302,7 +1315,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async updateWorkspaceSettings(token, { name }) {
-      return store.transact((state) => {
+      return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         ensure(typeof name === "string" && name.trim(), "Workspace name is required");
         const nextName = name.trim();
@@ -1326,7 +1339,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async createTemplate(token, { name, description = "" }) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireWriteAccess(state, token, clock);
         ensure(name, "Template name is required");
         ensure(
@@ -1366,7 +1379,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async archiveTemplate(token, templateId) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
         ensure(!auth.template.archivedAt, "Template already archived", 409);
@@ -1386,7 +1399,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async restoreTemplate(token, templateId) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
         ensure(auth.template.archivedAt, "Template is not archived", 409);
@@ -1406,7 +1419,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async deleteTemplate(token, templateId) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
         ensure(
@@ -1470,7 +1483,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listTemplates(token) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const templates = state.templates
           .filter((entry) => entry.workspaceId === auth.workspace.id)
@@ -1480,7 +1493,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listTemplateBuilds(token) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const builds = state.templateBuilds
           .map((build) => {
@@ -1508,7 +1521,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async addTemplateVersion(token, templateId, { version, manifest = {}, notes = "" }) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
         ensure(version, "Version is required");
@@ -1568,7 +1581,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async uploadTemplateVersionBundle(token, templateId, versionId, { body, contentType = "application/octet-stream" } = {}) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
         const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
@@ -1593,7 +1606,7 @@ export function createBurstFlareService(options = {}) {
       versionId,
       { contentType = "application/octet-stream", bytes = null } = {}
     ) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
         const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
@@ -1639,7 +1652,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async getTemplateVersionBundle(token, templateId, versionId) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
         ensure(templateVersion, "Template version not found", 404);
@@ -1671,7 +1684,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async processTemplateBuilds(token) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const builds = [];
         for (const build of state.templateBuilds) {
@@ -1703,7 +1716,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async processTemplateBuildById(buildId, { source = "queue", actorUserId = null } = {}) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const build = state.templateBuilds.find((entry) => entry.id === buildId);
         ensure(build, "Build not found", 404);
         const templateVersion = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
@@ -1731,7 +1744,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async getTemplateBuildLog(token, buildId) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireAuth(state, token, clock);
         const build = state.templateBuilds.find((entry) => entry.id === buildId);
         ensure(build, "Build not found", 404);
@@ -1767,7 +1780,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async retryTemplateBuild(token, buildId) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const build = state.templateBuilds.find((entry) => entry.id === buildId);
         ensure(build, "Build not found", 404);
@@ -1795,7 +1808,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async retryDeadLetteredBuilds(token) {
-      return store.transact(async (state) => {
+      return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const buildIds = [];
         for (const build of state.templateBuilds) {
@@ -1835,7 +1848,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async promoteTemplateVersion(token, templateId, versionId) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
         const version = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
@@ -1860,7 +1873,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listBindingReleases(token) {
-      return store.transact((state) => {
+      return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const releases = state.bindingReleases
           .filter((entry) => entry.workspaceId === auth.workspace.id)
@@ -1878,7 +1891,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async createSession(token, { name, templateId }) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireWriteAccess(state, token, clock);
         ensure(name, "Session name is required");
         const template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
@@ -1924,7 +1937,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async startSession(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         ensure(["created", "sleeping"].includes(auth.session.state), "Session cannot be started", 409);
@@ -1957,7 +1970,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async stopSession(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         ensure(["running", "starting"].includes(auth.session.state), "Session cannot be stopped", 409);
@@ -1981,7 +1994,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async restartSession(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         if (auth.session.state === "running") {
@@ -2021,7 +2034,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async deleteSession(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         auth.session.state = "deleted";
         auth.session.updatedAt = nowIso(clock);
@@ -2038,7 +2051,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listSessions(token) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const sessions = state.sessions
           .filter((entry) => entry.workspaceId === auth.workspace.id && entry.state !== "deleted")
@@ -2048,7 +2061,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listSessionEvents(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         requireSessionAccess(state, token, sessionId, clock);
         const events = state.sessionEvents.filter((entry) => entry.sessionId === sessionId);
         return { events };
@@ -2056,7 +2069,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async getSession(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         const snapshots = state.snapshots.filter((entry) => entry.sessionId === auth.session.id);
         const events = state.sessionEvents.filter((entry) => entry.sessionId === auth.session.id);
@@ -2069,7 +2082,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async createSnapshot(token, sessionId, { label = "manual" }) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         const snapshot = {
@@ -2103,7 +2116,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async uploadSnapshotContent(token, sessionId, snapshotId, { body, contentType = "application/octet-stream" } = {}) {
-      return store.transact(async (state) => {
+      return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
@@ -2128,7 +2141,7 @@ export function createBurstFlareService(options = {}) {
       snapshotId,
       { contentType = "application/octet-stream", bytes = null } = {}
     ) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
@@ -2174,7 +2187,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async consumeUploadGrant(grantId, { body, contentType = "application/octet-stream" } = {}) {
-      return store.transact(async (state) => {
+      return transact(ADMIN_SCOPE, async (state) => {
         const grants = pruneUploadGrants(state, clock);
         const uploadGrant = grants.find((entry) => entry.id === grantId);
         ensure(uploadGrant, "Upload grant not found", 404);
@@ -2250,7 +2263,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async listSnapshots(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         requireSessionAccess(state, token, sessionId, clock);
         return {
           snapshots: state.snapshots.filter((entry) => entry.sessionId === sessionId)
@@ -2259,7 +2272,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async getSnapshotContent(token, sessionId, snapshotId) {
-      return store.transact(async (state) => {
+      return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
         ensure(snapshot, "Snapshot not found", 404);
@@ -2291,7 +2304,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async restoreSnapshot(token, sessionId, snapshotId) {
-      return store.transact(async (state) => {
+      return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         ensure(["created", "running", "sleeping"].includes(auth.session.state), "Session cannot restore snapshots", 409);
@@ -2323,7 +2336,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async deleteSnapshot(token, sessionId, snapshotId) {
-      return store.transact(async (state) => {
+      return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         const index = state.snapshots.findIndex((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
         ensure(index >= 0, "Snapshot not found", 404);
@@ -2353,7 +2366,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async issueRuntimeToken(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state === "running", "Session is not running", 409);
         const runtimeToken = createToken(state, clock, {
@@ -2377,14 +2390,14 @@ export function createBurstFlareService(options = {}) {
     },
 
     async validateRuntimeToken(token, sessionId) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         requireRuntimeToken(state, token, sessionId, clock);
         return { ok: true, sessionId };
       });
     },
 
     async getUsage(token) {
-      return store.transact((state) => {
+      return transact(SESSION_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         return {
           usage: summarizeUsage(state, auth.workspace.id),
@@ -2395,7 +2408,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async getAudit(token, { limit = 50 } = {}) {
-      return store.transact((state) => {
+      return transact(ADMIN_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const items = state.auditLogs
           .filter((entry) => entry.workspaceId === auth.workspace.id)
@@ -2406,7 +2419,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async getAdminReport(token) {
-      return store.transact((state) => {
+      return transact(ADMIN_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const reportAt = nowMs(clock);
         const workspaceBuilds = state.templateBuilds.filter((build) => {
@@ -2468,7 +2481,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async exportWorkspace(token) {
-      return store.transact((state) => {
+      return transact(ADMIN_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const workspaceId = auth.workspace.id;
         const templateIds = new Set(
@@ -2504,7 +2517,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async reconcile(token) {
-      return store.transact(async (state) => {
+      return transact(ADMIN_SCOPE, async (state) => {
         const auth = token ? requireManageWorkspace(state, token, clock) : null;
         const workspaceId = auth?.workspace.id || null;
 
@@ -2717,7 +2730,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async enqueueReconcile(token) {
-      return store.transact(async (state) => {
+      return transact(ADMIN_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         if (jobs?.enqueueReconcile) {
           await jobs.enqueueReconcile();

@@ -35,8 +35,9 @@ This file lists the remaining work required to close the gap between the current
   - the Cloudflare store now cuts over from the legacy blob to normalized D1 tables
   - normalized writes now use row-level upserts and deletes instead of full-table rewrites
   - migration coverage now includes a Cloudflare-store cutover test
+  - hot service paths now use scoped normalized-collection transactions instead of always loading every collection
 - Remaining:
-  - replace the current normalized state-projection layer with direct table-oriented D1 access instead of materializing the full state object for every request
+  - replace the current scoped normalized state-projection layer with direct table-oriented D1 access instead of cloning collection arrays through the shared state object
   - move hot ephemeral indexes fully into KV-native access patterns instead of the current projected state model
   - remove the legacy fallback row after the cutover is fully retired
   - add stronger migration test coverage and drift checks
@@ -280,7 +281,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 4. CI And Test Work Still Needed
 
-- Expand migration and persistence tests beyond the current normalized-store cutover coverage.
+- Expand migration and persistence tests beyond the current normalized-store cutover and scoped-collection coverage.
 - Add integration tests for browser auth, device auth, and session revocation.
 - Add queue-consumer and workflow tests for build processing.
 - Add Durable Object concurrency tests for session state.

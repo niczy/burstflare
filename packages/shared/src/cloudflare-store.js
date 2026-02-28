@@ -237,12 +237,20 @@ function createIndexSql(table, column) {
   return `CREATE INDEX IF NOT EXISTS idx_${table}_${column} ON ${table} (${column});`;
 }
 
+function normalizeScope(collections) {
+  if (!Array.isArray(collections) || collections.length === 0) {
+    return null;
+  }
+  return Array.from(new Set(collections.filter(Boolean)));
+}
+
 class CloudflareStateStore extends BaseStore {
   constructor(db) {
     super();
     this.db = db;
     this.schemaReady = false;
     this.lastLoadSource = "empty";
+    this.lastLoadScope = null;
   }
 
   async prepare(sql, bindings = []) {
@@ -335,10 +343,15 @@ class CloudflareStateStore extends BaseStore {
     return false;
   }
 
-  async loadNormalizedState() {
+  async loadNormalizedState(collections = null) {
+    const scope = normalizeScope(collections);
+    const scopeSet = scope ? new Set(scope) : null;
     const state = createDefaultState();
 
     for (const definition of TABLES) {
+      if (scopeSet && !scopeSet.has(definition.source)) {
+        continue;
+      }
       const result = await this.all(`SELECT payload_json FROM ${definition.table} ORDER BY position ASC, row_key ASC`);
       state[definition.source] = resultsFromQuery(result).map((row) => JSON.parse(row.payload_json));
     }
@@ -346,10 +359,15 @@ class CloudflareStateStore extends BaseStore {
     return state;
   }
 
-  async saveNormalizedState(nextState, previousState = null) {
+  async saveNormalizedState(nextState, previousState = null, options = {}) {
     const timestamp = nowIso();
+    const scope = normalizeScope(options.collections);
+    const scopeSet = scope ? new Set(scope) : null;
 
     for (const definition of TABLES) {
+      if (scopeSet && !scopeSet.has(definition.source)) {
+        continue;
+      }
       const nextRows = Array.isArray(nextState[definition.source]) ? nextState[definition.source] : [];
       const previousRows = previousState ? previousState[definition.source] : null;
       if (previousRows && serializeCollection(previousRows) === serializeCollection(nextRows)) {
@@ -418,6 +436,7 @@ class CloudflareStateStore extends BaseStore {
 
   async load() {
     await this.ensureSchema();
+    this.lastLoadScope = null;
 
     const schemaVersion = await this.readMeta(SCHEMA_VERSION_KEY);
     if (schemaVersion?.value === NORMALIZED_SCHEMA_VERSION) {
@@ -441,11 +460,44 @@ class CloudflareStateStore extends BaseStore {
     return createDefaultState();
   }
 
-  async save(nextState, previousState = null) {
+  async loadCollections(collections) {
+    await this.ensureSchema();
+    const scope = normalizeScope(collections);
+
+    const schemaVersion = await this.readMeta(SCHEMA_VERSION_KEY);
+    if (schemaVersion?.value === NORMALIZED_SCHEMA_VERSION) {
+      this.lastLoadSource = "normalized";
+      this.lastLoadScope = scope;
+      return this.loadNormalizedState(scope);
+    }
+
+    const legacy = await this.readLegacyState();
+    if (legacy?.value) {
+      this.lastLoadSource = "legacy";
+      this.lastLoadScope = null;
+      return { ...createDefaultState(), ...JSON.parse(legacy.value) };
+    }
+
+    if (await this.hasNormalizedData()) {
+      await this.writeMeta(SCHEMA_VERSION_KEY, NORMALIZED_SCHEMA_VERSION);
+      this.lastLoadSource = "normalized";
+      this.lastLoadScope = scope;
+      return this.loadNormalizedState(scope);
+    }
+
+    this.lastLoadSource = "empty";
+    this.lastLoadScope = scope;
+    return createDefaultState();
+  }
+
+  async save(nextState, previousState = null, options = {}) {
     await this.ensureSchema();
     const normalizedPreviousState = this.lastLoadSource === "normalized" || this.lastLoadSource === "empty" ? previousState : null;
-    await this.saveNormalizedState(nextState, normalizedPreviousState);
+    const collections = normalizeScope(options.collections);
+    const effectiveScope = this.lastLoadScope && collections ? this.lastLoadScope : null;
+    await this.saveNormalizedState(nextState, normalizedPreviousState, { collections: effectiveScope });
     this.lastLoadSource = "normalized";
+    this.lastLoadScope = null;
   }
 }
 
