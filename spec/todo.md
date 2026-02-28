@@ -138,7 +138,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 09: Generated Runtime Binding Catalog And Deploy Automation
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - generated Wrangler config
   - promotion-driven release records
@@ -146,8 +146,7 @@ This file lists the remaining work required to close the gap between the current
   - template promotion now emits a canonical release binding manifest derived from the promoted build output
   - release list responses now return the binding manifest payload
   - rollback automation now promotes a prior release back to the active version and records rollback provenance
-- Remaining:
-  - add staging validation flow
+  - added a release-validation flow that exercises promote and rollback against a target deployment and now runs in CI
 
 ### PR 10: Session API And Durable Object State Machine
 

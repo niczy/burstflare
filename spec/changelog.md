@@ -1048,3 +1048,24 @@ This file records what has already been implemented in the repository and what h
     - `sourceReleaseId`
 - Added `template.rolled_back` audit events with previous-version and release provenance.
 - Added service, Worker, and CLI test coverage for rollback flows.
+- Verified locally through `npm run ci`, in the local dev smoke flow, and in the live Cloudflare deployment that:
+  - a template can be promoted from version 1 to version 2
+  - a rollback can restore the active version back to version 1
+  - the emitted rollback release preserves `mode = rollback` and `sourceReleaseId`
+
+## 70. Release Validation Flow
+
+- Added `scripts/release-validate.mjs`.
+- Added `npm run release:validate`.
+- The validation flow now:
+  - provisions a fresh workspace through the public API
+  - creates two template versions
+  - waits for both builds to become ready
+  - promotes version 1
+  - promotes version 2
+  - rolls back automatically to the prior release
+  - verifies the release catalog and rollback provenance
+- Updated GitHub Actions CI to run the release-validation flow against the local dev server after the existing smoke test.
+- Verified the new validation flow both:
+  - locally against `http://127.0.0.1:8787`
+  - live against `https://burstflare.nicholas-zhaoyu.workers.dev`

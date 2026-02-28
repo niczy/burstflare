@@ -23,6 +23,7 @@
     "cf:verify:staging": "CLOUDFLARE_ENVIRONMENT=staging node scripts/cloudflare-verify.mjs",
     "dev": "node apps/edge/src/dev-server.js",
     "lint": "node scripts/lint.mjs",
+    "release:validate": "node scripts/release-validate.mjs",
     "smoke": "node scripts/smoke.mjs",
     "test": "node --test"
   },
