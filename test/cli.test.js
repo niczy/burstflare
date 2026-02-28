@@ -586,7 +586,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       configPath
     });
     assert.equal(code, 0);
-    assert.match(stdout.data, /wscat --connect/);
+    assert.match(stdout.data, /wstunnel client/);
+    assert.match(stdout.data, /ssh -p 2222 dev@127\.0\.0\.1/);
     assert.equal(stderr.data, "");
 
     stdout.data = "";

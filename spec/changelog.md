@@ -1138,3 +1138,19 @@ This file records what has already been implemented in the repository and what h
 - Verified locally through `npm run ci` and in the live Cloudflare deployment that:
   - runtime versions increment monotonically across session lifecycle transitions
   - the persisted session detail keeps the latest runtime version and operation id
+
+## 75. SSHD-Backed Runtime Tunnel
+
+- The browser terminal now uses a dedicated `/runtime/sessions/:id/terminal` shell route instead of sharing the raw SSH tunnel route.
+- Session runtime images now install and start OpenSSH `sshd` on `127.0.0.1:2222`.
+- The container `/ssh` endpoint now bridges raw TCP bytes between the websocket client and the in-container `sshd`, rather than routing through the old shell echo bridge.
+- The runtime now waits for `sshd` to become ready before reporting the container as booted.
+- SSH tunnel error paths now emit valid websocket close frames instead of invalid close payloads.
+- CLI `burstflare ssh <session>` now emits a `wstunnel` plus native `ssh` attach command:
+  - `wstunnel client -L tcp://127.0.0.1:2222:...`
+  - `ssh -p 2222 dev@127.0.0.1`
+- Added Worker and CLI test coverage for the dedicated browser terminal route and the new SSH attach command shape.
+- Verified locally through `npm run ci`, in a local Docker container, and in the live Cloudflare deployment that:
+  - the browser terminal websocket returns the container shell banner and `pwd` resolves to `/workspace`
+  - the container `/ssh` route serves a real `SSH-2.0-OpenSSH_10.2` banner
+  - the public Worker `/runtime/sessions/:id/ssh` route also serves a real `SSH-2.0-OpenSSH_10.2` banner through the runtime token-gated websocket path

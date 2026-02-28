@@ -759,7 +759,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     method: "POST",
     headers: switchedHeaders
   });
-  assert.match(ssh.data.sshCommand, /wscat --connect/);
+  assert.match(ssh.data.sshCommand, /wstunnel client/);
+  assert.match(ssh.data.sshCommand, /ssh -p 2222 dev@127\.0\.0\.1/);
 
   const runtimeInvalid = await app.fetch(
     new Request(`http://example.test/runtime/sessions/${sessionId}/ssh?token=${switchedToken}`)
@@ -1096,6 +1097,80 @@ test("worker proxies runtime SSH websocket upgrades into the session container",
   assert.equal(forwarded.started, 1);
   assert.equal(forwarded.sessionId, session.session.id);
   assert.equal(forwarded.path, "/ssh");
+  assert.equal(forwarded.requestSessionId, session.session.id);
+  assert.equal(forwarded.upgrade, "websocket");
+});
+
+test("worker proxies browser terminal websocket upgrades into the session container shell route", async () => {
+  const forwarded = {
+    started: 0,
+    sessionId: null,
+    path: null,
+    requestSessionId: null,
+    upgrade: null
+  };
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer(sessionId) {
+      forwarded.sessionId = sessionId;
+      return {
+        async startAndWaitForPorts() {
+          forwarded.started += 1;
+        },
+        async fetch(request) {
+          const url = new URL(request.url);
+          forwarded.path = url.pathname;
+          forwarded.requestSessionId = url.searchParams.get("sessionId");
+          forwarded.upgrade = request.headers.get("upgrade");
+          return new Response("proxied shell", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8"
+            }
+          });
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "terminal-proxy@example.com",
+    name: "Terminal Proxy"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "terminal-proxy",
+    description: "Template for terminal proxy"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/terminal-proxy:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const session = await service.createSession(owner.token, {
+    name: "container-terminal",
+    templateId: template.template.id
+  });
+  await service.startSession(owner.token, session.session.id);
+  const runtime = await service.issueRuntimeToken(owner.token, session.session.id);
+
+  const response = await app.fetch(
+    new Request(`http://example.test/runtime/sessions/${session.session.id}/terminal?token=${runtime.token}`, {
+      headers: {
+        upgrade: "websocket"
+      }
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "proxied shell");
+  assert.equal(forwarded.started, 1);
+  assert.equal(forwarded.sessionId, session.session.id);
+  assert.equal(forwarded.path, "/shell");
   assert.equal(forwarded.requestSessionId, session.session.id);
   assert.equal(forwarded.upgrade, "websocket");
 });

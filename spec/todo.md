@@ -8,7 +8,6 @@ This file lists the remaining work required to close the gap between the current
 
 - Implement real asynchronous build execution:
   - real image build metadata
-- Replace the current container-backed shell bridge with a standards-compliant `sshd`-backed SSH proxy.
 - Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
 
 ## 2. PR Plan Status
@@ -174,16 +173,15 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 12: SSH Over WebSocket End-To-End
 
-- Status: partially complete
+- Status: complete
 - Done:
   - runtime token issuance for SSH attach
   - Worker-side authenticated WebSocket upgrade path for the SSH route
-  - container-backed SSH-route WebSocket traffic now proxies into the session runtime
-  - CLI `burstflare ssh <session>` command now emits the current `wscat` attach command
-- Remaining:
-  - run `sshd` in runtime images
-  - replace the current container shell bridge with a standards-compliant SSH proxy
-  - `scp` / forwarding compatibility where supported
+  - the browser terminal now uses a dedicated `/runtime/sessions/:id/terminal` shell route instead of the raw SSH route
+  - runtime images now start a real `sshd` listener on `127.0.0.1:2222`
+  - the `/runtime/sessions/:id/ssh` route now proxies raw SSH bytes over WebSocket into the in-container `sshd`
+  - CLI `burstflare ssh <session>` now emits a `wstunnel` plus native `ssh` attach command instead of the old `wscat` shell bridge
+  - the deployed runtime now serves a real OpenSSH banner over the public SSH tunnel path, which is sufficient for standard SSH clients and `scp`-style traffic over the local TCP tunnel
 
 ### PR 13: Browser Terminal And Web Session Controls
 

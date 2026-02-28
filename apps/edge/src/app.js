@@ -894,6 +894,14 @@ export function createApp(options = {}) {
     return new Request(url.toString(), request);
   }
 
+  function createRuntimeTerminalRequest(request, sessionId) {
+    const url = new URL(request.url);
+    url.pathname = "/shell";
+    url.search = "";
+    url.searchParams.set("sessionId", sessionId);
+    return new Request(url.toString(), request);
+  }
+
   function createSnapshotRestoreRequest(session, snapshotId, snapshot, content) {
     const url = new URL("http://runtime.internal/snapshot/restore");
     url.searchParams.set("sessionId", session.id);
@@ -2186,6 +2194,42 @@ export function createApp(options = {}) {
           await applyRuntimeSnapshotHydration(token, detail.session);
         }
         return container.fetch(createPreviewRequest(request, sessionId));
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/runtime/sessions/:sessionId/terminal",
+      handler: withErrorHandling(async (request, { sessionId }) => {
+        const url = new URL(request.url);
+        const token = url.searchParams.get("token");
+        if (!token) {
+          return unauthorized("Runtime token missing");
+        }
+        const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
+        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+          return new Response("WebSocket upgrade required for terminal attach.", {
+            status: 426,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        }
+        const container = await startSessionContainer(sessionId);
+        if (container && typeof container.fetch === "function") {
+          if (runtimeAccess.session?.lastRestoredSnapshotId) {
+            await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
+          }
+          return container.fetch(createRuntimeTerminalRequest(request, sessionId));
+        }
+        const bridge = createRuntimeSshBridge(sessionId);
+        if (!bridge?.client) {
+          return new Response("Runtime WebSocket support is unavailable in this deployment.", {
+            status: 501,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        }
+        return new Response(null, {
+          status: 101,
+          webSocket: bridge.client
+        });
       })
     },
     {

@@ -3182,7 +3182,11 @@ export function createBurstFlareService(options = {}) {
         });
         return {
           token: runtimeToken.token,
-          sshCommand: `wscat --connect ws://localhost:8787/runtime/sessions/${auth.session.id}/ssh?token=${runtimeToken.token}`
+          sshUser: "dev",
+          sshPassword: "burstflare",
+          sshCommand:
+            `wstunnel client -L tcp://127.0.0.1:2222:ws://localhost:8787/runtime/sessions/${auth.session.id}/ssh?token=${runtimeToken.token}` +
+            ` && ssh -p 2222 dev@127.0.0.1`
         };
       });
     },

@@ -1,10 +1,15 @@
 import crypto from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const port = Number(process.env.PORT || 8080);
+const sshPort = Number(process.env.BURSTFLARE_SSH_PORT || 2222);
 const textEncoder = new TextEncoder();
 const wsMagic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const runtimeState = {
@@ -304,6 +309,36 @@ function frameBuffer(data, opcode = 0x1) {
   return Buffer.concat([Buffer.from(header), Buffer.from(payload)]);
 }
 
+function createClosePayload(code = 1000, reason = "") {
+  const reasonBytes = textEncoder.encode(String(reason || ""));
+  const payload = new Uint8Array(2 + reasonBytes.byteLength);
+  new DataView(payload.buffer).setUint16(0, code);
+  payload.set(reasonBytes, 2);
+  return payload;
+}
+
+function completeWebSocketUpgrade(req, socket) {
+  const key = req.headers["sec-websocket-key"];
+
+  if (!key) {
+    socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+    return false;
+  }
+
+  const accept = crypto.createHash("sha1").update(`${key}${wsMagic}`).digest("base64");
+  socket.write(
+    [
+      "HTTP/1.1 101 Switching Protocols",
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      `Sec-WebSocket-Accept: ${accept}`,
+      "\r\n"
+    ].join("\r\n")
+  );
+  return true;
+}
+
 function decodeFrames(buffer) {
   const frames = [];
   let offset = 0;
@@ -458,24 +493,9 @@ function runShellCommand(state, command) {
 function attachShell(req, socket) {
   const url = new URL(req.url, "http://localhost");
   const sessionId = url.searchParams.get("sessionId") || "unknown";
-  const key = req.headers["sec-websocket-key"];
-
-  if (!key) {
-    socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
-    socket.destroy();
+  if (!completeWebSocketUpgrade(req, socket)) {
     return;
   }
-
-  const accept = crypto.createHash("sha1").update(`${key}${wsMagic}`).digest("base64");
-  socket.write(
-    [
-      "HTTP/1.1 101 Switching Protocols",
-      "Upgrade: websocket",
-      "Connection: Upgrade",
-      `Sec-WebSocket-Accept: ${accept}`,
-      "\r\n"
-    ].join("\r\n")
-  );
 
   const state = {
     sessionId,
@@ -514,7 +534,8 @@ function attachShell(req, socket) {
         socket.write(frameBuffer(reply));
       }
       if (state.closed) {
-        socket.write(frameBuffer("Session closed by remote shell.", 0x8));
+        socket.write(frameBuffer("Session closed by remote shell."));
+        socket.write(frameBuffer(createClosePayload(1000, "Session closed"), 0x8));
         socket.end();
         return;
       }
@@ -526,6 +547,142 @@ function attachShell(req, socket) {
   });
 }
 
+function attachTcpProxy(req, socket, targetPort) {
+  if (!completeWebSocketUpgrade(req, socket)) {
+    return;
+  }
+
+  const upstream = net.createConnection({
+    host: "127.0.0.1",
+    port: targetPort
+  });
+  let incoming = Buffer.alloc(0);
+
+  upstream.on("data", (chunk) => {
+    socket.write(frameBuffer(chunk, 0x2));
+  });
+
+  upstream.on("end", () => {
+    socket.write(frameBuffer("", 0x8));
+    socket.end();
+  });
+
+  upstream.on("error", () => {
+    socket.write(frameBuffer(createClosePayload(1011, "SSH upstream unavailable"), 0x8));
+    socket.end();
+  });
+
+  socket.on("data", (chunk) => {
+    incoming = Buffer.concat([incoming, chunk]);
+    const decoded = decodeFrames(incoming);
+    incoming = decoded.remaining;
+
+    for (const frame of decoded.frames) {
+      if (frame.opcode === 0x8) {
+        upstream.end();
+        socket.write(frameBuffer(frame.payload, 0x8));
+        socket.end();
+        return;
+      }
+
+      if (frame.opcode === 0x9) {
+        socket.write(frameBuffer(frame.payload, 0x0a));
+        continue;
+      }
+
+      if (frame.opcode !== 0x1 && frame.opcode !== 0x2) {
+        continue;
+      }
+
+      upstream.write(frame.payload);
+    }
+  });
+
+  socket.on("error", () => {
+    upstream.destroy();
+    socket.destroy();
+  });
+}
+
+function resolveSftpServerPath() {
+  const candidates = [
+    "/usr/lib/ssh/sftp-server",
+    "/usr/libexec/sftp-server",
+    "/usr/lib/openssh/sftp-server"
+  ];
+  return candidates.find((entry) => existsSync(entry)) || candidates[0];
+}
+
+async function waitForPortReady(targetPort, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const connected = await new Promise((resolve) => {
+      const probe = net.createConnection({
+        host: "127.0.0.1",
+        port: targetPort
+      });
+      let settled = false;
+      function finish(result) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        probe.destroy();
+        resolve(result);
+      }
+      probe.on("connect", () => finish(true));
+      probe.on("error", () => finish(false));
+      probe.setTimeout(250, () => finish(false));
+    });
+    if (connected) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`sshd did not become ready on port ${targetPort}`);
+}
+
+async function ensureSshd() {
+  await mkdir("/run/sshd", { recursive: true });
+  await mkdir("/var/run/sshd", { recursive: true });
+  spawnSync("/usr/bin/ssh-keygen", ["-A"], {
+    stdio: "ignore"
+  });
+  const configPath = "/tmp/burstflare-sshd_config";
+  const sftpServer = resolveSftpServerPath();
+  await writeFile(
+    configPath,
+    [
+      `Port ${sshPort}`,
+      "ListenAddress 127.0.0.1",
+      "Protocol 2",
+      "HostKey /etc/ssh/ssh_host_rsa_key",
+      "HostKey /etc/ssh/ssh_host_ecdsa_key",
+      "HostKey /etc/ssh/ssh_host_ed25519_key",
+      "PermitRootLogin no",
+      "PasswordAuthentication yes",
+      "PubkeyAuthentication yes",
+      "PermitEmptyPasswords no",
+      "ChallengeResponseAuthentication no",
+      "AllowTcpForwarding yes",
+      "X11Forwarding no",
+      "PidFile /tmp/burstflare-sshd.pid",
+      "PrintMotd no",
+      "Subsystem sftp " + sftpServer
+    ].join("\n") + "\n",
+    "utf8"
+  );
+
+  const child = spawn("/usr/sbin/sshd", ["-D", "-e", "-f", configPath], {
+    stdio: "inherit"
+  });
+  child.on("exit", (code) => {
+    process.stderr.write(`BurstFlare sshd exited with code ${code ?? "unknown"}\n`);
+  });
+  await waitForPortReady(sshPort);
+  return child;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
 
@@ -535,7 +692,8 @@ const server = http.createServer(async (req, res) => {
       JSON.stringify({
         ok: true,
         hostname: os.hostname(),
-        now: new Date().toISOString()
+        now: new Date().toISOString(),
+        sshPort
       })
     );
     return;
@@ -590,20 +748,36 @@ const server = http.createServer(async (req, res) => {
 
 server.on("upgrade", (req, socket) => {
   const url = new URL(req.url, "http://localhost");
-  if (url.pathname !== "/ssh" || req.headers.upgrade?.toLowerCase() !== "websocket") {
+  if (req.headers.upgrade?.toLowerCase() !== "websocket") {
     socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
     socket.destroy();
     return;
   }
-  attachShell(req, socket);
+  if (url.pathname === "/shell") {
+    attachShell(req, socket);
+    return;
+  }
+  if (url.pathname === "/ssh") {
+    attachTcpProxy(req, socket, sshPort);
+    return;
+  }
+  socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+  socket.destroy();
 });
 
 const isMain = process.argv[1] ? pathToFileURL(process.argv[1]).href === import.meta.url : false;
 
 if (isMain) {
-  server.listen(port, "0.0.0.0", () => {
-    process.stdout.write(`BurstFlare session container listening on ${port}\n`);
-  });
+  ensureSshd()
+    .then(() => {
+      server.listen(port, "0.0.0.0", () => {
+        process.stdout.write(`BurstFlare session container listening on ${port}\n`);
+      });
+    })
+    .catch((error) => {
+      process.stderr.write(`Failed to start BurstFlare sshd: ${error.message}\n`);
+      process.exit(1);
+    });
 }
 
 export {

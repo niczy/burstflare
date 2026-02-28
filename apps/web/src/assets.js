@@ -664,7 +664,7 @@ async function openTerminal(sessionId) {
   closeTerminal("Connecting...");
   setTerminalOutput("Connecting to " + sessionId + "...");
   const data = await api('/api/sessions/' + sessionId + '/ssh-token', { method: 'POST' });
-  const url = new URL('/runtime/sessions/' + sessionId + '/ssh?token=' + encodeURIComponent(data.token), window.location.origin);
+  const url = new URL('/runtime/sessions/' + sessionId + '/terminal?token=' + encodeURIComponent(data.token), window.location.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(url.toString());
   state.terminalSocket = socket;

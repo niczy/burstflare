@@ -403,7 +403,8 @@ test("service covers invites, queued builds, releases, session events, usage, an
   await service.stopSession(switched.token, staleSession.session.id);
 
   const runtime = await service.issueRuntimeToken(switched.token, session.session.id);
-  assert.match(runtime.sshCommand, /wscat --connect/);
+  assert.match(runtime.sshCommand, /wstunnel client/);
+  assert.match(runtime.sshCommand, /ssh -p 2222 dev@127\.0\.0\.1/);
   await service.validateRuntimeToken(runtime.token, session.session.id);
 
   const events = await service.listSessionEvents(switched.token, session.session.id);
