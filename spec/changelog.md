@@ -511,3 +511,22 @@ This file records what has already been implemented in the repository and what h
 - Verified on the live Worker that:
   - plain HTTP access now returns `426`
   - an authenticated WebSocket attach succeeds through `wscat`
+
+## 43. Browser Terminal Panel
+
+- Replaced the web app’s SSH alert action with an in-browser terminal panel.
+- Added a terminal card to the main app shell with:
+  - connection status
+  - scrollable output
+  - input field
+  - send and close controls
+- The browser client now:
+  - requests an SSH runtime token
+  - opens a WebSocket connection to the runtime SSH bridge
+  - streams messages into the terminal panel
+  - sends typed input over the live WebSocket
+- Added UI cleanup so terminal state is reset on logout and logout-all.
+- Added Worker test coverage for the terminal card and WebSocket client wiring in the served app bundle.
+- Verified the live Worker now serves:
+  - the `Browser Terminal` panel in the HTML shell
+  - browser bundle wiring for `new WebSocket(...)` terminal attach

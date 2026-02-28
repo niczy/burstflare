@@ -16,7 +16,7 @@ This file lists the remaining work required to close the gap between the current
   - real image build metadata
 - Replace the current session lifecycle shim with a real Durable Object state machine and per-session locking.
 - Replace the current SSH WebSocket bridge stub with a real container-backed SSH proxy.
-- Add browser-native terminal access (`ttyd`, `code-server`, or equivalent) instead of preview-only HTTP.
+- Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
 - Implement real snapshot upload, restore, and persisted-path behavior for running containers.
 
 ## 2. PR Plan Status
@@ -179,8 +179,9 @@ This file lists the remaining work required to close the gap between the current
 - Done:
   - browser preview route
   - basic web controls for sessions
+  - browser terminal panel wired to the SSH WebSocket bridge
 - Remaining:
-  - true browser terminal/editor integration
+  - richer container-native terminal/editor integration
   - richer live status updates
   - shared parity with CLI session controls
 

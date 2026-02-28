@@ -82,6 +82,12 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(health.data.ok, true);
   assert.equal(health.data.runtime.turnstileEnabled, false);
 
+  const rootResponse = await app.fetch(new Request("http://example.test/"));
+  assert.equal(rootResponse.status, 200);
+  const rootHtml = await rootResponse.text();
+  assert.match(rootHtml, /Browser Terminal/);
+  assert.match(rootHtml, /terminalOutput/);
+
   const appScriptResponse = await app.fetch(new Request("http://example.test/app.js"));
   assert.equal(appScriptResponse.status, 200);
   const appScript = await appScriptResponse.text();
@@ -89,6 +95,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /x-burstflare-csrf/);
   assert.match(appScript, /api\/auth\/sessions/);
   assert.match(appScript, /api\/workspaces\/current\/settings/);
+  assert.match(appScript, /new WebSocket/);
+  assert.match(appScript, /terminalSendButton/);
   assert.match(appScript, /logout-all/);
   assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
   assert.doesNotMatch(appScript, /state\.token/);

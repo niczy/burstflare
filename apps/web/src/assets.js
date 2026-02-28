@@ -148,6 +148,21 @@ pre {
   margin: 0;
 }
 
+.terminal {
+  min-height: 180px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #171b1a;
+  color: #e9f0ea;
+}
+
+.terminal-input {
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
 .muted { color: var(--muted); }
 .error { color: #9d2500; min-height: 1.25em; }
 
@@ -308,6 +323,17 @@ export const html = `<!doctype html>
         </div>
 
         <div class="card stack">
+          <h2>Browser Terminal</h2>
+          <div class="muted" id="terminalStatus">Not connected</div>
+          <pre class="terminal" id="terminalOutput">Waiting for a session attach...</pre>
+          <div class="row">
+            <input class="terminal-input" id="terminalInput" type="text" placeholder="Type a command or message" />
+            <button class="secondary" id="terminalSendButton">Send</button>
+            <button class="secondary" id="terminalCloseButton">Close</button>
+          </div>
+        </div>
+
+        <div class="card stack">
           <h2>Snapshots + Reports</h2>
           <div class="row">
             <div>
@@ -340,7 +366,9 @@ export const appJs = `
 const state = {
   refreshToken: localStorage.getItem("burstflare_refresh_token") || "",
   csrfToken: localStorage.getItem("burstflare_csrf") || "",
-  me: null
+  me: null,
+  terminalSocket: null,
+  terminalSessionId: ""
 };
 
 localStorage.removeItem("burstflare_token");
@@ -351,6 +379,21 @@ function byId(id) {
 
 function setError(message) {
   byId("errors").textContent = message || "";
+}
+
+function setTerminalStatus(message) {
+  byId("terminalStatus").textContent = message || "Not connected";
+}
+
+function setTerminalOutput(message) {
+  byId("terminalOutput").textContent = message;
+  byId("terminalOutput").scrollTop = byId("terminalOutput").scrollHeight;
+}
+
+function appendTerminalOutput(message) {
+  const current = byId("terminalOutput").textContent;
+  byId("terminalOutput").textContent = current ? current + "\\n" + message : message;
+  byId("terminalOutput").scrollTop = byId("terminalOutput").scrollHeight;
 }
 
 function setAuth(refreshToken = state.refreshToken, csrfToken = state.csrfToken) {
@@ -366,6 +409,61 @@ function setAuth(refreshToken = state.refreshToken, csrfToken = state.csrfToken)
   } else {
     localStorage.removeItem("burstflare_csrf");
   }
+}
+
+function closeTerminal(message = "Not connected") {
+  if (state.terminalSocket) {
+    const socket = state.terminalSocket;
+    state.terminalSocket = null;
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close(1000, "Closed");
+    }
+  }
+  state.terminalSessionId = "";
+  setTerminalStatus(message);
+}
+
+async function openTerminal(sessionId) {
+  closeTerminal("Connecting...");
+  setTerminalOutput("Connecting to " + sessionId + "...");
+  const data = await api('/api/sessions/' + sessionId + '/ssh-token', { method: 'POST' });
+  const url = new URL('/runtime/sessions/' + sessionId + '/ssh?token=' + encodeURIComponent(data.token), window.location.origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(url.toString());
+  state.terminalSocket = socket;
+  state.terminalSessionId = sessionId;
+  socket.onopen = () => {
+    setTerminalStatus('Connected to ' + sessionId);
+    appendTerminalOutput('connected');
+  };
+  socket.onmessage = (event) => {
+    appendTerminalOutput(String(event.data ?? ''));
+  };
+  socket.onerror = () => {
+    setTerminalStatus('Terminal connection failed');
+    appendTerminalOutput('connection error');
+  };
+  socket.onclose = () => {
+    state.terminalSocket = null;
+    setTerminalStatus('Disconnected');
+  };
+}
+
+function sendTerminalInput() {
+  const value = byId("terminalInput").value;
+  if (!value) {
+    return;
+  }
+  if (!state.terminalSocket || state.terminalSocket.readyState !== WebSocket.OPEN) {
+    throw new Error("Terminal is not connected");
+  }
+  state.terminalSocket.send(value);
+  appendTerminalOutput('> ' + value);
+  byId("terminalInput").value = "";
 }
 
 async function refreshAuth() {
@@ -507,6 +605,9 @@ function clearPanels() {
   byId("templates").textContent = "";
   byId("builds").textContent = "";
   byId("sessions").textContent = "";
+  byId("terminalInput").value = "";
+  setTerminalOutput("Waiting for a session attach...");
+  closeTerminal();
   byId("usage").textContent = "";
   byId("report").textContent = "";
   byId("releases").textContent = "";
@@ -537,8 +638,7 @@ function attachSessionButtons() {
   document.querySelectorAll("[data-ssh]").forEach((button) => {
     button.addEventListener("click", async () => {
       await perform(async () => {
-        const data = await api('/api/sessions/' + button.dataset.ssh + '/ssh-token', { method: 'POST' });
-        alert(data.sshCommand);
+        await openTerminal(button.dataset.ssh);
       });
     });
   });
@@ -767,6 +867,26 @@ byId("snapshotButton").addEventListener("click", async () => {
 });
 
 byId("refreshButton").addEventListener("click", () => perform(async () => {}));
+
+byId("terminalSendButton").addEventListener("click", async () => {
+  await perform(async () => {
+    sendTerminalInput();
+  });
+});
+
+byId("terminalCloseButton").addEventListener("click", () => {
+  closeTerminal();
+});
+
+byId("terminalInput").addEventListener("keydown", async (event) => {
+  if (event.key !== 'Enter') {
+    return;
+  }
+  event.preventDefault();
+  await perform(async () => {
+    sendTerminalInput();
+  });
+});
 
 byId("reconcileButton").addEventListener("click", async () => {
   await perform(async () => {
