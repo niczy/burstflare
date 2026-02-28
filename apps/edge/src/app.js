@@ -447,6 +447,28 @@ export function createApp(options = {}) {
     return sshCommand.replace("ws://localhost:8787", `wss://${host}`);
   }
 
+  function createRuntimeSshBridge(sessionId) {
+    if (typeof options.createWebSocketPair === "function") {
+      return options.createWebSocketPair(sessionId);
+    }
+    if (typeof globalThis.WebSocketPair !== "function") {
+      return null;
+    }
+    const pair = new globalThis.WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    server.accept();
+    server.send(`BurstFlare SSH bridge attached to ${sessionId}`);
+    server.addEventListener("message", (event) => {
+      if (event.data === "__burstflare_close__") {
+        server.close(1000, "Closed by client");
+        return;
+      }
+      server.send(`echo: ${String(event.data ?? "")}`);
+    });
+    return { client, server };
+  }
+
   function withRateLimit(config, handler) {
     return async (request, params = {}) => {
       const identity = config.identity ? config.identity(request, params) : requestIdentity(request);
@@ -1338,12 +1360,22 @@ export function createApp(options = {}) {
           return unauthorized("Runtime token missing");
         }
         await service.validateRuntimeToken(token, sessionId);
-        const container = getSessionContainer(sessionId);
-        if (container && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-          return container.fetch(request);
+        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+          return new Response("WebSocket upgrade required for SSH attach.", {
+            status: 426,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
         }
-        return new Response(`Runtime WebSocket proxy placeholder for ${sessionId}`, {
-          headers: { "content-type": "text/plain; charset=utf-8" }
+        const bridge = createRuntimeSshBridge(sessionId);
+        if (!bridge?.client) {
+          return new Response("Runtime WebSocket support is unavailable in this deployment.", {
+            status: 501,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        }
+        return new Response(null, {
+          status: 101,
+          webSocket: bridge.client
         });
       })
     }

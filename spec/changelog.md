@@ -497,3 +497,17 @@ This file records what has already been implemented in the repository and what h
   - rename a workspace through the new settings route
   - reflect the updated name on `/api/auth/me`
   - serve browser bundle wiring for `/api/workspaces/current/settings`
+
+## 42. Runtime SSH WebSocket Bridge
+
+- Replaced the plain-text SSH placeholder route with a real WebSocket upgrade path.
+- `GET /runtime/sessions/:sessionId/ssh` now:
+  - validates the runtime token before upgrading
+  - returns `426` for plain HTTP requests without a WebSocket upgrade
+  - returns `501` if WebSocket support is unavailable in the current runtime
+  - upgrades to a live authenticated WebSocket bridge when supported
+- The current bridge sends an attach banner and echoes client messages, which makes the path structurally correct even though it is not yet a full SSH tunnel to the container.
+- Updated the Worker test suite to reflect the new `426` requirement for non-WebSocket requests.
+- Verified on the live Worker that:
+  - plain HTTP access now returns `426`
+  - an authenticated WebSocket attach succeeds through `wscat`

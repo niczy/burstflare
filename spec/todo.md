@@ -15,7 +15,7 @@ This file lists the remaining work required to close the gap between the current
   - workflow orchestration
   - real image build metadata
 - Replace the current session lifecycle shim with a real Durable Object state machine and per-session locking.
-- Implement the actual SSH-over-WebSocket runtime path instead of the current placeholder route.
+- Replace the current SSH WebSocket bridge stub with a real container-backed SSH proxy.
 - Add browser-native terminal access (`ttyd`, `code-server`, or equivalent) instead of preview-only HTTP.
 - Implement real snapshot upload, restore, and persisted-path behavior for running containers.
 
@@ -163,12 +163,14 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 12: SSH Over WebSocket End-To-End
 
-- Status: not complete
+- Status: partially complete
+- Done:
+  - runtime token issuance for SSH attach
+  - Worker-side authenticated WebSocket upgrade path for the SSH route
+  - CLI `burstflare ssh <session>` command emits the attach command
 - Remaining:
   - run `sshd` in runtime images
-  - runtime token issuance for SSH attach
-  - Worker WebSocket proxy for SSH
-  - CLI `burstflare ssh <session>`
+  - replace the current bridge stub with a real container-backed SSH proxy
   - `scp` / forwarding compatibility where supported
 
 ### PR 13: Browser Terminal And Web Session Controls

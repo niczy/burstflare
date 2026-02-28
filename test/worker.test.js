@@ -559,7 +559,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const runtimeValid = await app.fetch(
     new Request(`http://example.test/runtime/sessions/${sessionId}/ssh?token=${ssh.data.token}`)
   );
-  assert.equal(runtimeValid.status, 200);
+  assert.equal(runtimeValid.status, 426);
+  assert.match(await runtimeValid.text(), /WebSocket upgrade required/);
 
   const rateHeaders = { "x-forwarded-for": "10.0.0.8" };
   const deviceStart = await requestJson(app, "/api/cli/device/start", {
