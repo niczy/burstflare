@@ -1241,3 +1241,24 @@ This file records what has already been implemented in the repository and what h
   - runtime lifecycle analytics when containers are enabled
   - preview and editor route availability when containers are enabled
 - Verified the updated smoke flow locally against the dev server.
+
+## 80. Dashboard Pulse And UI Smoke
+
+- Added a `Dashboard Pulse` summary strip to the browser shell so the dashboard now shows live counts for:
+  - templates
+  - builds
+  - sessions
+  - snapshots
+- Added `scripts/ui-smoke.mjs` to verify the browser shell surface without needing a full browser automation pass.
+- The UI smoke flow now validates:
+  - shell HTML markers
+  - stylesheet markers
+  - browser bundle markers
+- Updated GitHub Actions so the local dev-server validation step now runs:
+  - `npm run smoke`
+  - `npm run ui:smoke`
+  - `npm run release:validate`
+- Verified locally that both `npm run smoke` and `npm run ui:smoke` pass against the dev server.
+- Verified in the live Cloudflare deployment that the public shell serves:
+  - the `Dashboard Pulse` card
+  - the updated browser bundle markers for the dashboard pulse and editor action

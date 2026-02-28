@@ -242,6 +242,11 @@ export const html = `<!doctype html>
 
       <section class="grid">
         <div class="card stack">
+          <h2>Dashboard Pulse</h2>
+          <div class="list" id="dashboardPulse"></div>
+        </div>
+
+        <div class="card stack">
           <h2>Workspace</h2>
           <div>
             <label for="workspaceName">Workspace Name</label>
@@ -892,6 +897,30 @@ function renderAuthSessions(authSessions) {
   });
 }
 
+function renderDashboardPulse(counts) {
+  const items = [
+    {
+      label: 'templates',
+      value: counts.templates
+    },
+    {
+      label: 'builds',
+      value: counts.builds
+    },
+    {
+      label: 'sessions',
+      value: counts.sessions
+    },
+    {
+      label: 'snapshots',
+      value: counts.snapshots
+    }
+  ];
+  byId("dashboardPulse").innerHTML = items
+    .map((item) => '<div class="item"><strong>' + item.value + '</strong><br><span class="muted">' + item.label + '</span></div>')
+    .join("");
+}
+
 function renderTemplates(templates) {
   const items = templates.map((template) => {
     const active = template.activeVersion ? template.activeVersion.version : "none";
@@ -1013,6 +1042,7 @@ function clearPanels() {
   byId("members").textContent = "";
   byId("authSessions").textContent = "";
   byId("pendingDevices").textContent = "";
+  byId("dashboardPulse").textContent = "";
   byId("templates").textContent = "";
   byId("builds").textContent = "";
   byId("sessions").textContent = "";
@@ -1097,6 +1127,12 @@ async function refresh() {
   byId("builds").textContent = JSON.stringify(builds.builds, null, 2);
   const sessions = await api('/api/sessions');
   renderSessions(sessions.sessions);
+  renderDashboardPulse({
+    templates: templates.templates.length,
+    builds: builds.builds.length,
+    sessions: sessions.sessions.length,
+    snapshots: sessions.sessions.reduce((sum, entry) => sum + (entry.snapshotCount || 0), 0)
+  });
   attachSessionButtons();
   await refreshSnapshots();
   const usage = await api('/api/usage');

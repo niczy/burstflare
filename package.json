@@ -25,6 +25,7 @@
     "lint": "node scripts/lint.mjs",
     "release:validate": "node scripts/release-validate.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "ui:smoke": "node scripts/ui-smoke.mjs",
     "test": "node --test"
   },
   "engines": {

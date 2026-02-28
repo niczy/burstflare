@@ -67,14 +67,14 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 05: Web App Shell And Dashboard
 
-- Status: partially complete
+- Status: complete
 - Done:
   - web shell and basic management screens
   - browser auth-session list, revoke, and logout-all controls
   - clearer empty states and last-sync visibility in the browser shell
-- Remaining:
-  - more polished dashboard state
-  - stronger end-to-end UI smoke coverage
+  - the dashboard now exposes a `Dashboard Pulse` summary strip for templates, builds, sessions, and snapshots
+  - `scripts/ui-smoke.mjs` now validates the shell HTML, stylesheet, and browser bundle markers
+  - GitHub Actions now runs the UI smoke flow against the local dev server alongside the existing synthetic smoke and release validation flows
 
 ### PR 06: CLI Skeleton And Device Authorization
 
