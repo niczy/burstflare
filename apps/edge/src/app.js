@@ -887,6 +887,25 @@ export async function handleScheduled(controller, options = {}) {
   await runReconcile(options);
 }
 
+export async function handleQueueBatch(batch, options = {}) {
+  const service = createWorkerService(options);
+  for (const message of batch.messages) {
+    const body = message.body || {};
+    if (body.type === "build" && body.buildId) {
+      await service.processTemplateBuildById(body.buildId, {
+        source: "queue"
+      });
+      continue;
+    }
+    if (body.type === "reconcile") {
+      await runReconcile({
+        ...options,
+        service
+      });
+    }
+  }
+}
+
 export function createApp(options = {}) {
   const service = createWorkerService(options);
   const jobs = createJobQueue(options);

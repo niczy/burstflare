@@ -1,6 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { WorkflowEntrypoint } from "cloudflare:workers";
-import { createApp, createWorkerService, handleScheduled, runReconcile } from "./app.js";
+import { createApp, createWorkerService, handleQueueBatch, handleScheduled } from "./app.js";
 
 const RUNTIME_STATE_KEY = "burstflare:runtime-state";
 
@@ -316,22 +316,7 @@ export default {
   },
 
   async queue(batch, env) {
-    const service = createWorkerService(createRuntimeOptions(env));
-    for (const message of batch.messages) {
-      const body = message.body || {};
-      if (body.type === "build" && body.buildId) {
-        await service.processTemplateBuildById(body.buildId, {
-          source: "queue"
-        });
-        continue;
-      }
-      if (body.type === "reconcile") {
-        await runReconcile({
-          ...createRuntimeOptions(env),
-          service
-        });
-      }
-    }
+    await handleQueueBatch(batch, createRuntimeOptions(env));
   },
 
   async scheduled(controller, env) {

@@ -1411,3 +1411,16 @@ This file records what has already been implemented in the repository and what h
 - Verified live on the public Cloudflare deployment that:
   - `GET /api/templates/:templateId` returns the new detail shape with `releaseCount`, `releases`, and `storageSummary`
   - the root shell HTML now includes the `templateInspector` panel
+
+## 87. Final CI Hardening Pass
+
+- Expanded Cloudflare persistence coverage with a new normalized-store test that verifies scoped saves remove deleted rows without wiping unrelated collections.
+- Extracted the queue consumer path into a shared `handleQueueBatch()` helper, so the Worker and the test suite now exercise the same queue-processing implementation.
+- Added queue-consumer coverage that proves queued build jobs can be processed through the shared batch handler and persist `executionSource = "queue"`.
+- Added a deployed smoke job to GitHub Actions for `main` pushes that now checks:
+  - `/api/health`
+  - the public shell HTML/CSS/JS markers via `scripts/ui-smoke.mjs`
+- Verified locally with `npm run ci`.
+- Verified live on the public Cloudflare deployment after the final deploy that:
+  - `/api/health` is healthy
+  - `scripts/ui-smoke.mjs --base-url https://burstflare.nicholas-zhaoyu.workers.dev` passes

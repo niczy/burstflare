@@ -24,3 +24,18 @@ jobs:
           npm run smoke -- --base-url http://127.0.0.1:8787
           npm run ui:smoke -- --base-url http://127.0.0.1:8787
           npm run release:validate -- --base-url http://127.0.0.1:8787
+
+  deployed-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      BURSTFLARE_DEPLOYED_URL: https://burstflare.nicholas-zhaoyu.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: |
+          node --input-type=module -e "const response = await fetch(process.env.BURSTFLARE_DEPLOYED_URL + '/api/health'); if (!response.ok) { throw new Error('Health check failed (' + response.status + ')'); } const payload = await response.json(); if (!payload.ok) { throw new Error('Health payload was not ok'); }"
+          node scripts/ui-smoke.mjs --base-url \"$BURSTFLARE_DEPLOYED_URL\"

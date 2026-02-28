@@ -270,15 +270,28 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. All planned product PRs are complete.
-2. Treat the optional PR 02 repository-style data-access cleanup as a scale-oriented follow-up, not a blocker for the current beta baseline.
-3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
+1. All planned product and CI hardening work in this spec is complete.
+2. Treat the optional PR 02 repository-style data-access cleanup as a scale-oriented follow-up only if the current normalized store abstraction becomes a bottleneck.
 
-## 4. CI And Test Work Still Needed
+## 4. CI And Test Coverage
 
-- Expand migration and persistence tests beyond the current normalized-store cutover and scoped-collection coverage.
-- Add integration tests for browser auth, device auth, and session revocation.
-- Add deeper queue-consumer and workflow tests for build processing, including failure and retry orchestration across live workflow redispatch.
-- Add Durable Object concurrency tests for session state.
-- Add end-to-end runtime tests for SSH, browser terminal access, and snapshot restore.
-- Add deployment smoke tests that run automatically after a successful Cloudflare deploy.
+- Migration and persistence coverage now includes normalized load order, scoped writes, and scoped deletions in the Cloudflare store tests.
+- Integration coverage now exists for:
+  - browser auth
+  - device auth
+  - session revocation
+  - workspace membership audit edge cases
+- Runtime coverage now exists for:
+  - SSH
+  - browser terminal attach
+  - browser editor attach
+  - snapshot restore and replay
+- Queue and workflow coverage now includes:
+  - workflow-backed build dispatch
+  - queue-consumer build execution
+  - retry and dead-letter recovery
+- GitHub Actions now runs:
+  - local dev-server smoke
+  - UI smoke
+  - release validation
+  - a deployed UI/health smoke job on `main`

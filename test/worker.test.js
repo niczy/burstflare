@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp, createWorkerService, handleScheduled, runReconcile } from "../apps/edge/src/app.js";
+import { createApp, createWorkerService, handleQueueBatch, handleScheduled, runReconcile } from "../apps/edge/src/app.js";
 
 function toBytes(value) {
   if (value instanceof Uint8Array) {
@@ -1107,6 +1107,52 @@ test("worker scheduled handler enqueues reconcile jobs", async () => {
       cron: "*/15 * * * *"
     }
   ]);
+});
+
+test("worker queue consumer processes queued builds with the shared service state", async () => {
+  const service = createWorkerService({
+    BUILD_QUEUE: {
+      async send() {}
+    },
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket()
+  });
+
+  const owner = await service.registerUser({
+    email: "queue-consumer@example.com",
+    name: "Queue Consumer"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "queue-template",
+    description: "queue test"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/queue-template:1.0.0"
+    }
+  });
+  assert.equal(version.build.status, "queued");
+
+  await handleQueueBatch(
+    {
+      messages: [
+        {
+          body: {
+            type: "build",
+            buildId: version.build.id
+          }
+        }
+      ]
+    },
+    { service }
+  );
+
+  const builds = await service.listTemplateBuilds(owner.token);
+  const processedBuild = builds.builds.find((entry) => entry.id === version.build.id);
+  assert.ok(processedBuild);
+  assert.equal(processedBuild.status, "succeeded");
+  assert.equal(processedBuild.executionSource, "queue");
 });
 
 test("worker exposes targeted operator reconcile endpoints", async () => {

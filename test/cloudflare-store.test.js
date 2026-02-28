@@ -346,3 +346,83 @@ test("cloudflare store can load and save a scoped normalized collection without 
   assert.equal(JSON.parse(users.results[0].payload_json).name, "Alpha Updated");
   assert.equal(JSON.parse(templates.results[0].payload_json).name, "Keep Me");
 });
+
+test("cloudflare store removes deleted rows from a scoped normalized collection", async () => {
+  const db = new MockD1Database();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_users (row_key, position, email, created_at, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "usr_1",
+      0,
+      "alpha@example.com",
+      "2026-02-28T00:00:00.000Z",
+      JSON.stringify({
+        id: "usr_1",
+        email: "alpha@example.com",
+        name: "Alpha",
+        createdAt: "2026-02-28T00:00:00.000Z"
+      }),
+      "2026-02-28T00:00:00.000Z"
+    )
+    .run();
+
+  await db
+    .prepare(
+      `
+        INSERT INTO bf_users (row_key, position, email, created_at, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `
+    )
+    .bind(
+      "usr_2",
+      1,
+      "beta@example.com",
+      "2026-02-28T00:00:01.000Z",
+      JSON.stringify({
+        id: "usr_2",
+        email: "beta@example.com",
+        name: "Beta",
+        createdAt: "2026-02-28T00:00:01.000Z"
+      }),
+      "2026-02-28T00:00:01.000Z"
+    )
+    .run();
+
+  const store = createCloudflareStateStore(db);
+  const state = await store.loadCollections(["users"]);
+  state.users = state.users.filter((entry) => entry.id === "usr_2");
+
+  await store.save(
+    state,
+    {
+      users: [
+        {
+          id: "usr_1",
+          email: "alpha@example.com",
+          name: "Alpha",
+          createdAt: "2026-02-28T00:00:00.000Z"
+        },
+        {
+          id: "usr_2",
+          email: "beta@example.com",
+          name: "Beta",
+          createdAt: "2026-02-28T00:00:01.000Z"
+        }
+      ]
+    },
+    {
+      collections: ["users"]
+    }
+  );
+
+  const users = await db.prepare("SELECT payload_json FROM bf_users ORDER BY position ASC, row_key ASC").all();
+
+  assert.equal(users.results.length, 1);
+  assert.equal(JSON.parse(users.results[0].payload_json).id, "usr_2");
+});
