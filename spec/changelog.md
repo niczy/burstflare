@@ -484,3 +484,16 @@ This file records what has already been implemented in the repository and what h
   - staging config generation targets `burstflare-staging`
   - production deploy still succeeds
   - local and remote smoke flows still pass after the tooling change
+
+## 41. Workspace Settings Rename Path
+
+- Added service-layer workspace settings updates for workspace name changes.
+- Added `PATCH /api/workspaces/current/settings`.
+- Added CLI support for `burstflare workspace rename <name>`.
+- Added browser UI controls for editing and saving the current workspace name.
+- The browser shell now hydrates the workspace name input from the current authenticated workspace.
+- Added test coverage across the service, Worker, and CLI suites.
+- Verified the live Worker can:
+  - rename a workspace through the new settings route
+  - reflect the updated name on `/api/auth/me`
+  - serve browser bundle wiring for `/api/workspaces/current/settings`

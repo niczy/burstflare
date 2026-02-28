@@ -133,6 +133,7 @@ function helpText() {
     "burstflare auth whoami",
     "burstflare workspace list",
     "burstflare workspace members",
+    "burstflare workspace rename <name>",
     "burstflare workspace invite --email teammate@example.com [--role member]",
     "burstflare workspace accept-invite --code invite_xxx",
     "burstflare workspace set-role <userId> --role viewer",
@@ -532,6 +533,20 @@ export async function runCli(argv, dependencies = {}) {
           `${baseUrl}/api/workspaces/current/members`,
           {
             headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "rename") {
+        const name = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/settings`,
+          {
+            method: "PATCH",
+            headers: headers(undefined),
+            body: JSON.stringify({ name })
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

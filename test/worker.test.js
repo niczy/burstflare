@@ -88,6 +88,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /burstflare_refresh_token/);
   assert.match(appScript, /x-burstflare-csrf/);
   assert.match(appScript, /api\/auth\/sessions/);
+  assert.match(appScript, /api\/workspaces\/current\/settings/);
   assert.match(appScript, /logout-all/);
   assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
   assert.doesNotMatch(appScript, /state\.token/);
@@ -142,6 +143,14 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const ownerToken = owner.data.token;
   const ownerRefreshToken = owner.data.refreshToken;
   const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
+
+  const renamedWorkspace = await requestJson(app, "/api/workspaces/current/settings", {
+    method: "PATCH",
+    headers: ownerHeaders,
+    body: JSON.stringify({ name: "Burst Ops" })
+  });
+  assert.equal(renamedWorkspace.response.status, 200);
+  assert.equal(renamedWorkspace.data.workspace.name, "Burst Ops");
 
   const ownerRecovery = await requestJson(app, "/api/auth/recovery-codes/generate", {
     method: "POST",

@@ -101,6 +101,18 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["workspace", "rename", "CLI-HQ", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const renamedWorkspace = JSON.parse(stdout.data.trim());
+    assert.equal(renamedWorkspace.workspace.name, "CLI-HQ");
+
+    stdout.data = "";
+
     code = await runCli(["auth", "device-start", "--email", "cli@example.com", "--url", "http://local"], {
       fetchImpl,
       stdout,

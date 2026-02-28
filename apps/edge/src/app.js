@@ -821,6 +821,18 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "PATCH",
+      pattern: "/api/workspaces/current/settings",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.updateWorkspaceSettings(token, body));
+      })
+    },
+    {
       method: "GET",
       pattern: "/api/templates",
       handler: withErrorHandling(async (request) => {

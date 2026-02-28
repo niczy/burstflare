@@ -202,6 +202,10 @@ export const html = `<!doctype html>
       <section class="grid">
         <div class="card stack">
           <h2>Workspace</h2>
+          <div>
+            <label for="workspaceName">Workspace Name</label>
+            <input id="workspaceName" type="text" placeholder="My Workspace" />
+          </div>
           <div class="row">
             <div>
               <label for="inviteEmail">Invite Email</label>
@@ -217,6 +221,7 @@ export const html = `<!doctype html>
             </div>
           </div>
           <div class="row">
+            <button class="secondary" id="saveWorkspaceButton">Save Workspace</button>
             <button id="inviteButton">Create Invite</button>
             <button class="secondary" id="membersButton">Refresh Members</button>
           </div>
@@ -407,6 +412,9 @@ function renderIdentity() {
   byId("identity").textContent = state.me
     ? state.me.user.email + " in " + state.me.workspace.name + " (" + state.me.membership.role + ", " + state.me.workspace.plan + ")"
     : "Not signed in";
+  if (state.me) {
+    byId("workspaceName").value = state.me.workspace.name;
+  }
 }
 
 function renderMembers(membersData) {
@@ -493,6 +501,7 @@ function renderSessions(sessions) {
 }
 
 function clearPanels() {
+  byId("workspaceName").value = "";
   byId("members").textContent = "";
   byId("authSessions").textContent = "";
   byId("templates").textContent = "";
@@ -657,6 +666,15 @@ byId("inviteButton").addEventListener("click", async () => {
       body: JSON.stringify({ email: byId("inviteEmail").value, role: byId("inviteRole").value })
     });
     byId("inviteCode").value = data.invite.code;
+  });
+});
+
+byId("saveWorkspaceButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await api('/api/workspaces/current/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ name: byId("workspaceName").value })
+    });
   });
 });
 

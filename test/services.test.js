@@ -135,6 +135,10 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const plan = await service.setWorkspacePlan(owner.token, "pro");
   assert.equal(plan.workspace.plan, "pro");
+  const renamedWorkspace = await service.updateWorkspaceSettings(owner.token, {
+    name: "Burst Operations"
+  });
+  assert.equal(renamedWorkspace.workspace.name, "Burst Operations");
 
   const template = await service.createTemplate(owner.token, {
     name: "node-dev",

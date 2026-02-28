@@ -62,8 +62,8 @@ This file lists the remaining work required to close the gap between the current
   - membership roles
   - invites
   - role changes
+  - workspace rename/settings path across API, CLI, and web
 - Remaining:
-  - richer workspace settings UX
   - deeper audit coverage for all membership edge cases
 
 ### PR 05: Web App Shell And Dashboard

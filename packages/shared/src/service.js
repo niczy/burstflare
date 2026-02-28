@@ -1300,6 +1300,30 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async updateWorkspaceSettings(token, { name }) {
+      return store.transact((state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        ensure(typeof name === "string" && name.trim(), "Workspace name is required");
+        const nextName = name.trim();
+        ensure(nextName.length >= 3, "Workspace name must be at least 3 characters");
+        ensure(nextName.length <= 80, "Workspace name is too long");
+        auth.workspace.name = nextName;
+        writeAudit(state, clock, {
+          action: "workspace.updated",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id,
+          details: {
+            name: nextName
+          }
+        });
+        return {
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
+        };
+      });
+    },
+
     async createTemplate(token, { name, description = "" }) {
       return store.transact((state) => {
         const auth = requireWriteAccess(state, token, clock);
