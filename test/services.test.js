@@ -127,7 +127,10 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const version = await service.addTemplateVersion(owner.token, template.template.id, {
     version: "1.0.0",
-    manifest: { image: "registry.cloudflare.com/test/node-dev:1.0.0" }
+    manifest: {
+      image: "registry.cloudflare.com/test/node-dev:1.0.0",
+      sleepTtlSeconds: 1
+    }
   });
   assert.equal(version.build.status, "queued");
   assert.deepEqual(queuedBuilds, [version.build.id]);
@@ -272,6 +275,13 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const restarted = await service.restartSession(switched.token, session.session.id);
   assert.equal(restarted.session.state, "running");
 
+  const staleSession = await service.createSession(switched.token, {
+    name: "stale-demo",
+    templateId: template.template.id
+  });
+  await service.startSession(switched.token, staleSession.session.id);
+  await service.stopSession(switched.token, staleSession.session.id);
+
   const runtime = await service.issueRuntimeToken(switched.token, session.session.id);
   assert.match(runtime.sshCommand, /ssh -o ProxyCommand=/);
   await service.validateRuntimeToken(runtime.token, session.session.id);
@@ -310,12 +320,14 @@ test("service covers invites, queued builds, releases, session events, usage, an
   await service.deleteSession(switched.token, session.session.id);
   const cleanup = await service.reconcile(owner.token);
   assert.equal(cleanup.purgedDeletedSessions, 1);
+  assert.equal(cleanup.purgedStaleSleepingSessions, 1);
   assert.equal(cleanup.purgedSnapshots, 1);
   await assert.rejects(() => service.getSession(switched.token, session.session.id), /Session not found/);
+  await assert.rejects(() => service.getSession(switched.token, staleSession.session.id), /Session not found/);
 
   const usage = await service.getUsage(owner.token);
   assert.deepEqual(usage.usage, {
-    runtimeMinutes: 2,
+    runtimeMinutes: 3,
     snapshots: 2,
     templateBuilds: 3
   });

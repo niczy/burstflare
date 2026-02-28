@@ -110,6 +110,12 @@ function validateTemplateManifest(manifest) {
       ensure(typeof entry === "string" && entry.startsWith("/"), "Persisted paths must be absolute");
     }
   }
+
+  if (manifest.sleepTtlSeconds !== undefined) {
+    ensure(Number.isInteger(manifest.sleepTtlSeconds), "Manifest sleepTtlSeconds must be an integer");
+    ensure(manifest.sleepTtlSeconds >= 1, "Manifest sleepTtlSeconds must be at least 1");
+    ensure(manifest.sleepTtlSeconds <= 60 * 60 * 24 * 7, "Manifest sleepTtlSeconds exceeds limit");
+  }
 }
 
 function findUserByEmail(state, email) {
@@ -1618,7 +1624,8 @@ export function createBurstFlareService(options = {}) {
         const template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
         ensure(template, "Template not found", 404);
         ensure(!template.archivedAt, "Template is archived", 409);
-        ensure(getActiveVersion(state, template.id), "Template has no promoted version", 409);
+        const activeVersion = getActiveVersion(state, template.id);
+        ensure(activeVersion, "Template has no promoted version", 409);
         ensure(
           !state.sessions.some(
             (entry) => entry.workspaceId === auth.workspace.id && entry.name.toLowerCase() === name.toLowerCase() && entry.state !== "deleted"
@@ -1638,6 +1645,7 @@ export function createBurstFlareService(options = {}) {
           updatedAt: nowIso(clock),
           lastStartedAt: null,
           lastStoppedAt: null,
+          sleepTtlSeconds: activeVersion.manifest?.sleepTtlSeconds || null,
           previewUrl: null
         };
         session.previewUrl = `/runtime/sessions/${session.id}/preview`;
@@ -2178,11 +2186,52 @@ export function createBurstFlareService(options = {}) {
           }
         }
 
+        const reconcileAt = nowMs(clock);
+        const staleSleepingSessionIds = new Set(
+          state.sessions
+            .filter((entry) => {
+              if (entry.state !== "sleeping") {
+                return false;
+              }
+              if (workspaceId && entry.workspaceId !== workspaceId) {
+                return false;
+              }
+              if (!Number.isInteger(entry.sleepTtlSeconds) || entry.sleepTtlSeconds <= 0) {
+                return false;
+              }
+              const referenceTime = entry.lastStoppedAt || entry.updatedAt || entry.createdAt;
+              if (!referenceTime) {
+                return false;
+              }
+              return reconcileAt - new Date(referenceTime).getTime() >= entry.sleepTtlSeconds * 1000;
+            })
+            .map((entry) => entry.id)
+        );
+
         const deletedSessionIds = new Set(
           state.sessions
             .filter((entry) => entry.state === "deleted" && (!workspaceId || entry.workspaceId === workspaceId))
             .map((entry) => entry.id)
         );
+
+        const purgedStaleSleepingSessions = staleSleepingSessionIds.size;
+        for (const sessionId of staleSleepingSessionIds) {
+          const session = state.sessions.find((entry) => entry.id === sessionId) || null;
+          if (!session) {
+            continue;
+          }
+          writeAudit(state, clock, {
+            action: "session.purged_stale",
+            actorUserId: auth?.user.id || null,
+            workspaceId: session.workspaceId,
+            targetType: "session",
+            targetId: session.id,
+            details: {
+              sleepTtlSeconds: session.sleepTtlSeconds,
+              lastStoppedAt: session.lastStoppedAt
+            }
+          });
+        }
 
         let purgedSnapshots = 0;
         const retainedSnapshots = [];
@@ -2190,6 +2239,7 @@ export function createBurstFlareService(options = {}) {
           const session = state.sessions.find((entry) => entry.id === snapshot.sessionId) || null;
           const shouldPurge =
             deletedSessionIds.has(snapshot.sessionId) ||
+            staleSleepingSessionIds.has(snapshot.sessionId) ||
             (!session && !workspaceId) ||
             (!session && workspaceId && snapshot.objectKey.startsWith(`snapshots/${workspaceId}/`));
 
@@ -2210,16 +2260,18 @@ export function createBurstFlareService(options = {}) {
         state.snapshots = retainedSnapshots;
 
         const purgedDeletedSessions = deletedSessionIds.size;
-        if (purgedDeletedSessions > 0) {
-          state.sessions = state.sessions.filter((entry) => !deletedSessionIds.has(entry.id));
-          state.sessionEvents = state.sessionEvents.filter((entry) => !deletedSessionIds.has(entry.sessionId));
-          state.authTokens = state.authTokens.filter((entry) => !(entry.sessionId && deletedSessionIds.has(entry.sessionId)));
+        const purgedSessionIds = new Set([...deletedSessionIds, ...staleSleepingSessionIds]);
+        if (purgedSessionIds.size > 0) {
+          state.sessions = state.sessions.filter((entry) => !purgedSessionIds.has(entry.id));
+          state.sessionEvents = state.sessionEvents.filter((entry) => !purgedSessionIds.has(entry.sessionId));
+          state.authTokens = state.authTokens.filter((entry) => !(entry.sessionId && purgedSessionIds.has(entry.sessionId)));
         }
 
         return {
           sleptSessions,
           processedBuilds,
           purgedDeletedSessions,
+          purgedStaleSleepingSessions,
           purgedSnapshots
         };
       });

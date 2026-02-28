@@ -174,7 +174,21 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     stdout.data = "";
 
     code = await runCli(
-      ["template", "upload", templateId, "--version", "1.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
+      [
+        "template",
+        "upload",
+        templateId,
+        "--version",
+        "1.0.0",
+        "--file",
+        bundlePath,
+        "--content-type",
+        "text/plain",
+        "--sleep-ttl-seconds",
+        "1",
+        "--url",
+        "http://local"
+      ],
       {
         fetchImpl,
         stdout,
@@ -389,6 +403,28 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["up", "sleepy-shell", "--template", templateId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const staleSessionOutput = JSON.parse(stdout.data.trim());
+    const staleSessionId = staleSessionOutput.session.id;
+
+    stdout.data = "";
+
+    code = await runCli(["down", staleSessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
     code = await runCli(["snapshot", "save", sessionId, "--label", "manual", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -462,6 +498,33 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(stderr.data, "");
 
     stdout.data = "";
+    stderr.data = "";
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    code = await runCli(["reconcile", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const cleanupOutput = JSON.parse(stdout.data.trim());
+    assert.equal(cleanupOutput.purgedStaleSleepingSessions, 1);
+
+    stdout.data = "";
+
+    code = await runCli(["status", staleSessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 1);
+    assert.match(stderr.data, /Session not found/);
+
+    stdout.data = "";
+    stderr.data = "";
 
     code = await runCli(["auth", "logout", "--url", "http://local"], {
       fetchImpl,

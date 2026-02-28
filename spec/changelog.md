@@ -308,3 +308,17 @@ This file records what has already been implemented in the repository and what h
   - retry it automatically through the build queue
   - move it to `dead_lettered` after three attempts
   - expose the dead-letter status and failure reason in the build log
+
+## 29. Stale Sleeping Session Cleanup
+
+- Added optional `sleepTtlSeconds` validation in template manifests.
+- Propagated `sleepTtlSeconds` from the active template version onto newly created sessions.
+- Extended reconcile to purge sleeping sessions that have exceeded their configured sleep TTL.
+- Extended reconcile cleanup to remove session events, session-bound runtime tokens, and snapshot artifacts for stale purged sessions.
+- Added `purgedStaleSleepingSessions` to reconcile results.
+- Added CLI support for setting `--sleep-ttl-seconds` during `template upload`.
+- Verified the live Worker can:
+  - create a session from a template with a one-second sleep TTL
+  - stop the session into `sleeping`
+  - purge it on reconcile after the TTL expires
+  - return `404` for the purged session afterward

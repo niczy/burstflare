@@ -223,10 +223,11 @@ This file lists the remaining work required to close the gap between the current
   - queue-driven reconcile enqueue and consumer execution
   - scheduled reconcile trigger
   - deleted-session purge and attached snapshot cleanup
+  - stale sleeping-session cleanup with template-defined sleep TTLs
 - Remaining:
   - stuck-build recovery
   - idempotent operator reports
-  - stale-session cleanup beyond explicit deletion
+  - broader operator-facing recovery workflows and reporting
 
 ### PR 17: Security Hardening And Audit Completeness
 

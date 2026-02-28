@@ -131,7 +131,10 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerHeaders,
     body: JSON.stringify({
       version: "2.0.0",
-      manifest: { image: "registry.cloudflare.com/test/python-dev:2.0.0" }
+      manifest: {
+        image: "registry.cloudflare.com/test/python-dev:2.0.0",
+        sleepTtlSeconds: 1
+      }
     })
   });
   assert.equal(version.data.build.status, "queued");
@@ -357,6 +360,26 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(restarted.data.session.state, "running");
 
+  const staleSession = await requestJson(app, "/api/sessions", {
+    method: "POST",
+    headers: switchedHeaders,
+    body: JSON.stringify({ name: "feature-y", templateId })
+  });
+  assert.equal(staleSession.response.status, 200);
+  const staleSessionId = staleSession.data.session.id;
+
+  const staleStarted = await requestJson(app, `/api/sessions/${staleSessionId}/start`, {
+    method: "POST",
+    headers: switchedHeaders
+  });
+  assert.equal(staleStarted.response.status, 200);
+
+  const staleStopped = await requestJson(app, `/api/sessions/${staleSessionId}/stop`, {
+    method: "POST",
+    headers: switchedHeaders
+  });
+  assert.equal(staleStopped.response.status, 200);
+
   const events = await requestJson(app, `/api/sessions/${sessionId}/events`, {
     headers: switchedHeaders
   });
@@ -528,16 +551,22 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: switchedHeaders
   });
   assert.equal(deletedSession.response.status, 200);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
   const cleanupRun = await requestJson(app, "/api/admin/reconcile", {
     method: "POST",
     headers: ownerHeaders
   });
   assert.equal(cleanupRun.response.status, 200);
   assert.equal(cleanupRun.data.purgedDeletedSessions, 1);
+  assert.equal(cleanupRun.data.purgedStaleSleepingSessions, 1);
   const removedSession = await requestJson(app, `/api/sessions/${sessionId}`, {
     headers: switchedHeaders
   });
   assert.equal(removedSession.response.status, 404);
+  const removedStaleSession = await requestJson(app, `/api/sessions/${staleSessionId}`, {
+    headers: switchedHeaders
+  });
+  assert.equal(removedStaleSession.response.status, 404);
 });
 
 test("worker scheduled handler enqueues reconcile jobs", async () => {

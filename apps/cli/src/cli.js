@@ -133,7 +133,7 @@ function helpText() {
     "burstflare workspace set-role <userId> --role viewer",
     "burstflare workspace plan <free|pro|enterprise>",
     "burstflare template create <name> [--description ...]",
-    "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure]",
+    "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600]",
     "burstflare template promote <templateId> <versionId>",
     "burstflare template archive <templateId>",
     "burstflare template restore <templateId>",
@@ -532,7 +532,8 @@ export async function runCli(argv, dependencies = {}) {
               manifest: {
                 image: `registry.cloudflare.com/local/${templateId}:${options.version}`,
                 features: ["ssh", "browser", "snapshots"],
-                simulateFailure: Boolean(options["simulate-failure"])
+                simulateFailure: Boolean(options["simulate-failure"]),
+                sleepTtlSeconds: options["sleep-ttl-seconds"] ? Number(options["sleep-ttl-seconds"]) : undefined
               }
             })
           }
