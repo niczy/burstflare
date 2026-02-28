@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   applySnapshotRestore,
   exportSnapshotPayload,
+  listEditorFiles,
   resetRuntimeState,
-  runtimeState
+  runtimeState,
+  updateEditorFile
 } from "../containers/session/server.mjs";
 
 function toBase64(value) {
@@ -58,4 +60,22 @@ test("session container restores only files inside persisted paths and exports a
       content: "hello world"
     }
   ]);
+});
+
+test("session container editor writes stay inside the configured persisted paths", async () => {
+  resetRuntimeState();
+
+  const saved = updateEditorFile("/workspace/project/notes.txt", "draft 1", ["/workspace/project"]);
+  assert.equal(saved.ok, true);
+  assert.equal(saved.path, "/workspace/project/notes.txt");
+  assert.equal(runtimeState.files.get("/workspace/project/notes.txt"), "draft 1");
+
+  const listed = listEditorFiles(["/workspace/project"]);
+  assert.deepEqual(listed.scope, ["/workspace/project"]);
+  assert.deepEqual(listed.files, ["/workspace/project/notes.txt"]);
+
+  assert.throws(
+    () => updateEditorFile("/tmp/blocked.txt", "nope", ["/workspace/project"]),
+    /persisted paths/
+  );
 });

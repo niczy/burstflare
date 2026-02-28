@@ -593,6 +593,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     stdout.data = "";
     stderr.data = "";
 
+    code = await runCli(["editor", sessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    assert.equal(stdout.data.trim(), `http://local/runtime/sessions/${sessionId}/editor`);
+    assert.equal(stderr.data, "");
+
+    stdout.data = "";
+    stderr.data = "";
+
     await new Promise((resolve) => setTimeout(resolve, 1100));
 
     code = await runCli(["reconcile", "--url", "http://local"], {

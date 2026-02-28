@@ -8,7 +8,6 @@ This file lists the remaining work required to close the gap between the current
 
 - Implement real asynchronous build execution:
   - real image build metadata
-- Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
 
 ## 2. PR Plan Status
 
@@ -185,16 +184,17 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 13: Browser Terminal And Web Session Controls
 
-- Status: partially complete
+- Status: complete
 - Done:
   - browser preview route
   - basic web controls for sessions
   - browser terminal panel wired to the container-backed SSH WebSocket shell
   - automatic live dashboard refresh while the browser session is active
   - session cards now surface runtime coordinator state from the control plane
-- Remaining:
-  - richer container-native terminal/editor integration
-  - shared parity with CLI session controls
+  - the browser terminal now uses a dedicated runtime shell route instead of the raw SSH tunnel route
+  - the browser now has a container-native workspace editor route that can read and write live runtime files inside the configured persisted paths
+  - saving from the browser editor now mutates the live runtime state and is captured by runtime-backed snapshots
+  - CLI now exposes a matching `burstflare editor <sessionId>` command that prints the browser editor URL for a session
 
 ### PR 14: Workspace Snapshots, Persisted Paths, And Restore
 

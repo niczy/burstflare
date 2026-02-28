@@ -82,6 +82,39 @@ function requireToken(request, service) {
   return token;
 }
 
+async function readEditorRequestAuth(request, service) {
+  const authHeader = request.headers.get("authorization");
+  const bodyText = request.method === "POST" ? await request.text() : null;
+  if (authHeader?.startsWith("Bearer ")) {
+    return {
+      token: authHeader.slice("Bearer ".length),
+      bodyText
+    };
+  }
+
+  const cookieHeader = request.headers.get("cookie");
+  const token = readCookie(cookieHeader, service.sessionCookieName);
+  if (!token) {
+    return null;
+  }
+
+  if (request.method === "POST") {
+    const csrfCookie = readCookie(cookieHeader, CSRF_COOKIE);
+    const form = new URLSearchParams(bodyText || "");
+    const csrfValue = form.get("csrf") || request.headers.get("x-burstflare-csrf");
+    if (!csrfCookie || !csrfValue || csrfCookie !== csrfValue) {
+      const error = new Error("CSRF token mismatch");
+      error.status = 403;
+      throw error;
+    }
+  }
+
+  return {
+    token,
+    bodyText
+  };
+}
+
 function createCsrfToken() {
   return globalThis.crypto.randomUUID();
 }
@@ -900,6 +933,35 @@ export function createApp(options = {}) {
     url.search = "";
     url.searchParams.set("sessionId", sessionId);
     return new Request(url.toString(), request);
+  }
+
+  function createRuntimeEditorRequest(request, session, bodyText = null) {
+    const source = new URL(request.url);
+    const url = new URL(request.url);
+    url.pathname = "/editor";
+    url.search = "";
+    url.searchParams.set("sessionId", session.id);
+    if (Array.isArray(session?.persistedPaths)) {
+      for (const persistedPath of session.persistedPaths) {
+        url.searchParams.append("persistedPath", persistedPath);
+      }
+    }
+    const requestedPath = source.searchParams.get("path");
+    if (requestedPath) {
+      url.searchParams.set("path", requestedPath);
+    }
+    const csrfCookie = readCookie(request.headers.get("cookie"), CSRF_COOKIE);
+    if (csrfCookie) {
+      url.searchParams.set("csrf", csrfCookie);
+    }
+    if (bodyText === null) {
+      return new Request(url.toString(), request);
+    }
+    return new Request(url.toString(), {
+      method: request.method,
+      headers: request.headers,
+      body: bodyText
+    });
   }
 
   function createSnapshotRestoreRequest(session, snapshotId, snapshot, content) {
@@ -2194,6 +2256,50 @@ export function createApp(options = {}) {
           await applyRuntimeSnapshotHydration(token, detail.session);
         }
         return container.fetch(createPreviewRequest(request, sessionId));
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/runtime/sessions/:sessionId/editor",
+      handler: withErrorHandling(async (request, { sessionId }) => {
+        const auth = await readEditorRequestAuth(request, service);
+        if (!auth?.token) {
+          return unauthorized();
+        }
+        const detail = await service.getSession(auth.token, sessionId);
+        const container = await startSessionContainer(sessionId);
+        if (!container) {
+          return new Response("Session container runtime is not bound in this deployment.", {
+            status: 503,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        }
+        if (detail.session.lastRestoredSnapshotId) {
+          await applyRuntimeSnapshotHydration(auth.token, detail.session);
+        }
+        return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/runtime/sessions/:sessionId/editor",
+      handler: withErrorHandling(async (request, { sessionId }) => {
+        const auth = await readEditorRequestAuth(request, service);
+        if (!auth?.token) {
+          return unauthorized();
+        }
+        const detail = await service.getSession(auth.token, sessionId);
+        const container = await startSessionContainer(sessionId);
+        if (!container) {
+          return new Response("Session container runtime is not bound in this deployment.", {
+            status: 503,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        }
+        if (detail.session.lastRestoredSnapshotId) {
+          await applyRuntimeSnapshotHydration(auth.token, detail.session);
+        }
+        return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
       })
     },
     {

@@ -201,6 +201,206 @@ function resetRuntimeState() {
   runtimeState.files.clear();
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getEditorScope(persistedPaths = runtimeState.persistedPaths) {
+  const normalized = normalizePersistedPaths(persistedPaths);
+  return normalized.length > 0 ? normalized : ["/workspace"];
+}
+
+function defaultEditorPath(scope) {
+  const base = scope[0] || "/workspace";
+  const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
+  return `${trimmed || "/workspace"}/notes.txt`;
+}
+
+function listEditorFiles(persistedPaths = runtimeState.persistedPaths) {
+  const scope = getEditorScope(persistedPaths);
+  const files = Array.from(runtimeState.files.keys())
+    .filter((filePath) => isWithinPersistedPaths(filePath, scope))
+    .sort();
+  if (files.length === 0) {
+    files.push(defaultEditorPath(scope));
+  }
+  return {
+    scope,
+    files
+  };
+}
+
+function updateEditorFile(filePath, content, persistedPaths = runtimeState.persistedPaths) {
+  const { scope } = listEditorFiles(persistedPaths);
+  const normalized = normalizeRuntimeFilePath(filePath);
+  if (!normalized || !isWithinPersistedPaths(normalized, scope)) {
+    const error = new Error("Editor path must stay inside the configured persisted paths");
+    error.status = 400;
+    throw error;
+  }
+  runtimeState.persistedPaths = scope;
+  runtimeState.files.set(normalized, String(content || ""));
+  return {
+    ok: true,
+    path: normalized,
+    scope
+  };
+}
+
+function renderEditorHtml({ sessionId = "unknown", filePath, scope, files, saved = false, csrfToken = "" }) {
+  const selectedPath = normalizeRuntimeFilePath(filePath) || files[0] || defaultEditorPath(scope);
+  const safePath = isWithinPersistedPaths(selectedPath, scope) ? selectedPath : files[0] || defaultEditorPath(scope);
+  const content = runtimeState.files.get(safePath) || "";
+  const scopeRows = scope.map((entry) => `<li>${escapeHtml(entry)}</li>`).join("");
+  const fileRows = files
+    .map((entry) => {
+      const active = entry === safePath ? ' style="font-weight:700;border-color:#c25413"' : "";
+      return `<a${active} href="?path=${encodeURIComponent(entry)}">${escapeHtml(entry)}</a>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BurstFlare Editor ${escapeHtml(sessionId)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4efe6;
+        --panel: #ffffff;
+        --ink: #182120;
+        --muted: #5d6664;
+        --accent: #c25413;
+        --border: rgba(24, 33, 32, 0.12);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", sans-serif;
+        background:
+          radial-gradient(circle at top right, rgba(194, 84, 19, 0.14), transparent 28%),
+          linear-gradient(135deg, #f9f0e4 0%, #f4efe6 45%, #edf2ea 100%);
+        color: var(--ink);
+      }
+      main {
+        min-height: 100vh;
+        padding: 24px;
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(220px, 320px) 1fr;
+        gap: 18px;
+      }
+      .panel {
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 18px;
+        box-shadow: 0 18px 44px rgba(24, 33, 32, 0.08);
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 4vw, 3.2rem);
+        line-height: 0.96;
+        letter-spacing: -0.04em;
+      }
+      p, li { color: var(--muted); }
+      ul {
+        margin: 10px 0 0;
+        padding-left: 18px;
+      }
+      nav {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      nav a {
+        display: block;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        color: inherit;
+        background: #fff;
+        text-decoration: none;
+        font-family: "IBM Plex Mono", monospace;
+        word-break: break-word;
+      }
+      label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 420px;
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        padding: 14px;
+        font: 0.95rem/1.5 "IBM Plex Mono", monospace;
+        resize: vertical;
+      }
+      input, button {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        padding: 11px 12px;
+        font: inherit;
+      }
+      button {
+        margin-top: 12px;
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .saved {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      @media (max-width: 900px) {
+        .shell { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="shell">
+        <section class="panel">
+          <h1>Workspace Editor</h1>
+          <p>Session ${escapeHtml(sessionId)}</p>
+          <p class="muted">Writes stay inside the configured persisted paths and remain in the live runtime state.</p>
+          <strong>Persisted paths</strong>
+          <ul>${scopeRows}</ul>
+          <nav>${fileRows}</nav>
+        </section>
+        <section class="panel">
+          <label for="editorPath">File Path</label>
+          <input id="editorPath" name="path" value="${escapeHtml(safePath)}" form="editorForm" />
+          <form id="editorForm" method="POST">
+            <input type="hidden" name="csrf" value="${escapeHtml(csrfToken)}" />
+            <label for="editorContent">Content</label>
+            <textarea id="editorContent" name="content">${escapeHtml(content)}</textarea>
+            <button type="submit">Save File</button>
+          </form>
+          <p class="${saved ? "saved" : "muted"}">${saved ? "Saved to the live container runtime." : "Editing the live container runtime."}</p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
 function renderHtml(req) {
   const sessionId = new URL(req.url, "http://localhost").searchParams.get("sessionId") || "unknown";
   return `<!doctype html>
@@ -742,6 +942,45 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === "/editor" && (req.method === "GET" || req.method === "POST")) {
+    const sessionId = url.searchParams.get("sessionId") || "unknown";
+    const requestedPaths = normalizePersistedPaths(url.searchParams.getAll("persistedPath"));
+    const csrfToken = url.searchParams.get("csrf") || "";
+    const scope = getEditorScope(requestedPaths.length > 0 ? requestedPaths : runtimeState.persistedPaths);
+    runtimeState.persistedPaths = scope;
+
+    let activePath = url.searchParams.get("path");
+    let saved = false;
+
+    if (req.method === "POST") {
+      const body = await readRequestBody(req);
+      const form = new URLSearchParams(body.toString("utf8"));
+      const updated = updateEditorFile(form.get("path"), form.get("content"), scope);
+      activePath = updated.path;
+      saved = true;
+    }
+
+    const listed = listEditorFiles(scope);
+    const selectedPath = normalizeRuntimeFilePath(activePath);
+    const filePath =
+      selectedPath && isWithinPersistedPaths(selectedPath, listed.scope)
+        ? selectedPath
+        : listed.files[0] || defaultEditorPath(listed.scope);
+
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(
+      renderEditorHtml({
+        sessionId,
+        filePath,
+        scope: listed.scope,
+        files: listed.files,
+        saved,
+        csrfToken
+      })
+    );
+    return;
+  }
+
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(renderHtml(req));
 });
@@ -784,7 +1023,9 @@ export {
   applySnapshotRestore,
   createSnapshotEnvelope,
   exportSnapshotPayload,
+  listEditorFiles,
   normalizePersistedPaths,
   resetRuntimeState,
-  runtimeState
+  runtimeState,
+  updateEditorFile
 };

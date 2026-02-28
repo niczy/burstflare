@@ -1175,6 +1175,109 @@ test("worker proxies browser terminal websocket upgrades into the session contai
   assert.equal(forwarded.upgrade, "websocket");
 });
 
+test("worker proxies browser editor requests into the session container editor route", async () => {
+  const forwarded = {
+    started: 0,
+    sessionId: null,
+    path: null,
+    requestSessionId: null,
+    requestedPath: null,
+    persistedPaths: [],
+    method: null,
+    bodyText: null
+  };
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer(sessionId) {
+      forwarded.sessionId = sessionId;
+      return {
+        async startAndWaitForPorts() {
+          forwarded.started += 1;
+        },
+        async fetch(request) {
+          const url = new URL(request.url);
+          forwarded.path = url.pathname;
+          forwarded.requestSessionId = url.searchParams.get("sessionId");
+          forwarded.requestedPath = url.searchParams.get("path");
+          forwarded.persistedPaths = url.searchParams.getAll("persistedPath");
+          forwarded.method = request.method;
+          forwarded.bodyText = request.method === "POST" ? await request.text() : null;
+          return new Response("proxied editor", {
+            headers: {
+              "content-type": "text/html; charset=utf-8"
+            }
+          });
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "editor-proxy@example.com",
+    name: "Editor Proxy"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "editor-proxy",
+    description: "Template for editor proxy"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/editor-proxy:1.0.0",
+      persistedPaths: ["/workspace/project"]
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const session = await service.createSession(owner.token, {
+    name: "container-editor",
+    templateId: template.template.id
+  });
+
+  const response = await app.fetch(
+    new Request(
+      `http://example.test/runtime/sessions/${session.session.id}/editor?path=${encodeURIComponent("/workspace/project/notes.txt")}`,
+      {
+        headers: {
+          authorization: `Bearer ${owner.token}`
+        }
+      }
+    )
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "proxied editor");
+  assert.equal(forwarded.started, 1);
+  assert.equal(forwarded.sessionId, session.session.id);
+  assert.equal(forwarded.path, "/editor");
+  assert.equal(forwarded.requestSessionId, session.session.id);
+  assert.equal(forwarded.requestedPath, "/workspace/project/notes.txt");
+  assert.deepEqual(forwarded.persistedPaths, ["/workspace/project"]);
+  assert.equal(forwarded.method, "GET");
+
+  const saved = await app.fetch(
+    new Request(`http://example.test/runtime/sessions/${session.session.id}/editor`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${owner.token}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        path: "/workspace/project/notes.txt",
+        content: "draft 2"
+      })
+    })
+  );
+
+  assert.equal(saved.status, 200);
+  assert.equal(await saved.text(), "proxied editor");
+  assert.equal(forwarded.method, "POST");
+  assert.match(forwarded.bodyText || "", /content=draft\+2/);
+});
+
 test("worker coordinates session lifecycle through the session container durable object", async () => {
   const calls = [];
   let runtime = {

@@ -1154,3 +1154,28 @@ This file records what has already been implemented in the repository and what h
   - the browser terminal websocket returns the container shell banner and `pwd` resolves to `/workspace`
   - the container `/ssh` route serves a real `SSH-2.0-OpenSSH_10.2` banner
   - the public Worker `/runtime/sessions/:id/ssh` route also serves a real `SSH-2.0-OpenSSH_10.2` banner through the runtime token-gated websocket path
+
+## 76. Browser Runtime Editor
+
+- Added a new container-native `/editor` route inside the session runtime image.
+- The editor route now:
+  - lists runtime files inside the session's configured persisted paths
+  - opens a selected file directly from live runtime state
+  - writes file edits back into the running container
+  - preserves the session's persisted-path policy when saving
+- Added new Worker proxy routes for:
+  - `GET /runtime/sessions/:id/editor`
+  - `POST /runtime/sessions/:id/editor`
+- The editor proxy now:
+  - authenticates with either bearer auth or browser session cookies
+  - preserves CSRF protection for cookie-authenticated saves
+  - forwards the session's persisted-path policy into the container editor
+- Added a new browser `Editor` action on session cards so the web app can open the runtime editor in a new tab.
+- Added `burstflare editor <sessionId>` to print the session editor URL from the CLI.
+- Added direct container-runtime test coverage for editor path enforcement.
+- Added Worker test coverage for editor proxy routing and save-body forwarding.
+- Added CLI coverage for the new `editor` command.
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - the public editor route renders the workspace editor shell
+  - saving `/workspace/project/notes.txt` through the public editor route updates the live runtime
+  - a subsequent runtime-backed snapshot captures the saved editor content in the structured snapshot envelope

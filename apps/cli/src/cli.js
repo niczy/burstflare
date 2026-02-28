@@ -182,6 +182,7 @@ function helpText() {
     "burstflare export [--output workspace-export.json]",
     "burstflare reconcile [--enqueue]",
     "burstflare preview <sessionId>",
+    "burstflare editor <sessionId>",
     "burstflare ssh <sessionId>"
   ].join("\n");
 }
@@ -1142,6 +1143,12 @@ export async function runCli(argv, dependencies = {}) {
       );
       const url = new URL(session.session.previewUrl, baseUrl).toString();
       print(stdout, url);
+      return 0;
+    }
+
+    if (command === "editor") {
+      const sessionId = subcommand;
+      print(stdout, new URL(`/runtime/sessions/${sessionId}/editor`, baseUrl).toString());
       return 0;
     }
 
