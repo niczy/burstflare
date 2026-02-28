@@ -1,162 +1,422 @@
 export const styles = `
 :root {
   color-scheme: light;
-  --bg: #f4efe6;
-  --panel: rgba(255, 255, 255, 0.92);
+  --bg: #f5f5f2;
+  --bg-deep: #eceee7;
+  --panel: rgba(251, 251, 248, 0.9);
   --panel-strong: #ffffff;
-  --ink: #182120;
-  --muted: #5d6664;
-  --accent: #c25413;
-  --accent-soft: #ffe1d1;
-  --border: rgba(24, 33, 32, 0.12);
-  --shadow: 0 18px 50px rgba(24, 33, 32, 0.08);
+  --ink: #151918;
+  --muted: #5c645f;
+  --accent: #0f766e;
+  --accent-soft: #d9f3ee;
+  --accent-strong: #0a5c56;
+  --border: rgba(21, 25, 24, 0.1);
+  --border-strong: rgba(21, 25, 24, 0.16);
+  --shadow: 0 24px 60px rgba(15, 118, 110, 0.08);
+  --shadow-soft: 0 12px 28px rgba(21, 25, 24, 0.05);
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-family: "Avenir Next", "IBM Plex Sans", "Segoe UI", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at top right, rgba(194, 84, 19, 0.15), transparent 28%),
-    linear-gradient(135deg, #f9f0e4 0%, #f4efe6 45%, #edf2ea 100%);
+    radial-gradient(circle at 12% 18%, rgba(15, 118, 110, 0.16), transparent 24%),
+    radial-gradient(circle at 84% 12%, rgba(15, 118, 110, 0.08), transparent 18%),
+    linear-gradient(160deg, #fbfbf8 0%, var(--bg) 42%, var(--bg-deep) 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.52), transparent 35%),
+    repeating-linear-gradient(
+      135deg,
+      rgba(21, 25, 24, 0.012) 0,
+      rgba(21, 25, 24, 0.012) 1px,
+      transparent 1px,
+      transparent 14px
+    );
+  opacity: 0.5;
 }
 
 main {
-  max-width: 1280px;
+  max-width: 1380px;
   margin: 0 auto;
-  padding: 32px 20px 80px;
+  padding: 28px clamp(18px, 3vw, 42px) 96px;
+  position: relative;
+  z-index: 1;
+}
+
+.shell {
+  display: grid;
+  gap: 24px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.12);
 }
 
 .hero {
   display: grid;
-  gap: 20px;
-  grid-template-columns: 1.4fr 1fr;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
   align-items: start;
 }
 
 .card {
   background: var(--panel);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--border);
-  border-radius: 22px;
-  padding: 20px;
+  border-radius: 28px;
+  padding: clamp(18px, 2vw, 28px);
   box-shadow: var(--shadow);
+}
+
+.hero-stack,
+.detail-grid,
+.operations-grid {
+  display: grid;
+  gap: 24px;
+}
+
+.hero-split {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1.18fr) minmax(280px, 0.82fr);
+}
+
+.hero-card {
+  min-height: 100%;
+  display: grid;
+  gap: 18px;
+  align-content: start;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(251, 251, 248, 0.82)),
+    linear-gradient(120deg, rgba(15, 118, 110, 0.07), transparent 46%);
 }
 
 .title {
   margin: 0;
-  font-size: clamp(2rem, 5vw, 4.4rem);
-  line-height: 0.94;
+  font-size: clamp(2.6rem, 6vw, 5.4rem);
+  line-height: 0.9;
   font-weight: 800;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.06em;
 }
 
 .subtitle {
-  margin: 12px 0 0;
+  margin: 0;
   color: var(--muted);
-  max-width: 60ch;
+  max-width: 62ch;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.hero-copy {
+  display: grid;
+  gap: 18px;
+}
+
+.hero-metrics {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-chip {
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 118, 110, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.metric-chip strong {
+  display: block;
+  font-size: 1.15rem;
+  letter-spacing: -0.04em;
+}
+
+.metric-chip span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.section-kicker {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.section-title {
+  margin: 0;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+}
+
+.section-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.quickstart-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.quickstart-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.step {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: var(--shadow-soft);
+}
+
+.step strong {
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.step span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.code-block {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  background: linear-gradient(145deg, rgba(17, 25, 24, 0.96), rgba(22, 34, 32, 0.96));
+  color: #e8f7f4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mini-note {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--accent-strong);
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: 20px;
-  margin-top: 24px;
+  gap: 24px;
+}
+
+.grid.grid-2 {
+  grid-template-columns: minmax(0, 1.06fr) minmax(300px, 0.94fr);
+}
+
+.grid.grid-3 {
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr) minmax(280px, 0.92fr);
+}
+
+.card-head {
+  display: grid;
+  gap: 6px;
+}
+
+.card-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: -0.03em;
+}
+
+.card-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 label {
   display: block;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  margin-bottom: 6px;
+  margin-bottom: 7px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 input,
 textarea,
-select,
-button {
+select {
   width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  padding: 11px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  padding: 12px 13px;
   font: inherit;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid rgba(15, 118, 110, 0.18);
+  border-color: rgba(15, 118, 110, 0.45);
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 16px;
+  border: 0;
+  padding: 12px 15px;
+  font: inherit;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 14px 26px rgba(15, 118, 110, 0.18);
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.24s cubic-bezier(0.16, 1, 0.3, 1), background 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 32px rgba(15, 118, 110, 0.2);
+}
+
+button:active {
+  transform: translateY(1px) scale(0.99);
 }
 
 textarea {
-  min-height: 84px;
+  min-height: 96px;
   resize: vertical;
-}
-
-button {
-  background: var(--accent);
-  color: white;
-  border: 0;
-  cursor: pointer;
-  font-weight: 700;
 }
 
 button.secondary {
   background: var(--panel-strong);
   color: var(--ink);
   border: 1px solid var(--border);
+  box-shadow: none;
 }
 
 .stack {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .row {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .row > * {
-  flex: 1;
+  flex: 1 1 180px;
 }
 
 .pill {
-  display: inline-block;
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   background: var(--accent-soft);
   color: var(--accent);
-  font-weight: 700;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
 }
 
 .list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .item {
   background: var(--panel-strong);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: var(--shadow-soft);
 }
 
 pre {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
   margin: 0;
 }
 
 .terminal {
-  min-height: 180px;
-  max-height: 320px;
+  min-height: 220px;
+  max-height: 360px;
   overflow: auto;
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background: #171b1a;
-  color: #e9f0ea;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 35%),
+    linear-gradient(145deg, #151c1b, #111716);
+  color: #edf8f6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .terminal-input {
@@ -165,17 +425,94 @@ pre {
 
 .turnstile-shell {
   min-height: 72px;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px dashed var(--border);
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.72);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.split-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.split-panel.columns {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .muted { color: var(--muted); }
-.error { color: #9d2500; min-height: 1.25em; }
+.error {
+  color: #9d2500;
+  min-height: 1.25em;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(157, 37, 0, 0.06);
+}
+
+.surface-note {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(21, 25, 24, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.surface-note strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.92rem;
+}
+
+.surface-note span {
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 0.9rem;
+}
+
+.output-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.output-shell pre {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: var(--shadow-soft);
+}
+
+@media (max-width: 1080px) {
+  .hero,
+  .hero-split,
+  .grid.grid-2,
+  .grid.grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
 
 @media (max-width: 820px) {
-  .hero { grid-template-columns: 1fr; }
+  main {
+    padding: 18px 14px 80px;
+  }
+
+  .hero-metrics,
+  .quickstart-grid,
+  .split-panel.columns {
+    grid-template-columns: 1fr;
+  }
+
+  .row > * {
+    flex-basis: 100%;
+  }
+
+  .card {
+    border-radius: 22px;
+    padding: 16px;
+  }
+
+  .title {
+    font-size: clamp(2.2rem, 15vw, 3.6rem);
+  }
 }
 `;
 
@@ -189,16 +526,93 @@ export const html = `<!doctype html>
     __BURSTFLARE_TURNSTILE_SCRIPT__
   </head>
   <body>
-    <main>
+    <main class="shell">
       <section class="hero">
-        <div class="card">
-          <span class="pill">Cloudflare-native burst dev</span>
-          <h1 class="title">BurstFlare</h1>
-          <p class="subtitle">
-            Shared control plane for accounts, workspace policy, build queues, container sessions, snapshots, and SSH handoff.
-          </p>
+        <div class="hero-stack">
+          <div class="hero-split">
+            <div class="card hero-card">
+              <span class="eyebrow">Cloudflare-native workspace control</span>
+              <div class="hero-copy">
+                <span class="pill">BurstFlare</span>
+                <h1 class="title">Launch dev workspaces without juggling five tools.</h1>
+                <p class="subtitle">
+                  BurstFlare keeps account auth, template releases, queue-driven builds, container sessions, snapshots, browser access,
+                  and SSH handoff inside one Cloudflare-native control plane. The dashboard below is built to move from first login to
+                  active session fast.
+                </p>
+              </div>
+              <div class="hero-metrics">
+                <div class="metric-chip">
+                  <strong>1 control plane</strong>
+                  <span>accounts, builds, runtime, storage</span>
+                </div>
+                <div class="metric-chip">
+                  <strong>2 entry points</strong>
+                  <span>web shell and the flare CLI</span>
+                </div>
+                <div class="metric-chip">
+                  <strong>Cloudflare only</strong>
+                  <span>D1, KV, R2, Queues, Workflows, Containers</span>
+                </div>
+              </div>
+              <div class="hero-actions">
+                <button class="secondary" id="refreshButton">Refresh Data</button>
+                <button class="secondary" id="reconcileButton">Reconcile</button>
+              </div>
+            </div>
+
+            <div class="card quickstart-shell">
+              <p class="section-kicker">Quick Start</p>
+              <h2 class="section-title">Get a working environment in minutes.</h2>
+              <p class="section-copy">
+                Use the browser for onboarding, then switch to the CLI when you want scripted setup or repeatable ops.
+              </p>
+              <div class="quickstart-grid">
+                <div class="step">
+                  <strong>1. Run the local control plane</strong>
+                  <span>Install dependencies, then boot the Worker-compatible dev server.</span>
+                  <pre class="code-block">npm install
+npm run dev</pre>
+                </div>
+                <div class="step">
+                  <strong>2. Register in the shell or CLI</strong>
+                  <span>Use the auth card on the right, or register directly with the flare CLI.</span>
+                  <pre class="code-block">flare auth register --email you@example.com --url http://127.0.0.1:8787</pre>
+                </div>
+                <div class="step">
+                  <strong>3. Create a template release</strong>
+                  <span>Define a template, queue a version, process the build, and promote it.</span>
+                  <pre class="code-block">flare template create node-dev
+flare template upload &lt;templateId&gt; --version 1.0.0 --url http://127.0.0.1:8787</pre>
+                </div>
+                <div class="step">
+                  <strong>4. Launch and attach</strong>
+                  <span>Start a session, then use Browser Terminal, Preview, Editor, or SSH from one place.</span>
+                  <pre class="code-block">flare session up sandbox --template &lt;templateId&gt; --url http://127.0.0.1:8787
+flare ssh &lt;sessionId&gt;</pre>
+                </div>
+              </div>
+              <p class="mini-note">
+                Tip: if you only need a quick tour, sign in first, create one template, promote one version, and use the Session Launcher
+                plus Browser Terminal cards below.
+              </p>
+            </div>
+          </div>
+
+          <div class="card stack">
+            <div class="card-head">
+              <h2>Dashboard Pulse</h2>
+              <p>Live counts for the current workspace so you can tell if the stack is healthy before you start making changes.</p>
+            </div>
+            <div class="list" id="dashboardPulse"></div>
+          </div>
         </div>
+
         <div class="card stack">
+          <div class="card-head">
+            <h2>Sign In And Bootstrap</h2>
+            <p>Start here for browser access, passkeys, recovery, and device approval. This is the fastest route into the rest of the dashboard.</p>
+          </div>
           <div class="row">
             <div>
               <label for="email">Email</label>
@@ -232,22 +646,22 @@ export const html = `<!doctype html>
             <button class="secondary" id="recoveryCodesButton">New Recovery Codes</button>
             <button class="secondary" id="passkeyRegisterButton">Register Passkey</button>
           </div>
-          <div class="muted" id="identity">Not signed in</div>
-          <div class="muted" id="lastRefresh">Last refresh: never</div>
-          <pre id="recoveryCodes">No recovery codes generated.</pre>
+          <div class="surface-note">
+            <strong id="identity">Not signed in</strong>
+            <span id="lastRefresh">Last refresh: never</span>
+          </div>
+          <pre class="code-block" id="recoveryCodes">No recovery codes generated.</pre>
           <div class="list" id="passkeys"></div>
           <div class="error" id="errors"></div>
         </div>
       </section>
 
-      <section class="grid">
+      <section class="grid grid-2">
         <div class="card stack">
-          <h2>Dashboard Pulse</h2>
-          <div class="list" id="dashboardPulse"></div>
-        </div>
-
-        <div class="card stack">
-          <h2>Workspace</h2>
+          <div class="card-head">
+            <h2>Workspace Control</h2>
+            <p>Rename the active workspace, invite teammates, approve incoming members, and adjust the plan without leaving the page.</p>
+          </div>
           <div>
             <label for="workspaceName">Workspace Name</label>
             <input id="workspaceName" type="text" placeholder="My Workspace" />
@@ -283,8 +697,10 @@ export const html = `<!doctype html>
         </div>
 
         <div class="card stack">
-          <h2>Auth Sessions</h2>
-          <div class="muted">Review and revoke active browser or CLI sign-ins without forcing a full account-wide logout.</div>
+          <div class="card-head">
+            <h2>Auth Sessions</h2>
+            <p>Review browser and CLI logins, approve device codes, or revoke access without forcing a full account reset.</p>
+          </div>
           <div>
             <label for="deviceCode">Approve Device Code</label>
             <input id="deviceCode" type="text" placeholder="device_..." />
@@ -298,9 +714,14 @@ export const html = `<!doctype html>
           <div class="list" id="pendingDevices"></div>
           <div class="list" id="authSessions"></div>
         </div>
+      </section>
 
+      <section class="grid grid-3">
         <div class="card stack">
-          <h2>Templates</h2>
+          <div class="card-head">
+            <h2>Templates</h2>
+            <p>Create reusable environments, queue versions, promote releases, and inspect build or storage history from one place.</p>
+          </div>
           <div>
             <label for="templateName">Template Name</label>
             <input id="templateName" type="text" placeholder="node-dev" />
@@ -340,14 +761,22 @@ export const html = `<!doctype html>
             </div>
           </div>
           <button id="promoteButton">Promote Version</button>
-          <div class="muted">Inspect a template to review versions, releases, and stored artifact totals.</div>
+          <div class="surface-note">
+            <strong>Quick Start Shortcut</strong>
+            <span>Create a template, queue one build, press Refresh Builds, then promote the version and inspect it before launching a session.</span>
+          </div>
           <div class="list" id="templates"></div>
-          <pre id="templateInspector">Select a template to inspect.</pre>
-          <pre id="builds">[]</pre>
+          <div class="output-shell">
+            <pre id="templateInspector">Select a template to inspect.</pre>
+            <pre id="builds">[]</pre>
+          </div>
         </div>
 
         <div class="card stack">
-          <h2>Sessions</h2>
+          <div class="card-head">
+            <h2>Session Launcher</h2>
+            <p>Spin up a workspace from the currently promoted template, then route users into Preview, Editor, Browser Terminal, or SSH.</p>
+          </div>
           <div class="row">
             <div>
               <label for="sessionName">Session Name</label>
@@ -359,15 +788,18 @@ export const html = `<!doctype html>
             </div>
           </div>
           <button id="createSessionButton">Create Session</button>
-          <div class="row">
-            <button class="secondary" id="refreshButton">Refresh Data</button>
-            <button class="secondary" id="reconcileButton">Reconcile</button>
+          <div class="surface-note">
+            <strong>Session workflow</strong>
+            <span>Create, start, inspect events, then use the quick actions on each card to preview, edit, or attach.</span>
           </div>
           <div class="list" id="sessions"></div>
         </div>
 
         <div class="card stack">
-          <h2>Browser Terminal</h2>
+          <div class="card-head">
+            <h2>Browser Terminal</h2>
+            <p>Use the Browser Terminal for lightweight checks and the SSH action on a session card when you need a full shell.</p>
+          </div>
           <div class="muted" id="terminalStatus">Not connected</div>
           <pre class="terminal" id="terminalOutput">Waiting for a session attach...</pre>
           <div class="row">
@@ -376,9 +808,14 @@ export const html = `<!doctype html>
             <button class="secondary" id="terminalCloseButton">Close</button>
           </div>
         </div>
+      </section>
 
+      <section class="grid grid-2">
         <div class="card stack">
-          <h2>Snapshots + Reports</h2>
+          <div class="card-head">
+            <h2>Snapshots + Reports</h2>
+            <p>Capture session state, review snapshot content, and keep an eye on usage plus operator-level health from one control area.</p>
+          </div>
           <div class="row">
             <div>
               <label for="snapshotSession">Session ID</label>
@@ -399,15 +836,26 @@ export const html = `<!doctype html>
             <button class="secondary" id="reportButton">Refresh Admin Report</button>
           </div>
           <div class="list" id="snapshotList"></div>
-          <pre id="snapshotContentPreview">No snapshot content loaded.</pre>
-          <pre id="usage"></pre>
-          <pre id="report">[]</pre>
+          <div class="output-shell">
+            <pre id="snapshotContentPreview">No snapshot content loaded.</pre>
+            <pre id="usage"></pre>
+            <pre id="report">[]</pre>
+          </div>
         </div>
 
         <div class="card stack">
-          <h2>Audit + Releases</h2>
-          <pre id="releases">[]</pre>
-          <pre id="audit">[]</pre>
+          <div class="card-head">
+            <h2>Audit + Releases</h2>
+            <p>Track what changed, which release is active, and what the control plane did on behalf of your workspace.</p>
+          </div>
+          <div class="surface-note">
+            <strong>Quick Start recap</strong>
+            <span>Register, create a template, promote a version, launch a session, then save a snapshot. Everything you need to verify that flow is in this page.</span>
+          </div>
+          <div class="output-shell">
+            <pre id="releases">[]</pre>
+            <pre id="audit">[]</pre>
+          </div>
         </div>
       </section>
     </main>
