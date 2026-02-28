@@ -401,3 +401,16 @@ This file records what has already been implemented in the repository and what h
   - generate recovery codes
   - create a new browser session from a valid recovery code
   - reject reuse of the same recovery code
+
+## 36. Turnstile Verification Path
+
+- Added an optional Turnstile verification path in the Worker for:
+  - registration
+  - login
+  - recovery-code login
+  - device authorization start
+- Added `turnstileEnabled` to `/api/health`.
+- Added CLI request support for passing `--turnstile-token` on auth flows.
+- Added a browser input field so the web app can send a Turnstile token when the secret is configured.
+- Added mocked enforcement coverage in the Worker test suite.
+- Verified the live Worker currently reports `turnstileEnabled: false` and remains backward-compatible until a `TURNSTILE_SECRET` is configured

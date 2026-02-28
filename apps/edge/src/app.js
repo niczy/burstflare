@@ -256,6 +256,39 @@ function createObjectStore(options) {
   };
 }
 
+function createTurnstileVerifier(options) {
+  const secret = options.TURNSTILE_SECRET || "";
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+
+  return {
+    enabled: Boolean(secret),
+    async verify(token, remoteIp) {
+      if (!secret) {
+        return;
+      }
+      if (!token) {
+        const error = new Error("Turnstile token is required");
+        error.status = 400;
+        throw error;
+      }
+      const response = await fetchImpl("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        body: new URLSearchParams({
+          secret,
+          response: token,
+          ...(remoteIp ? { remoteip: remoteIp } : {})
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        const error = new Error((data["error-codes"] && data["error-codes"].join(", ")) || "Turnstile verification failed");
+        error.status = 400;
+        throw error;
+      }
+    }
+  };
+}
+
 function createJobQueue(options) {
   if (!options.BUILD_QUEUE && !options.RECONCILE_QUEUE) {
     return null;
@@ -376,6 +409,7 @@ export async function handleScheduled(controller, options = {}) {
 export function createApp(options = {}) {
   const service = createWorkerService(options);
   const rateLimiter = createRateLimiter(options);
+  const turnstile = createTurnstileVerifier(options);
 
   function hasContainerBinding() {
     return Boolean(options.containersEnabled);
@@ -440,6 +474,13 @@ export function createApp(options = {}) {
     };
   }
 
+  async function verifyTurnstile(request, body) {
+    if (!turnstile.enabled) {
+      return;
+    }
+    await turnstile.verify(body.turnstileToken || request.headers.get("cf-turnstile-response"), requestIdentity(request));
+  }
+
   const routes = [
     {
       method: "GET",
@@ -483,7 +524,8 @@ export function createApp(options = {}) {
           ok: true,
           service: "burstflare",
           runtime: {
-            containersEnabled: hasContainerBinding()
+            containersEnabled: hasContainerBinding(),
+            turnstileEnabled: turnstile.enabled
           }
         })
     },
@@ -498,6 +540,7 @@ export function createApp(options = {}) {
         },
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
+          await verifyTurnstile(request, body);
           const result = await service.registerUser(body);
           const csrfToken = createCsrfToken();
           return toJsonWithCookies(
@@ -521,6 +564,7 @@ export function createApp(options = {}) {
         },
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
+          await verifyTurnstile(request, body);
           const result = await service.login(body);
           const csrfToken = createCsrfToken();
           return toJsonWithCookies(
@@ -544,6 +588,7 @@ export function createApp(options = {}) {
         },
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
+          await verifyTurnstile(request, body);
           const result = await service.recoverWithCode(body);
           const csrfToken = createCsrfToken();
           return toJsonWithCookies(
@@ -658,6 +703,7 @@ export function createApp(options = {}) {
         },
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
+          await verifyTurnstile(request, body);
           return toJson(await service.deviceStart(body));
         })
       )

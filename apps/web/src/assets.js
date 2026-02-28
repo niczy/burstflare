@@ -185,6 +185,10 @@ export const html = `<!doctype html>
               <input id="name" type="text" placeholder="Nicholas" />
             </div>
           </div>
+          <div>
+            <label for="turnstileToken">Turnstile Token</label>
+            <input id="turnstileToken" type="text" placeholder="Optional when Turnstile is enabled" />
+          </div>
           <div class="row">
             <button id="registerButton">Register</button>
             <button class="secondary" id="loginButton">Login</button>
@@ -540,7 +544,11 @@ byId("registerButton").addEventListener("click", async () => {
   await perform(async () => {
     const data = await api('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email: byId("email").value, name: byId("name").value })
+      body: JSON.stringify({
+        email: byId("email").value,
+        name: byId("name").value,
+        turnstileToken: byId("turnstileToken").value
+      })
     });
     setAuth(data.refreshToken, data.csrfToken || "");
   });
@@ -550,7 +558,11 @@ byId("loginButton").addEventListener("click", async () => {
   await perform(async () => {
     const data = await api('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email: byId("email").value, kind: 'browser' })
+      body: JSON.stringify({
+        email: byId("email").value,
+        kind: 'browser',
+        turnstileToken: byId("turnstileToken").value
+      })
     });
     setAuth(data.refreshToken, data.csrfToken || "");
   });

@@ -58,7 +58,7 @@ This file lists the remaining work required to close the gap between the current
   - the web app now runs without storing bearer access tokens in local storage
 - Remaining:
   - WebAuthn
-  - Turnstile
+  - Turnstile production enablement with a configured `TURNSTILE_SECRET` and real client widget flow
   - deeper device/session management UX beyond the current logout-all path
 
 ### PR 04: Workspace And Membership Model

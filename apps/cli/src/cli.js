@@ -308,7 +308,7 @@ export async function runCli(argv, dependencies = {}) {
           {
             method: "POST",
             headers: headers(),
-            body: JSON.stringify({ email: options.email, name: options.name })
+            body: JSON.stringify({ email: options.email, name: options.name, turnstileToken: options["turnstile-token"] || "" })
           },
           fetchImpl
         );
@@ -323,7 +323,7 @@ export async function runCli(argv, dependencies = {}) {
           {
             method: "POST",
             headers: headers(),
-            body: JSON.stringify({ email: options.email, kind: "api" })
+            body: JSON.stringify({ email: options.email, kind: "api", turnstileToken: options["turnstile-token"] || "" })
           },
           fetchImpl
         );
@@ -338,7 +338,12 @@ export async function runCli(argv, dependencies = {}) {
           {
             method: "POST",
             headers: headers(),
-            body: JSON.stringify({ email: options.email, code: options.code, workspaceId: options["workspace-id"] || null })
+            body: JSON.stringify({
+              email: options.email,
+              code: options.code,
+              workspaceId: options["workspace-id"] || null,
+              turnstileToken: options["turnstile-token"] || ""
+            })
           },
           fetchImpl
         );
@@ -353,7 +358,11 @@ export async function runCli(argv, dependencies = {}) {
           {
             method: "POST",
             headers: headers(),
-            body: JSON.stringify({ email: options.email, workspaceId: options["workspace-id"] || null })
+            body: JSON.stringify({
+              email: options.email,
+              workspaceId: options["workspace-id"] || null,
+              turnstileToken: options["turnstile-token"] || ""
+            })
           },
           fetchImpl
         );

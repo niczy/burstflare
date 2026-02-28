@@ -80,6 +80,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const health = await requestJson(app, "/api/health");
   assert.equal(health.response.status, 200);
   assert.equal(health.data.ok, true);
+  assert.equal(health.data.runtime.turnstileEnabled, false);
 
   const appScriptResponse = await app.fetch(new Request("http://example.test/app.js"));
   assert.equal(appScriptResponse.status, 200);
@@ -88,6 +89,42 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /x-burstflare-csrf/);
   assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
   assert.doesNotMatch(appScript, /state\.token/);
+
+  const turnstileApp = createApp({
+    TURNSTILE_SECRET: "secret",
+    fetchImpl: async (_url, init) => {
+      const params = new URLSearchParams(init.body);
+      const success = params.get("response") === "valid-turnstile";
+      return new Response(
+        JSON.stringify(success ? { success: true } : { success: false, "error-codes": ["invalid-input-response"] }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8"
+          }
+        }
+      );
+    }
+  });
+
+  const strictHealth = await requestJson(turnstileApp, "/api/health");
+  assert.equal(strictHealth.response.status, 200);
+  assert.equal(strictHealth.data.runtime.turnstileEnabled, true);
+
+  const strictMissing = await requestJson(turnstileApp, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "strict-missing@example.com", name: "Strict Missing" })
+  });
+  assert.equal(strictMissing.response.status, 400);
+
+  const strictAllowed = await requestJson(turnstileApp, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "strict-ok@example.com",
+      name: "Strict Ok",
+      turnstileToken: "valid-turnstile"
+    })
+  });
+  assert.equal(strictAllowed.response.status, 200);
 
   const owner = await requestJson(app, "/api/auth/register", {
     method: "POST",
