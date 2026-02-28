@@ -84,6 +84,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
   const configPath = path.join(os.tmpdir(), `burstflare-cli-${Date.now()}.json`);
   const bundlePath = path.join(os.tmpdir(), `burstflare-bundle-${Date.now()}.txt`);
   const restoredPath = path.join(os.tmpdir(), `burstflare-restored-${Date.now()}.txt`);
+  const exportPath = path.join(os.tmpdir(), `burstflare-export-${Date.now()}.json`);
 
   try {
     await writeFile(bundlePath, "cli bundle payload");
@@ -490,6 +491,21 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["export", "--output", exportPath, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const exportOutput = JSON.parse(stdout.data.trim());
+    assert.equal(exportOutput.output, exportPath);
+    const exported = JSON.parse(await readFile(exportPath, "utf8"));
+    assert.equal(exported.export.workspace.id, refreshedConfig.workspaceId);
+    assert.equal(exported.export.members.length, 1);
+
+    stdout.data = "";
+
     code = await runCli(["ssh", sessionId, "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -565,5 +581,6 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });
     await rm(restoredPath, { force: true });
+    await rm(exportPath, { force: true });
   }
 });

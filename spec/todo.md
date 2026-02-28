@@ -237,11 +237,12 @@ This file lists the remaining work required to close the gap between the current
 - Done:
   - audit logging exists for many core actions
   - rate limiting on key auth and upload routes
+  - authenticated workspace export path for backup/export use
 - Remaining:
   - abuse controls
   - full audit coverage
   - runtime secret handling
-  - backup/export procedures
+  - fuller backup/export procedures beyond the current workspace JSON export
   - focused security validation of proxy and tenant isolation paths
 
 ### PR 18: Beta Readiness, Docs, And Production Rollout

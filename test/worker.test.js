@@ -530,6 +530,13 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(report.data.report.sessionsSleeping, 1);
   assert.equal(report.data.report.activeUploadGrants, 0);
 
+  const exported = await requestJson(app, "/api/admin/export", {
+    headers: ownerHeaders
+  });
+  assert.equal(exported.response.status, 200);
+  assert.equal(exported.data.export.workspace.id, owner.data.workspace.id);
+  assert.equal(exported.data.export.members.length, 2);
+
   const enqueued = await requestJson(app, "/api/admin/reconcile/enqueue", {
     method: "POST",
     headers: ownerHeaders

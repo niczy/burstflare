@@ -2177,6 +2177,42 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async exportWorkspace(token) {
+      return store.transact((state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const workspaceId = auth.workspace.id;
+        const templateIds = new Set(
+          state.templates.filter((entry) => entry.workspaceId === workspaceId).map((entry) => entry.id)
+        );
+        const templateVersionIds = new Set(
+          state.templateVersions.filter((entry) => templateIds.has(entry.templateId)).map((entry) => entry.id)
+        );
+        const sessionIds = new Set(
+          state.sessions.filter((entry) => entry.workspaceId === workspaceId).map((entry) => entry.id)
+        );
+
+        return {
+          export: {
+            exportedAt: nowIso(clock),
+            workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+            members: state.memberships.filter((entry) => entry.workspaceId === workspaceId),
+            invites: state.workspaceInvites.filter((entry) => entry.workspaceId === workspaceId),
+            templates: state.templates
+              .filter((entry) => entry.workspaceId === workspaceId)
+              .map((entry) => formatTemplate(state, entry)),
+            builds: state.templateBuilds.filter((entry) => templateVersionIds.has(entry.templateVersionId)),
+            releases: state.bindingReleases.filter((entry) => entry.workspaceId === workspaceId),
+            sessions: state.sessions
+              .filter((entry) => entry.workspaceId === workspaceId)
+              .map((entry) => formatSession(state, entry)),
+            snapshots: state.snapshots.filter((entry) => sessionIds.has(entry.sessionId)),
+            usage: state.usageEvents.filter((entry) => entry.workspaceId === workspaceId),
+            audit: state.auditLogs.filter((entry) => entry.workspaceId === workspaceId)
+          }
+        };
+      });
+    },
+
     async reconcile(token) {
       return store.transact(async (state) => {
         const auth = token ? requireManageWorkspace(state, token, clock) : null;

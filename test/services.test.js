@@ -352,6 +352,12 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(report.report.sessionsSleeping, 0);
   assert.equal(report.report.activeUploadGrants, 0);
 
+  const exported = await service.exportWorkspace(owner.token);
+  assert.equal(exported.export.workspace.id, owner.workspace.id);
+  assert.equal(exported.export.members.length, 2);
+  assert.equal(exported.export.templates.length >= 1, true);
+  assert.equal(exported.export.audit.length >= 1, true);
+
   const audit = await service.getAudit(owner.token);
   assert.ok(audit.audit.length >= 10);
 });

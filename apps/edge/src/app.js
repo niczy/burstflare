@@ -1150,6 +1150,17 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "GET",
+      pattern: "/api/admin/export",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.exportWorkspace(token));
+      })
+    },
+    {
       method: "POST",
       pattern: "/api/admin/reconcile",
       handler: withErrorHandling(async (request) => {

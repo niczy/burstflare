@@ -348,3 +348,15 @@ This file records what has already been implemented in the repository and what h
 - Verified the live Worker can:
   - reject a cookie-authenticated write without the CSRF header
   - accept the same write when the matching CSRF header is provided
+
+## 32. Workspace Export And Backup Path
+
+- Added an authenticated admin export route for workspace data.
+- Added service-layer export generation for:
+  - workspace metadata
+  - members and invites
+  - templates, builds, and releases
+  - sessions and snapshots
+  - usage events and audit logs
+- Added CLI support for `burstflare export` with optional `--output`.
+- Verified the live Worker can return a structured workspace export with templates and audit entries present

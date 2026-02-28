@@ -158,6 +158,7 @@ function helpText() {
     "burstflare snapshot get <sessionId> <snapshotId> [--output restored.bin]",
     "burstflare usage",
     "burstflare report",
+    "burstflare export [--output workspace-export.json]",
     "burstflare reconcile [--enqueue]",
     "burstflare preview <sessionId>",
     "burstflare ssh <sessionId>"
@@ -914,6 +915,32 @@ export async function runCli(argv, dependencies = {}) {
           headers: headers(undefined, false)
         }
       );
+      print(stdout, JSON.stringify(data, null, 2));
+      return 0;
+    }
+
+    if (command === "export") {
+      const data = await requestJsonAuthed(
+        `${baseUrl}/api/admin/export`,
+        {
+          headers: headers(undefined, false)
+        }
+      );
+      if (options.output) {
+        await writeFile(options.output, JSON.stringify(data, null, 2));
+        print(
+          stdout,
+          JSON.stringify(
+            {
+              output: options.output,
+              bytes: new TextEncoder().encode(JSON.stringify(data, null, 2)).byteLength
+            },
+            null,
+            2
+          )
+        );
+        return 0;
+      }
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
     }
