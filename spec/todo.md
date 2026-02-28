@@ -176,7 +176,7 @@ This file lists the remaining work required to close the gap between the current
   - the browser terminal now uses a dedicated `/runtime/sessions/:id/terminal` shell route instead of the raw SSH route
   - runtime images now start a real `sshd` listener on `127.0.0.1:2222`
   - the `/runtime/sessions/:id/ssh` route now proxies raw SSH bytes over WebSocket into the in-container `sshd`
-  - CLI `burstflare ssh <session>` now emits a `wstunnel` plus native `ssh` attach command instead of the old `wscat` shell bridge
+  - CLI `flare ssh <session>` now emits a `wstunnel` plus native `ssh` attach command instead of the old `wscat` shell bridge
   - the deployed runtime now serves a real OpenSSH banner over the public SSH tunnel path, which is sufficient for standard SSH clients and `scp`-style traffic over the local TCP tunnel
 
 ### PR 13: Browser Terminal And Web Session Controls
@@ -191,7 +191,7 @@ This file lists the remaining work required to close the gap between the current
   - the browser terminal now uses a dedicated runtime shell route instead of the raw SSH tunnel route
   - the browser now has a container-native workspace editor route that can read and write live runtime files inside the configured persisted paths
   - saving from the browser editor now mutates the live runtime state and is captured by runtime-backed snapshots
-  - CLI now exposes a matching `burstflare editor <sessionId>` command that prints the browser editor URL for a session
+  - CLI now exposes a matching `flare editor <sessionId>` command that prints the browser editor URL for a session
 
 ### PR 14: Workspace Snapshots, Persisted Paths, And Restore
 

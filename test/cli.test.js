@@ -741,6 +741,24 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
   }
 });
 
+test("cli help uses flare branding", async () => {
+  const stdout = capture();
+  const stderr = capture();
+
+  const code = await runCli([], {
+    stdout,
+    stderr,
+    env: {
+      FLARE_CONFIG: path.join(os.tmpdir(), `flare-help-${Date.now()}.json`)
+    }
+  });
+
+  assert.equal(code, 0);
+  assert.match(stdout.data, /^flare auth register/m);
+  assert.doesNotMatch(stdout.data, /burstflare auth register/);
+  assert.equal(stderr.data, "");
+});
+
 test("cli can roll back a template to a prior release", async () => {
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),

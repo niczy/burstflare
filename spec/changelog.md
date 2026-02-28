@@ -32,7 +32,7 @@ This file records what has already been implemented in the repository and what h
 ## 4. Web App And CLI Baseline
 
 - Implemented the web UI served by the Worker.
-- Implemented the `burstflare` CLI with auth and session-oriented commands.
+- Implemented the `flare` CLI with auth and session-oriented commands.
 - Added device-flow support between the web app and CLI.
 - Added basic dashboard and management surfaces for templates, builds, sessions, and preview access.
 
@@ -358,7 +358,7 @@ This file records what has already been implemented in the repository and what h
   - templates, builds, and releases
   - sessions and snapshots
   - usage events and audit logs
-- Added CLI support for `burstflare export` with optional `--output`.
+- Added CLI support for `flare export` with optional `--output`.
 - Verified the live Worker can return a structured workspace export with templates and audit entries present
 
 ## 33. Browser-Only Session Flow
@@ -380,7 +380,7 @@ This file records what has already been implemented in the repository and what h
 
 - Added `logout-all` support in the auth service.
 - Added an authenticated `POST /api/auth/logout-all` route.
-- Added CLI support for `burstflare auth logout-all`.
+- Added CLI support for `flare auth logout-all`.
 - Revokes all non-runtime tokens for the current user across sessions.
 - Clears browser auth cookies on the `logout-all` path.
 - Verified the live Worker can:
@@ -395,8 +395,8 @@ This file records what has already been implemented in the repository and what h
 - Added an authenticated `POST /api/auth/recovery-codes/generate` route.
 - Added a public `POST /api/auth/recover` route.
 - Added CLI support for:
-  - `burstflare auth recovery-generate`
-  - `burstflare auth recover --email ... --code ...`
+  - `flare auth recovery-generate`
+  - `flare auth recover --email ... --code ...`
 - Verified the live Worker can:
   - generate recovery codes
   - create a new browser session from a valid recovery code
@@ -423,8 +423,8 @@ This file records what has already been implemented in the repository and what h
 - Added `GET /api/auth/sessions`.
 - Added `DELETE /api/auth/sessions/:authSessionId`.
 - Added CLI support for:
-  - `burstflare auth sessions`
-  - `burstflare auth revoke-session <authSessionId>`
+  - `flare auth sessions`
+  - `flare auth revoke-session <authSessionId>`
 - Added test coverage across the service, Worker, and CLI suites.
 - Verified the live Worker can:
   - list multiple active auth sessions for the same user
@@ -489,7 +489,7 @@ This file records what has already been implemented in the repository and what h
 
 - Added service-layer workspace settings updates for workspace name changes.
 - Added `PATCH /api/workspaces/current/settings`.
-- Added CLI support for `burstflare workspace rename <name>`.
+- Added CLI support for `flare workspace rename <name>`.
 - Added browser UI controls for editing and saving the current workspace name.
 - The browser shell now hydrates the workspace name input from the current authenticated workspace.
 - Added test coverage across the service, Worker, and CLI suites.
@@ -549,7 +549,7 @@ This file records what has already been implemented in the repository and what h
 ## 45. Persisted-Path Template Inputs
 
 - Exposed template `persistedPaths` at the product edges instead of leaving it as backend-only manifest data.
-- Added CLI support for `--persisted-paths /workspace,/home/dev/.cache` on `burstflare template upload`.
+- Added CLI support for `--persisted-paths /workspace,/home/dev/.cache` on `flare template upload`.
 - Added a persisted-paths input to the web template version form.
 - Added client-side parsing of comma-separated persisted paths in the browser shell.
 - Added test coverage across the service, Worker, and CLI suites to ensure persisted paths pass through the manifest correctly.
@@ -593,7 +593,7 @@ This file records what has already been implemented in the repository and what h
 
 - Added an operator-facing bulk recovery path for dead-lettered builds.
 - Added `POST /api/admin/builds/retry-dead-lettered`.
-- Added CLI support for `burstflare build retry-dead-lettered`.
+- Added CLI support for `flare build retry-dead-lettered`.
 - The bulk recovery flow now:
   - finds dead-lettered builds in the current workspace
   - resets their attempt counter
@@ -645,7 +645,7 @@ This file records what has already been implemented in the repository and what h
   - `lastRestoredAt`
   - a `restored` session event
   - a `snapshot.restored` audit entry
-- Added CLI support for `burstflare snapshot restore <sessionId> <snapshotId>`.
+- Added CLI support for `flare snapshot restore <sessionId> <snapshotId>`.
 - Added a browser `Restore` action in the snapshot list and surfaced the last restored snapshot ID on session cards.
 - Expanded service, Worker, and CLI test coverage for the restore flow.
 - Verified the live Worker can:
@@ -1000,7 +1000,7 @@ This file records what has already been implemented in the repository and what h
   - `artifactBuiltAt`
 - Build logs now include the persisted artifact metadata for operator inspection.
 - Added `GET /api/template-builds/:buildId/artifact`.
-- Added CLI support for `burstflare build artifact <buildId>`.
+- Added CLI support for `flare build artifact <buildId>`.
 - Template deletion now also cleans up stored build artifacts.
 - Added local test coverage across the service, Worker, and CLI flows for:
   - artifact generation from bundle-backed builds
@@ -1038,7 +1038,7 @@ This file records what has already been implemented in the repository and what h
 
 - Added service-layer rollback automation that can restore a template to a prior release.
 - Added `POST /api/templates/:templateId/rollback`.
-- Added CLI support for `burstflare template rollback <templateId> [<releaseId>]`.
+- Added CLI support for `flare template rollback <templateId> [<releaseId>]`.
 - Rollback now:
   - selects a prior release automatically when no release id is provided
   - can target an explicit release id
@@ -1146,7 +1146,7 @@ This file records what has already been implemented in the repository and what h
 - The container `/ssh` endpoint now bridges raw TCP bytes between the websocket client and the in-container `sshd`, rather than routing through the old shell echo bridge.
 - The runtime now waits for `sshd` to become ready before reporting the container as booted.
 - SSH tunnel error paths now emit valid websocket close frames instead of invalid close payloads.
-- CLI `burstflare ssh <session>` now emits a `wstunnel` plus native `ssh` attach command:
+- CLI `flare ssh <session>` now emits a `wstunnel` plus native `ssh` attach command:
   - `wstunnel client -L tcp://127.0.0.1:2222:...`
   - `ssh -p 2222 dev@127.0.0.1`
 - Added Worker and CLI test coverage for the dedicated browser terminal route and the new SSH attach command shape.
@@ -1171,7 +1171,7 @@ This file records what has already been implemented in the repository and what h
   - preserves CSRF protection for cookie-authenticated saves
   - forwards the session's persisted-path policy into the container editor
 - Added a new browser `Editor` action on session cards so the web app can open the runtime editor in a new tab.
-- Added `burstflare editor <sessionId>` to print the session editor URL from the CLI.
+- Added `flare editor <sessionId>` to print the session editor URL from the CLI.
 - Added direct container-runtime test coverage for editor path enforcement.
 - Added Worker test coverage for editor proxy routing and save-body forwarding.
 - Added CLI coverage for the new `editor` command.

@@ -54,7 +54,7 @@ Run these at the start of each operator day:
 
 - Inspect `/api/template-builds` for `failed`, `retrying`, and `dead_lettered`.
 - Pull the relevant `/api/template-builds/:id/log`.
-- Use `burstflare build retry <buildId>` or `burstflare build retry-dead-lettered` for controlled recovery.
+- Use `flare build retry <buildId>` or `flare build retry-dead-lettered` for controlled recovery.
 - If build dispatch is stuck globally, verify Queue consumers and the `BUILD_WORKFLOW` binding from `/api/health`.
 
 ### Runtime Incident

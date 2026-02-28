@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "bin": {
-    "burstflare": "./bin/burstflare.js"
+    "flare": "./bin/flare.js"
   }
 }

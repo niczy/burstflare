@@ -239,7 +239,7 @@ Operational visibility should also include:
 
 ### C. Start Session
 
-1. User calls `burstflare up` or clicks "Start Session".
+1. User calls `flare up` or clicks "Start Session".
 2. The Worker validates quota and authorization, creates a D1 session record, and signals the session DO.
 3. The session DO acquires the lock, resolves the template binding, starts or wakes the container, and hydrates the workspace from R2.
 4. The DO marks the session `running` and publishes usage events.

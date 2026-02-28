@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+const CLI_NAME = "flare";
+
 function parseArgs(argv) {
   const positionals = [];
   const options = {};
@@ -24,7 +26,7 @@ function parseArgs(argv) {
 }
 
 function defaultConfigPath(env = process.env) {
-  return env.BURSTFLARE_CONFIG || path.join(os.homedir(), ".config", "burstflare", "config.json");
+  return env.FLARE_CONFIG || env.BURSTFLARE_CONFIG || path.join(os.homedir(), ".config", CLI_NAME, "config.json");
 }
 
 async function readConfig(configPath) {
@@ -128,63 +130,65 @@ async function clearAuthConfig(configPath, config, baseUrl) {
 
 function helpText() {
   return [
-    "burstflare auth register --email you@example.com [--name Name]",
-    "burstflare auth login --email you@example.com",
-    "burstflare auth recover --email you@example.com --code XXXX-XXXX-XXXX",
-    "burstflare auth refresh",
-    "burstflare auth logout",
-    "burstflare auth logout-all",
-    "burstflare auth sessions",
-    "burstflare auth revoke-session <authSessionId>",
-    "burstflare auth recovery-generate",
-    "burstflare auth device-start --email you@example.com",
-    "burstflare auth device-approve --code device_xxx",
-    "burstflare auth device-exchange --code device_xxx",
-    "burstflare auth switch-workspace <workspaceId>",
-    "burstflare auth whoami",
-    "burstflare workspace list",
-    "burstflare workspace members",
-    "burstflare workspace rename <name>",
-    "burstflare workspace invite --email teammate@example.com [--role member]",
-    "burstflare workspace accept-invite --code invite_xxx",
-    "burstflare workspace set-role <userId> --role viewer",
-    "burstflare workspace plan <free|pro|enterprise>",
-    "burstflare template create <name> [--description ...]",
-    "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
-    "burstflare template promote <templateId> <versionId>",
-    "burstflare template rollback <templateId> [<releaseId>]",
-    "burstflare template archive <templateId>",
-    "burstflare template restore <templateId>",
-    "burstflare template delete <templateId>",
-    "burstflare template list",
-    "burstflare build list",
-    "burstflare build log <buildId>",
-    "burstflare build artifact <buildId>",
-    "burstflare build process",
-    "burstflare build retry <buildId>",
-    "burstflare build retry-dead-lettered",
-    "burstflare release list",
-    "burstflare up <name> --template <templateId>",
-    "burstflare list",
-    "burstflare status <sessionId>",
-    "burstflare events <sessionId>",
-    "burstflare start <sessionId>",
-    "burstflare down <sessionId>",
-    "burstflare restart <sessionId>",
-    "burstflare delete <sessionId>",
-    "burstflare snapshot save <sessionId> [--label manual] [--file snapshot.tgz]",
-    "burstflare snapshot list <sessionId>",
-    "burstflare snapshot restore <sessionId> <snapshotId>",
-    "burstflare snapshot delete <sessionId> <snapshotId>",
-    "burstflare snapshot get <sessionId> <snapshotId> [--output restored.bin]",
-    "burstflare usage",
-    "burstflare report",
-    "burstflare export [--output workspace-export.json]",
-    "burstflare reconcile [--enqueue]",
-    "burstflare preview <sessionId>",
-    "burstflare editor <sessionId>",
-    "burstflare ssh <sessionId>"
-  ].join("\n");
+    "auth register --email you@example.com [--name Name]",
+    "auth login --email you@example.com",
+    "auth recover --email you@example.com --code XXXX-XXXX-XXXX",
+    "auth refresh",
+    "auth logout",
+    "auth logout-all",
+    "auth sessions",
+    "auth revoke-session <authSessionId>",
+    "auth recovery-generate",
+    "auth device-start --email you@example.com",
+    "auth device-approve --code device_xxx",
+    "auth device-exchange --code device_xxx",
+    "auth switch-workspace <workspaceId>",
+    "auth whoami",
+    "workspace list",
+    "workspace members",
+    "workspace rename <name>",
+    "workspace invite --email teammate@example.com [--role member]",
+    "workspace accept-invite --code invite_xxx",
+    "workspace set-role <userId> --role viewer",
+    "workspace plan <free|pro|enterprise>",
+    "template create <name> [--description ...]",
+    "template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
+    "template promote <templateId> <versionId>",
+    "template rollback <templateId> [<releaseId>]",
+    "template archive <templateId>",
+    "template restore <templateId>",
+    "template delete <templateId>",
+    "template list",
+    "build list",
+    "build log <buildId>",
+    "build artifact <buildId>",
+    "build process",
+    "build retry <buildId>",
+    "build retry-dead-lettered",
+    "release list",
+    "up <name> --template <templateId>",
+    "list",
+    "status <sessionId>",
+    "events <sessionId>",
+    "start <sessionId>",
+    "down <sessionId>",
+    "restart <sessionId>",
+    "delete <sessionId>",
+    "snapshot save <sessionId> [--label manual] [--file snapshot.tgz]",
+    "snapshot list <sessionId>",
+    "snapshot restore <sessionId> <snapshotId>",
+    "snapshot delete <sessionId> <snapshotId>",
+    "snapshot get <sessionId> <snapshotId> [--output restored.bin]",
+    "usage",
+    "report",
+    "export [--output workspace-export.json]",
+    "reconcile [--enqueue]",
+    "preview <sessionId>",
+    "editor <sessionId>",
+    "ssh <sessionId>"
+  ]
+    .map((command) => `${CLI_NAME} ${command}`)
+    .join("\n");
 }
 
 export async function runCli(argv, dependencies = {}) {

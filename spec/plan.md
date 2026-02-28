@@ -8,7 +8,7 @@ The plan below assumes a monorepo with:
 
 - `apps/edge` for the main Worker
 - `apps/web` for the web UI bundled into the Worker
-- `apps/cli` for the `burstflare` CLI
+- `apps/cli` for the `flare` CLI
 - `packages/shared` for API contracts, types, validation, and auth helpers
 - `infra/` for generated config, migrations, and deployment helpers
 
@@ -111,8 +111,8 @@ Ship the first useful CLI with shared auth.
 
 Changes:
 
-- Create the `burstflare` CLI package with command parsing, config storage, and structured output.
-- Implement `burstflare auth login`, `auth logout`, and `auth whoami`.
+- Create the `flare` CLI package with command parsing, config storage, and structured output.
+- Implement `flare auth login`, `auth logout`, and `auth whoami`.
 - Add device authorization endpoints in the Worker.
 - Add the web approval page for pending CLI device logins.
 - Store CLI access and refresh tokens securely on the client side.
@@ -230,12 +230,12 @@ Changes:
 - Run `sshd` and the WebSocket tunnel endpoint in every runtime image.
 - Add authenticated runtime token issuance for CLI attach operations.
 - Implement the Worker runtime proxy route for SSH WebSocket traffic.
-- Add `burstflare ssh <session>` and optional local SSH config helpers.
+- Add `flare ssh <session>` and optional local SSH config helpers.
 - Add CLI support for port-forwarding and standard SSH passthrough options.
 
 Exit criteria:
 
-- A user can run `burstflare ssh <session>` and get a real shell.
+- A user can run `flare ssh <session>` and get a real shell.
 - SSH access is denied immediately when tokens expire or access is revoked.
 - `scp` and standard SSH forwarding work for supported templates.
 
