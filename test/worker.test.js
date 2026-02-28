@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp, createWorkerService, handleScheduled } from "../apps/edge/src/app.js";
+import { createApp, createWorkerService, handleScheduled, runReconcile } from "../apps/edge/src/app.js";
 
 function toBytes(value) {
   if (value instanceof Uint8Array) {
@@ -967,6 +967,63 @@ test("worker scheduled handler enqueues reconcile jobs", async () => {
       cron: "*/15 * * * *"
     }
   ]);
+});
+
+test("runtime-aware reconcile stops running sessions and persists runtime state", async () => {
+  const service = createWorkerService();
+  const owner = await service.registerUser({
+    email: "runtime-reconcile@example.com",
+    name: "Runtime Reconcile"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "runtime-reconcile",
+    description: "Runtime reconcile template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/runtime-reconcile:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+  const created = await service.createSession(owner.token, {
+    name: "runtime-reconcile-session",
+    templateId: template.template.id
+  });
+  await service.startSession(owner.token, created.session.id);
+
+  const stopped = [];
+  const reconciled = await runReconcile({
+    service,
+    containersEnabled: true,
+    getSessionContainer(sessionId) {
+      return {
+        async stopRuntime(reason) {
+          stopped.push({
+            sessionId,
+            reason
+          });
+          return {
+            sessionId,
+            desiredState: "sleeping",
+            status: "sleeping",
+            runtimeState: "stopped"
+          };
+        }
+      };
+    }
+  });
+
+  assert.equal(reconciled.runtimeSleptSessions, 1);
+  assert.equal(stopped.length, 1);
+  assert.equal(stopped[0].sessionId, created.session.id);
+  assert.equal(stopped[0].reason, "reconcile");
+
+  const detail = await service.getSession(owner.token, created.session.id);
+  assert.equal(detail.session.state, "sleeping");
+  assert.equal(detail.session.runtimeStatus, "sleeping");
+  assert.equal(detail.session.runtimeState, "stopped");
 });
 
 test("worker proxies runtime SSH websocket upgrades into the session container", async () => {

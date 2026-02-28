@@ -1,6 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { WorkflowEntrypoint } from "cloudflare:workers";
-import { createApp, createWorkerService, handleScheduled } from "./app.js";
+import { createApp, createWorkerService, handleScheduled, runReconcile } from "./app.js";
 
 const RUNTIME_STATE_KEY = "burstflare:runtime-state";
 
@@ -277,7 +277,10 @@ export default {
         continue;
       }
       if (body.type === "reconcile") {
-        await service.reconcile();
+        await runReconcile({
+          ...createRuntimeOptions(env),
+          service
+        });
       }
     }
   },

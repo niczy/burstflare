@@ -159,9 +159,9 @@ This file lists the remaining work required to close the gap between the current
   - per-session runtime coordinator state is now persisted and exposed on session detail and session list responses
   - lifecycle routes now use the Durable Object runtime transition result as the source of truth before persisting the session transition
   - session records now persist the last-known runtime snapshot fields (`runtimeStatus`, `runtimeState`, `runtimeDesiredState`, `runtimeUpdatedAt`)
+  - queued reconcile now stops running container sessions through the runtime binding before persisting the sleep transition
 - Remaining:
   - stronger distributed concurrent-request protection across state persistence and runtime coordination
-  - persistent session reconciliation behavior
 
 ### PR 11: Cloudflare Container Runtime Bootstrap
 

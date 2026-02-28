@@ -2735,6 +2735,39 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async listSessionsForRuntimeReconcile() {
+      return transact(SESSION_SCOPE, (state) => {
+        const sessions = state.sessions
+          .filter((entry) => entry.state !== "deleted")
+          .map((session) => formatSession(state, session));
+        return { sessions };
+      });
+    },
+
+    async applySystemSessionTransition(sessionId, action, runtime = null) {
+      return transact(SESSION_SCOPE, (state) => {
+        const session = state.sessions.find((entry) => entry.id === sessionId);
+        ensure(session, "Session not found", 404);
+        const workspace = state.workspaces.find((entry) => entry.id === session.workspaceId) || {
+          id: session.workspaceId,
+          plan: "free"
+        };
+        return applySessionTransition({
+          state,
+          clock,
+          auth: {
+            user: {
+              id: null
+            },
+            session,
+            workspace
+          },
+          action,
+          runtime
+        });
+      });
+    },
+
     async listSessions(token) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);

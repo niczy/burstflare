@@ -1069,3 +1069,19 @@ This file records what has already been implemented in the repository and what h
 - Verified the new validation flow both:
   - locally against `http://127.0.0.1:8787`
   - live against `https://burstflare.nicholas-zhaoyu.workers.dev`
+
+## 71. Runtime-Aware Reconcile Persistence
+
+- Added a shared `runReconcile(...)` path for background reconcile execution.
+- Queue-driven and scheduled reconcile now stop running session containers through the runtime binding before the control-plane reconcile persists the sleep transition.
+- Added internal service helpers so the system reconcile path can:
+  - list non-deleted sessions
+  - apply a runtime-backed session transition without a user token
+- This keeps the persisted session record aligned with the Durable Object runtime during background reconcile, instead of only changing the control-plane state.
+- Added Worker test coverage for runtime-aware reconcile.
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - enqueueing reconcile moves a running session to `sleeping`
+  - the live session detail reports:
+    - `session.state = sleeping`
+    - `session.runtime.status = sleeping`
+    - `session.runtimeStatus = sleeping`

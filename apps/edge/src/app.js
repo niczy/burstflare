@@ -691,6 +691,68 @@ export function createWorkerService(options = {}) {
   });
 }
 
+function hasRuntimeBinding(options = {}) {
+  return Boolean(options.containersEnabled && typeof options.getSessionContainer === "function");
+}
+
+async function readContainerRuntimeState(container) {
+  if (!container) {
+    return null;
+  }
+  if (typeof container.getRuntimeState === "function") {
+    return container.getRuntimeState();
+  }
+  if (typeof container.getState === "function") {
+    const state = await container.getState();
+    return {
+      desiredState: ["healthy", "running"].includes(state?.status) ? "running" : "sleeping",
+      status: ["healthy", "running"].includes(state?.status) ? "running" : "sleeping",
+      runtimeState: state?.status || "unknown"
+    };
+  }
+  return null;
+}
+
+async function stopContainerRuntime(container, reason = "reconcile") {
+  if (!container) {
+    return null;
+  }
+  if (typeof container.stopRuntime === "function") {
+    return container.stopRuntime(reason);
+  }
+  if (typeof container.stop === "function") {
+    await container.stop();
+  }
+  return readContainerRuntimeState(container);
+}
+
+export async function runReconcile(options = {}) {
+  const service = createWorkerService(options);
+  let runtimeSleptSessions = 0;
+
+  if (hasRuntimeBinding(options)) {
+    const result = await service.listSessionsForRuntimeReconcile();
+    for (const session of result.sessions) {
+      if (session.state !== "running") {
+        continue;
+      }
+      const container = options.getSessionContainer(session.id);
+      if (!container) {
+        continue;
+      }
+      const runtime = await stopContainerRuntime(container, "reconcile");
+      await service.applySystemSessionTransition(session.id, "stop", runtime);
+      runtimeSleptSessions += 1;
+    }
+  }
+
+  const result = await service.reconcile();
+  return {
+    ...result,
+    runtimeSleptSessions
+  };
+}
+
 export async function handleScheduled(controller, options = {}) {
   if (options.RECONCILE_QUEUE) {
     await options.RECONCILE_QUEUE.send({
@@ -700,8 +762,7 @@ export async function handleScheduled(controller, options = {}) {
     });
     return;
   }
-  const service = createWorkerService(options);
-  await service.reconcile();
+  await runReconcile(options);
 }
 
 export function createApp(options = {}) {
@@ -712,7 +773,7 @@ export function createApp(options = {}) {
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
 
   function hasContainerBinding() {
-    return Boolean(options.containersEnabled);
+    return hasRuntimeBinding(options);
   }
 
   function getSessionContainer(sessionId) {
@@ -735,21 +796,7 @@ export function createApp(options = {}) {
 
   async function getSessionRuntimeState(sessionId) {
     const container = getSessionContainer(sessionId);
-    if (!container) {
-      return null;
-    }
-    if (typeof container.getRuntimeState === "function") {
-      return container.getRuntimeState();
-    }
-    if (typeof container.getState === "function") {
-      const state = await container.getState();
-      return {
-        desiredState: ["healthy", "running"].includes(state?.status) ? "running" : "sleeping",
-        status: ["healthy", "running"].includes(state?.status) ? "running" : "sleeping",
-        runtimeState: state?.status || "unknown"
-      };
-    }
-    return null;
+    return readContainerRuntimeState(container);
   }
 
   async function syncSessionRuntime(action, session) {
@@ -768,13 +815,7 @@ export function createApp(options = {}) {
       return getSessionRuntimeState(session.id);
     }
     if (action === "stop") {
-      if (typeof container.stopRuntime === "function") {
-        return container.stopRuntime("session_stop");
-      }
-      if (typeof container.stop === "function") {
-        await container.stop();
-      }
-      return getSessionRuntimeState(session.id);
+      return stopContainerRuntime(container, "session_stop");
     }
     if (action === "restart") {
       if (typeof container.restartRuntime === "function") {
