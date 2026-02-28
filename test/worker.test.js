@@ -1558,3 +1558,61 @@ test("preview route rehydrates the restored snapshot before proxying", async () 
   assert.equal(Buffer.from(forwarded[0].payload.contentBase64, "base64").toString("utf8"), "preview restore payload");
   assert.equal(forwarded[1].path, "/");
 });
+
+test("worker can roll back a template through the API", async () => {
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket()
+  });
+  const owner = await service.registerUser({
+    email: "worker-rollback@example.com",
+    name: "Worker Rollback"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "worker-rollback",
+    description: "Worker rollback template"
+  });
+  const versionOne = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/worker-rollback:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(versionOne.build.id);
+  const firstPromotion = await service.promoteTemplateVersion(owner.token, template.template.id, versionOne.templateVersion.id);
+
+  const versionTwo = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "2.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/worker-rollback:2.0.0"
+    }
+  });
+  await service.processTemplateBuildById(versionTwo.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, versionTwo.templateVersion.id);
+
+  const rollback = await requestJson(app, `/api/templates/${template.template.id}/rollback`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      releaseId: firstPromotion.release.id
+    })
+  });
+  assert.equal(rollback.response.status, 200);
+  assert.equal(rollback.data.activeVersion.id, versionOne.templateVersion.id);
+  assert.equal(rollback.data.targetRelease.id, firstPromotion.release.id);
+  assert.equal(rollback.data.release.mode, "rollback");
+  assert.equal(rollback.data.release.sourceReleaseId, firstPromotion.release.id);
+
+  const releases = await requestJson(app, "/api/releases", {
+    headers: {
+      authorization: `Bearer ${owner.token}`
+    }
+  });
+  assert.equal(releases.response.status, 200);
+  assert.equal(releases.data.releases.at(-1).mode, "rollback");
+});

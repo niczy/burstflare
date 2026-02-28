@@ -1033,3 +1033,18 @@ This file records what has already been implemented in the repository and what h
   - the live promote response now returns `release.binding`
   - the live releases list returns the same binding payload
   - the live binding payload includes `artifactSource`, `artifactDigest`, and `persistedPaths`
+
+## 69. Release Rollback Automation
+
+- Added service-layer rollback automation that can restore a template to a prior release.
+- Added `POST /api/templates/:templateId/rollback`.
+- Added CLI support for `burstflare template rollback <templateId> [<releaseId>]`.
+- Rollback now:
+  - selects a prior release automatically when no release id is provided
+  - can target an explicit release id
+  - moves the template's active version back to that release's template version
+  - emits a new rollback release record with:
+    - `mode = rollback`
+    - `sourceReleaseId`
+- Added `template.rolled_back` audit events with previous-version and release provenance.
+- Added service, Worker, and CLI test coverage for rollback flows.

@@ -1675,6 +1675,18 @@ export function createApp(options = {}) {
     },
     {
       method: "POST",
+      pattern: "/api/templates/:templateId/rollback",
+      handler: withErrorHandling(async (request, { templateId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.rollbackTemplate(token, templateId, body.releaseId || null));
+      })
+    },
+    {
+      method: "POST",
       pattern: "/api/templates/:templateId/archive",
       handler: withErrorHandling(async (request, { templateId }) => {
         const token = requireToken(request, service);

@@ -611,3 +611,47 @@ test("service can persist runtime state from a durable-object-driven session tra
   assert.equal(detail.session.runtimeStatus, "running");
   assert.equal(detail.session.runtimeState, "healthy");
 });
+
+test("service can roll back a template to a prior release", async () => {
+  const service = createBurstFlareService();
+  const owner = await service.registerUser({
+    email: "rollback@example.com",
+    name: "Rollback User"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "rollback-template",
+    description: "Rollback coverage"
+  });
+
+  const versionOne = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/rollback-template:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(versionOne.build.id);
+  const firstPromotion = await service.promoteTemplateVersion(owner.token, template.template.id, versionOne.templateVersion.id);
+
+  const versionTwo = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "2.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/rollback-template:2.0.0"
+    }
+  });
+  await service.processTemplateBuildById(versionTwo.build.id);
+  const secondPromotion = await service.promoteTemplateVersion(owner.token, template.template.id, versionTwo.templateVersion.id);
+  assert.equal(secondPromotion.activeVersion.id, versionTwo.templateVersion.id);
+
+  const rolledBack = await service.rollbackTemplate(owner.token, template.template.id);
+  assert.equal(rolledBack.activeVersion.id, versionOne.templateVersion.id);
+  assert.equal(rolledBack.targetRelease.id, firstPromotion.release.id);
+  assert.equal(rolledBack.release.mode, "rollback");
+  assert.equal(rolledBack.release.sourceReleaseId, firstPromotion.release.id);
+  assert.equal(rolledBack.release.binding.templateName, "rollback-template");
+
+  const releases = await service.listBindingReleases(owner.token);
+  const templateReleases = releases.releases.filter((entry) => entry.templateId === template.template.id);
+  assert.equal(templateReleases.length, 3);
+  assert.equal(templateReleases.at(-1).mode, "rollback");
+  assert.equal(templateReleases.at(-1).templateVersionId, versionOne.templateVersion.id);
+});

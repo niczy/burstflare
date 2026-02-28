@@ -145,8 +145,9 @@ This file lists the remaining work required to close the gap between the current
   - deploy automation scripts
   - template promotion now emits a canonical release binding manifest derived from the promoted build output
   - release list responses now return the binding manifest payload
+  - rollback automation now promotes a prior release back to the active version and records rollback provenance
 - Remaining:
-  - add rollback automation and staging validation flow
+  - add staging validation flow
 
 ### PR 10: Session API And Durable Object State Machine
 

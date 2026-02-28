@@ -723,3 +723,117 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     await rm(exportPath, { force: true });
   }
 });
+
+test("cli can roll back a template to a prior release", async () => {
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket()
+  });
+  const fetchImpl = createFetch(app);
+  const stdout = capture();
+  const stderr = capture();
+  const configPath = path.join(os.tmpdir(), `burstflare-cli-rollback-${Date.now()}.json`);
+  const bundlePath = path.join(os.tmpdir(), `burstflare-rollback-bundle-${Date.now()}.txt`);
+
+  try {
+    await writeFile(bundlePath, "rollback bundle payload");
+
+    let code = await runCli(["auth", "register", "--email", "rollback-cli@example.com", "--name", "Rollback CLI", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["template", "create", "rollback-cli", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const created = JSON.parse(stdout.data.trim());
+    const templateId = created.template.id;
+    stdout.data = "";
+
+    code = await runCli(
+      ["template", "upload", templateId, "--version", "1.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
+    assert.equal(code, 0);
+    const versionOne = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["template", "promote", templateId, versionOne.templateVersion.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const firstPromotion = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(
+      ["template", "upload", templateId, "--version", "2.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
+    assert.equal(code, 0);
+    const versionTwo = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["template", "promote", templateId, versionTwo.templateVersion.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["template", "rollback", templateId, firstPromotion.release.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const rolledBack = JSON.parse(stdout.data.trim());
+    assert.equal(rolledBack.activeVersion.id, versionOne.templateVersion.id);
+    assert.equal(rolledBack.release.mode, "rollback");
+    assert.equal(rolledBack.release.sourceReleaseId, firstPromotion.release.id);
+  } finally {
+    await rm(configPath, { force: true });
+    await rm(bundlePath, { force: true });
+  }
+});

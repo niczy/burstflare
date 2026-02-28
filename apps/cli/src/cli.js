@@ -152,6 +152,7 @@ function helpText() {
     "burstflare template create <name> [--description ...]",
     "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
     "burstflare template promote <templateId> <versionId>",
+    "burstflare template rollback <templateId> [<releaseId>]",
     "burstflare template archive <templateId>",
     "burstflare template restore <templateId>",
     "burstflare template delete <templateId>",
@@ -695,6 +696,23 @@ export async function runCli(argv, dependencies = {}) {
             method: "POST",
             headers: headers(undefined),
             body: JSON.stringify({ versionId })
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "rollback") {
+        const templateId = rest[0];
+        const releaseId = rest[1] || null;
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/templates/${templateId}/rollback`,
+          {
+            method: "POST",
+            headers: headers(undefined),
+            body: JSON.stringify({
+              releaseId
+            })
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

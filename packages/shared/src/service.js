@@ -272,17 +272,30 @@ function createBindingManifest(template, templateVersion, build) {
   };
 }
 
-function writeBindingRelease(state, clock, workspaceId, templateId, templateVersionId, binding = null) {
+function writeBindingRelease(state, clock, workspaceId, templateId, templateVersionId, binding = null, extra = {}) {
   const release = {
     id: createId("rel"),
     workspaceId,
     templateId,
     templateVersionId,
     binding,
+    ...extra,
     createdAt: nowIso(clock)
   };
   state.bindingReleases.push(release);
   return release;
+}
+
+function formatBindingRelease(state, release) {
+  const version = state.templateVersions.find((candidate) => candidate.id === release.templateVersionId);
+  const template = state.templates.find((candidate) => candidate.id === release.templateId);
+  const build = version ? state.templateBuilds.find((candidate) => candidate.templateVersionId === version.id) : null;
+  return {
+    ...release,
+    binding: release.binding || createBindingManifest(template, version, build),
+    templateName: template?.name || "unknown",
+    version: version?.version || "unknown"
+  };
 }
 
 function getUploadGrants(state) {
@@ -2550,18 +2563,62 @@ export function createBurstFlareService(options = {}) {
         const auth = requireAuth(state, token, clock);
         const releases = state.bindingReleases
           .filter((entry) => entry.workspaceId === auth.workspace.id)
-          .map((entry) => {
-            const version = state.templateVersions.find((candidate) => candidate.id === entry.templateVersionId);
-            const template = state.templates.find((candidate) => candidate.id === entry.templateId);
-            const build = version ? state.templateBuilds.find((candidate) => candidate.templateVersionId === version.id) : null;
-            return {
-              ...entry,
-              binding: entry.binding || createBindingManifest(template, version, build),
-              templateName: template?.name || "unknown",
-              version: version?.version || "unknown"
-            };
-          });
+          .map((entry) => formatBindingRelease(state, entry));
         return { releases };
+      });
+    },
+
+    async rollbackTemplate(token, templateId, releaseId = null) {
+      return transact(TEMPLATE_SCOPE, (state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
+        const releases = state.bindingReleases.filter(
+          (entry) => entry.workspaceId === auth.workspace.id && entry.templateId === auth.template.id
+        );
+        ensure(releases.length > 0, "Template has no releases", 409);
+        const targetRelease = releaseId
+          ? releases.find((entry) => entry.id === releaseId)
+          : [...releases].reverse().find((entry) => entry.templateVersionId !== auth.template.activeVersionId);
+        ensure(targetRelease, releaseId ? "Release not found" : "No prior release available for rollback", releaseId ? 404 : 409);
+        ensure(targetRelease.templateVersionId !== auth.template.activeVersionId, "Release is already active", 409);
+        const version = state.templateVersions.find(
+          (entry) => entry.id === targetRelease.templateVersionId && entry.templateId === auth.template.id
+        );
+        ensure(version, "Template version not found", 404);
+        const build = state.templateBuilds.find((entry) => entry.templateVersionId === version.id) || null;
+        const previousVersionId = auth.template.activeVersionId || null;
+        auth.template.activeVersionId = version.id;
+        const release = writeBindingRelease(
+          state,
+          clock,
+          auth.workspace.id,
+          auth.template.id,
+          version.id,
+          targetRelease.binding || createBindingManifest(auth.template, version, build),
+          {
+            mode: "rollback",
+            sourceReleaseId: targetRelease.id
+          }
+        );
+        writeAudit(state, clock, {
+          action: "template.rolled_back",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "template",
+          targetId: auth.template.id,
+          details: {
+            previousVersionId,
+            versionId: version.id,
+            sourceReleaseId: targetRelease.id,
+            releaseId: release.id
+          }
+        });
+        return {
+          template: formatTemplate(state, auth.template),
+          activeVersion: version,
+          targetRelease: formatBindingRelease(state, targetRelease),
+          release: formatBindingRelease(state, release)
+        };
       });
     },
 
