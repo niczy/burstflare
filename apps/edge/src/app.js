@@ -2285,6 +2285,17 @@ export function createApp(options = {}) {
     },
     {
       method: "GET",
+      pattern: "/api/admin/reconcile/preview",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.previewReconcile(token));
+      })
+    },
+    {
+      method: "GET",
       pattern: "/api/admin/export",
       handler: withErrorHandling(async (request) => {
         const token = requireToken(request, service);
@@ -2314,6 +2325,50 @@ export function createApp(options = {}) {
           return unauthorized();
         }
         return toJson(await service.reconcile(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/admin/reconcile/sleep-running",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.sleepRunningSessions(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/admin/reconcile/recover-builds",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.recoverStuckBuilds(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/admin/reconcile/purge-sleeping",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.purgeStaleSleepingSessions(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/admin/reconcile/purge-deleted",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.purgeDeletedSessions(token));
       })
     },
     {

@@ -1263,3 +1263,20 @@ This file records what has already been implemented in the repository and what h
 - Verified in the live Cloudflare deployment that the public shell serves:
   - the `Dashboard Pulse` card
   - the updated browser bundle markers for the dashboard pulse and editor action
+
+## 81. Targeted Operator Reconcile Workflows
+
+- Added targeted operator reconcile actions across the service layer, API, and `flare` CLI:
+  - `reconcile preview`
+  - `reconcile sleep-running`
+  - `reconcile recover-builds`
+  - `reconcile purge-sleeping`
+  - `reconcile purge-deleted`
+- Expanded the admin report payload with `reconcileCandidates` so operators can see pending running-session, stale-build, queued-build, stale-sleeping-session, and deleted-session counts without mutating state.
+- Verified locally with new service, Worker, and CLI tests covering the targeted operator flows.
+- Verified live on the public Cloudflare deployment that:
+  - `GET /api/admin/reconcile/preview` returns the new preview shape
+  - `POST /api/admin/reconcile/sleep-running` returns `sleptSessions` and `sessionIds`
+  - `POST /api/admin/reconcile/recover-builds` returns `recoveredStuckBuilds` and `buildIds`
+  - `POST /api/admin/reconcile/purge-sleeping` returns `purgedStaleSleepingSessions`
+  - `POST /api/admin/reconcile/purge-deleted` returns `purgedDeletedSessions`

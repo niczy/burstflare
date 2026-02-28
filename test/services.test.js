@@ -583,6 +583,147 @@ test("service records workflow dispatch metadata and workflow-driven build compl
   assert.equal(processed.build.dispatchMode, "workflow");
 });
 
+test("service exposes targeted operator reconcile workflows", async () => {
+  let tick = Date.parse("2026-02-28T12:00:00.000Z");
+  const objects = createObjectStore();
+  const queuedBuilds = [];
+  const store = createMemoryStore();
+  const service = createBurstFlareService({
+    store,
+    objects,
+    jobs: {
+      buildStrategy: "queue",
+      async enqueueBuild(buildId) {
+        queuedBuilds.push(buildId);
+        return {
+          buildId,
+          dispatch: "queue",
+          dispatchedAt: new Date(tick + 1).toISOString()
+        };
+      }
+    },
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "ops-workflows@example.com",
+    name: "Ops Workflows"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "ops-template",
+    description: "Operator workflow template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/ops-template:1.0.0",
+      sleepTtlSeconds: 1
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const runningSession = await service.createSession(owner.token, {
+    name: "ops-running",
+    templateId: template.template.id
+  });
+  await service.startSession(owner.token, runningSession.session.id);
+
+  const staleSession = await service.createSession(owner.token, {
+    name: "ops-stale",
+    templateId: template.template.id
+  });
+  await service.startSession(owner.token, staleSession.session.id);
+  await service.stopSession(owner.token, staleSession.session.id);
+  const staleSnapshot = await service.createSnapshot(owner.token, staleSession.session.id, {
+    label: "stale"
+  });
+  await service.uploadSnapshotContent(owner.token, staleSession.session.id, staleSnapshot.snapshot.id, {
+    body: "stale-snapshot",
+    contentType: "text/plain"
+  });
+
+  const deletedSession = await service.createSession(owner.token, {
+    name: "ops-deleted",
+    templateId: template.template.id
+  });
+  const deletedSnapshot = await service.createSnapshot(owner.token, deletedSession.session.id, {
+    label: "deleted"
+  });
+  await service.uploadSnapshotContent(owner.token, deletedSession.session.id, deletedSnapshot.snapshot.id, {
+    body: "deleted-snapshot",
+    contentType: "text/plain"
+  });
+  await service.deleteSession(owner.token, deletedSession.session.id);
+
+  const stuckVersion = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.1",
+    manifest: {
+      image: "registry.cloudflare.com/test/ops-template:1.0.1"
+    }
+  });
+  await store.transact((state) => {
+    const build = state.templateBuilds.find((entry) => entry.id === stuckVersion.build.id);
+    assert.ok(build);
+    build.status = "building";
+    build.startedAt = new Date(tick - 1000 * 60 * 10).toISOString();
+    build.updatedAt = build.startedAt;
+  });
+
+  tick += 2000;
+
+  const preview = await service.previewReconcile(owner.token);
+  assert.equal(preview.preview.sleptSessions, 1);
+  assert.equal(preview.preview.recoveredStuckBuilds, 1);
+  assert.equal(preview.preview.processedBuilds, 0);
+  assert.equal(preview.preview.purgedDeletedSessions, 1);
+  assert.equal(preview.preview.purgedStaleSleepingSessions, 1);
+  assert.deepEqual(preview.preview.sessionIds.running, [runningSession.session.id]);
+  assert.deepEqual(preview.preview.sessionIds.staleSleeping, [staleSession.session.id]);
+  assert.deepEqual(preview.preview.sessionIds.deleted, [deletedSession.session.id]);
+  assert.deepEqual(preview.preview.buildIds.stuck, [stuckVersion.build.id]);
+
+  const slept = await service.sleepRunningSessions(owner.token);
+  assert.equal(slept.sleptSessions, 1);
+  assert.deepEqual(slept.sessionIds, [runningSession.session.id]);
+  const sleptAgain = await service.sleepRunningSessions(owner.token);
+  assert.equal(sleptAgain.sleptSessions, 0);
+
+  const recovered = await service.recoverStuckBuilds(owner.token);
+  assert.equal(recovered.recoveredStuckBuilds, 1);
+  assert.deepEqual(recovered.buildIds, [stuckVersion.build.id]);
+  assert.equal(queuedBuilds.at(-1), stuckVersion.build.id);
+  assert.equal(queuedBuilds.filter((entry) => entry === stuckVersion.build.id).length, 2);
+  const recoveredAgain = await service.recoverStuckBuilds(owner.token);
+  assert.equal(recoveredAgain.recoveredStuckBuilds, 0);
+
+  const purgedSleeping = await service.purgeStaleSleepingSessions(owner.token);
+  assert.equal(purgedSleeping.purgedStaleSleepingSessions, 2);
+  assert.equal(purgedSleeping.purgedSnapshots, 1);
+  assert.deepEqual(new Set(purgedSleeping.sessionIds), new Set([runningSession.session.id, staleSession.session.id]));
+  const purgedSleepingAgain = await service.purgeStaleSleepingSessions(owner.token);
+  assert.equal(purgedSleepingAgain.purgedStaleSleepingSessions, 0);
+  await assert.rejects(() => service.getSession(owner.token, staleSession.session.id), /Session not found/);
+
+  const purgedDeleted = await service.purgeDeletedSessions(owner.token);
+  assert.equal(purgedDeleted.purgedDeletedSessions, 1);
+  assert.equal(purgedDeleted.purgedSnapshots, 1);
+  assert.deepEqual(purgedDeleted.sessionIds, [deletedSession.session.id]);
+  const purgedDeletedAgain = await service.purgeDeletedSessions(owner.token);
+  assert.equal(purgedDeletedAgain.purgedDeletedSessions, 0);
+  await assert.rejects(() => service.getSession(owner.token, deletedSession.session.id), /Session not found/);
+
+  const report = await service.getAdminReport(owner.token);
+  assert.equal(report.report.reconcileCandidates.runningSessions, 0);
+  assert.equal(report.report.reconcileCandidates.stuckBuilds, 0);
+  assert.equal(report.report.reconcileCandidates.deletedSessions, 0);
+  assert.equal(report.report.reconcileCandidates.staleSleepingSessions, 0);
+  assert.equal(report.report.reconcileCandidates.queuedBuilds, 1);
+});
+
 test("service can persist runtime state from a durable-object-driven session transition", async () => {
   const service = createBurstFlareService();
   const owner = await service.registerUser({

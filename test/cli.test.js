@@ -759,6 +759,222 @@ test("cli help uses flare branding", async () => {
   assert.equal(stderr.data, "");
 });
 
+test("cli exposes targeted operator reconcile commands", async () => {
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket(),
+    SNAPSHOT_BUCKET: createBucket()
+  });
+  const fetchImpl = createFetch(app);
+  const stdout = capture();
+  const stderr = capture();
+  const configPath = path.join(os.tmpdir(), `flare-cli-operator-${Date.now()}.json`);
+  const bundlePath = path.join(os.tmpdir(), `flare-operator-bundle-${Date.now()}.txt`);
+
+  try {
+    await writeFile(bundlePath, "operator bundle payload");
+
+    let code = await runCli(["auth", "register", "--email", "operator-cli@example.com", "--name", "Operator CLI", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["template", "create", "operator-cli-template", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const template = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(
+      [
+        "template",
+        "upload",
+        template.template.id,
+        "--version",
+        "1.0.0",
+        "--file",
+        bundlePath,
+        "--content-type",
+        "text/plain",
+        "--sleep-ttl-seconds",
+        "1",
+        "--url",
+        "http://local"
+      ],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
+    assert.equal(code, 0);
+    const version = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["template", "promote", template.template.id, version.templateVersion.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["up", "operator-running", "--template", template.template.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const running = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["up", "operator-stale", "--template", template.template.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const stale = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["down", stale.session.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["snapshot", "save", stale.session.id, "--label", "stale", "--file", bundlePath, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["up", "operator-deleted", "--template", template.template.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const deleted = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(
+      ["snapshot", "save", deleted.session.id, "--label", "deleted", "--file", bundlePath, "--url", "http://local"],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["delete", deleted.session.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    code = await runCli(["reconcile", "preview", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const preview = JSON.parse(stdout.data.trim());
+    assert.equal(preview.preview.sleptSessions, 1);
+    assert.equal(preview.preview.purgedStaleSleepingSessions, 1);
+    assert.equal(preview.preview.purgedDeletedSessions, 1);
+    assert.deepEqual(preview.preview.sessionIds.running, [running.session.id]);
+    stdout.data = "";
+
+    code = await runCli(["reconcile", "sleep-running", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const slept = JSON.parse(stdout.data.trim());
+    assert.equal(slept.sleptSessions, 1);
+    stdout.data = "";
+
+    code = await runCli(["reconcile", "purge-sleeping", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const purgedSleeping = JSON.parse(stdout.data.trim());
+    assert.equal(purgedSleeping.purgedStaleSleepingSessions, 1);
+    assert.equal(purgedSleeping.purgedSnapshots, 1);
+    stdout.data = "";
+
+    code = await runCli(["reconcile", "purge-deleted", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const purgedDeleted = JSON.parse(stdout.data.trim());
+    assert.equal(purgedDeleted.purgedDeletedSessions, 1);
+    assert.equal(purgedDeleted.purgedSnapshots, 1);
+    stdout.data = "";
+
+    code = await runCli(["report", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const report = JSON.parse(stdout.data.trim());
+    assert.equal(report.report.reconcileCandidates.runningSessions, 0);
+    assert.equal(report.report.reconcileCandidates.staleSleepingSessions, 0);
+    assert.equal(report.report.reconcileCandidates.deletedSessions, 0);
+  } finally {
+    await rm(configPath, { force: true });
+    await rm(bundlePath, { force: true });
+  }
+});
+
 test("cli can roll back a template to a prior release", async () => {
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),

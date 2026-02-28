@@ -226,7 +226,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 16: Reliability Jobs, Reconciliation, And Cleanup
 
-- Status: partially complete
+- Status: complete
 - Done:
   - reconcile concepts and queue scaffolding exist
   - queue-driven reconcile enqueue and consumer execution
@@ -235,9 +235,9 @@ This file lists the remaining work required to close the gap between the current
   - stale sleeping-session cleanup with template-defined sleep TTLs
   - stuck-build recovery for stale `building` jobs during reconcile
   - richer admin report counters for current operator state
-- Remaining:
-  - deeper idempotent operator workflows beyond the current read-only report
-  - broader operator-facing recovery workflows and reporting
+  - admin report responses now include a `reconcileCandidates` summary for running sessions, stuck builds, queued builds, stale sleeping sessions, and deleted sessions
+  - targeted operator workflows now exist for reconcile preview, sleep-running, recover-builds, purge-sleeping, and purge-deleted across the service layer, API, and `flare` CLI
+  - targeted reconcile actions are now covered by focused service, Worker, and CLI tests
 
 ### PR 17: Security Hardening And Audit Completeness
 
@@ -267,7 +267,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Finish PR 15, PR 16, and PR 17 next. The largest remaining gaps are now quota enforcement, operator recovery depth, and security hardening.
+1. Finish PR 15 and PR 17 next. The largest remaining gaps are now quota enforcement and security hardening.
 2. After that, tighten the earlier mostly-complete product surfaces in PR 04, PR 05, PR 06, and PR 07.
 3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
 

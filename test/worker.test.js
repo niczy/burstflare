@@ -976,6 +976,184 @@ test("worker scheduled handler enqueues reconcile jobs", async () => {
   ]);
 });
 
+test("worker exposes targeted operator reconcile endpoints", async () => {
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket(),
+    SNAPSHOT_BUCKET: createBucket()
+  });
+
+  const owner = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "operator-routes@example.com", name: "Operator Routes" })
+  });
+  const ownerHeaders = {
+    authorization: `Bearer ${owner.data.token}`
+  };
+
+  const template = await requestJson(app, "/api/templates", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "operator-routes-template",
+      description: "Operator routes template"
+    })
+  });
+  assert.equal(template.response.status, 200);
+
+  const version = await requestJson(app, `/api/templates/${template.data.template.id}/versions`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      version: "1.0.0",
+      manifest: {
+        image: "registry.cloudflare.com/example/operator-routes:1.0.0",
+        sleepTtlSeconds: 1
+      }
+    })
+  });
+  assert.equal(version.response.status, 200);
+
+  const processed = await requestJson(app, "/api/template-builds/process", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(processed.response.status, 200);
+  assert.equal(processed.data.processed, 1);
+
+  const promoted = await requestJson(app, `/api/templates/${template.data.template.id}/promote`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      versionId: version.data.templateVersion.id
+    })
+  });
+  assert.equal(promoted.response.status, 200);
+
+  const running = await requestJson(app, "/api/sessions", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "operator-running",
+      templateId: template.data.template.id
+    })
+  });
+  assert.equal(running.response.status, 200);
+  await requestJson(app, `/api/sessions/${running.data.session.id}/start`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+
+  const stale = await requestJson(app, "/api/sessions", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "operator-stale",
+      templateId: template.data.template.id
+    })
+  });
+  assert.equal(stale.response.status, 200);
+  await requestJson(app, `/api/sessions/${stale.data.session.id}/start`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  await requestJson(app, `/api/sessions/${stale.data.session.id}/stop`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  const staleSnapshot = await requestJson(app, `/api/sessions/${stale.data.session.id}/snapshots`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({ label: "stale" })
+  });
+  assert.equal(staleSnapshot.response.status, 200);
+  await requestJson(app, `/api/sessions/${stale.data.session.id}/snapshots/${staleSnapshot.data.snapshot.id}/content`, {
+    method: "PUT",
+    headers: {
+      ...ownerHeaders,
+      "content-type": "text/plain"
+    },
+    body: "stale operator snapshot"
+  });
+
+  const deleted = await requestJson(app, "/api/sessions", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "operator-deleted",
+      templateId: template.data.template.id
+    })
+  });
+  assert.equal(deleted.response.status, 200);
+  const deletedSnapshot = await requestJson(app, `/api/sessions/${deleted.data.session.id}/snapshots`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({ label: "deleted" })
+  });
+  assert.equal(deletedSnapshot.response.status, 200);
+  await requestJson(app, `/api/sessions/${deleted.data.session.id}/snapshots/${deletedSnapshot.data.snapshot.id}/content`, {
+    method: "PUT",
+    headers: {
+      ...ownerHeaders,
+      "content-type": "text/plain"
+    },
+    body: "deleted operator snapshot"
+  });
+  await requestJson(app, `/api/sessions/${deleted.data.session.id}`, {
+    method: "DELETE",
+    headers: ownerHeaders
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+
+  const preview = await requestJson(app, "/api/admin/reconcile/preview", {
+    headers: ownerHeaders
+  });
+  assert.equal(preview.response.status, 200);
+  assert.equal(preview.data.preview.sleptSessions, 1);
+  assert.equal(preview.data.preview.purgedStaleSleepingSessions, 1);
+  assert.equal(preview.data.preview.purgedDeletedSessions, 1);
+  assert.deepEqual(preview.data.preview.sessionIds.running, [running.data.session.id]);
+
+  const slept = await requestJson(app, "/api/admin/reconcile/sleep-running", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(slept.response.status, 200);
+  assert.equal(slept.data.sleptSessions, 1);
+
+  const sleptAgain = await requestJson(app, "/api/admin/reconcile/sleep-running", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(sleptAgain.response.status, 200);
+  assert.equal(sleptAgain.data.sleptSessions, 0);
+
+  const purgedSleeping = await requestJson(app, "/api/admin/reconcile/purge-sleeping", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(purgedSleeping.response.status, 200);
+  assert.equal(purgedSleeping.data.purgedStaleSleepingSessions, 1);
+  assert.equal(purgedSleeping.data.purgedSnapshots, 1);
+
+  const purgedDeleted = await requestJson(app, "/api/admin/reconcile/purge-deleted", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(purgedDeleted.response.status, 200);
+  assert.equal(purgedDeleted.data.purgedDeletedSessions, 1);
+  assert.equal(purgedDeleted.data.purgedSnapshots, 1);
+
+  const report = await requestJson(app, "/api/admin/report", {
+    headers: ownerHeaders
+  });
+  assert.equal(report.response.status, 200);
+  assert.equal(report.data.report.reconcileCandidates.runningSessions, 0);
+  assert.equal(report.data.report.reconcileCandidates.staleSleepingSessions, 0);
+  assert.equal(report.data.report.reconcileCandidates.deletedSessions, 0);
+});
+
 test("runtime-aware reconcile stops running sessions and persists runtime state", async () => {
   const service = createWorkerService();
   const owner = await service.registerUser({

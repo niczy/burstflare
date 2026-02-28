@@ -183,6 +183,11 @@ function helpText() {
     "report",
     "export [--output workspace-export.json]",
     "reconcile [--enqueue]",
+    "reconcile preview",
+    "reconcile sleep-running",
+    "reconcile recover-builds",
+    "reconcile purge-sleeping",
+    "reconcile purge-deleted",
     "preview <sessionId>",
     "editor <sessionId>",
     "ssh <sessionId>"
@@ -1125,12 +1130,29 @@ export async function runCli(argv, dependencies = {}) {
     }
 
     if (command === "reconcile") {
-      const route = options.enqueue ? "/api/admin/reconcile/enqueue" : "/api/admin/reconcile";
+      let route = "/api/admin/reconcile";
+      let method = "POST";
+      if (subcommand === "preview") {
+        route = "/api/admin/reconcile/preview";
+        method = "GET";
+      } else if (subcommand === "sleep-running") {
+        route = "/api/admin/reconcile/sleep-running";
+      } else if (subcommand === "recover-builds") {
+        route = "/api/admin/reconcile/recover-builds";
+      } else if (subcommand === "purge-sleeping") {
+        route = "/api/admin/reconcile/purge-sleeping";
+      } else if (subcommand === "purge-deleted") {
+        route = "/api/admin/reconcile/purge-deleted";
+      } else if (options.enqueue) {
+        route = "/api/admin/reconcile/enqueue";
+      } else if (subcommand) {
+        throw new Error("Unknown reconcile action");
+      }
       const data = await requestJsonAuthed(
         `${baseUrl}${route}`,
         {
-          method: "POST",
-          headers: headers(undefined)
+          method,
+          headers: method === "GET" ? headers(undefined, false) : headers(undefined)
         }
       );
       print(stdout, JSON.stringify(data, null, 2));
