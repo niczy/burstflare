@@ -199,6 +199,32 @@ test("service covers invites, queued builds, releases, session events, usage, an
     role: "member"
   });
   await service.acceptWorkspaceInvite(teammate.token, invite.invite.code);
+  await assert.rejects(
+    () =>
+      service.createWorkspaceInvite(owner.token, {
+        email: "teammate@example.com",
+        role: "member"
+      }),
+    /already a member/
+  );
+  const prospectInvite = await service.createWorkspaceInvite(owner.token, {
+    email: "prospect@example.com",
+    role: "viewer"
+  });
+  await assert.rejects(
+    () =>
+      service.createWorkspaceInvite(owner.token, {
+        email: "prospect@example.com",
+        role: "viewer"
+      }),
+    /Invite already pending/
+  );
+  await assert.rejects(() => service.acceptWorkspaceInvite(teammate.token, prospectInvite.invite.code), /Invite email mismatch/);
+  await assert.rejects(() => service.acceptWorkspaceInvite(teammate.token, invite.invite.code), /Invite already used/);
+  const reaffirmedRole = await service.updateWorkspaceMemberRole(owner.token, teammate.user.id, "member");
+  assert.equal(reaffirmedRole.membership.role, "member");
+  const elevatedRole = await service.updateWorkspaceMemberRole(owner.token, teammate.user.id, "admin");
+  assert.equal(elevatedRole.membership.role, "admin");
   const switched = await service.switchWorkspace(teammate.token, owner.workspace.id);
   assert.equal(switched.workspace.id, owner.workspace.id);
 
@@ -543,8 +569,24 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const deletedSecret = await service.deleteWorkspaceSecret(ownerSecondLogin.token, "api_token");
   assert.equal(deletedSecret.ok, true);
 
-  const audit = await service.getAudit(ownerSecondLogin.token);
+  const audit = await service.getAudit(ownerSecondLogin.token, { limit: 200 });
   assert.ok(audit.audit.length >= 10);
+  assert.ok(audit.audit.some((entry) => entry.action === "workspace.invite_rejected_existing_member"));
+  assert.ok(audit.audit.some((entry) => entry.action === "workspace.invite_rejected_duplicate"));
+  assert.ok(
+    audit.audit.some(
+      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
+    )
+  );
+  assert.ok(
+    audit.audit.some(
+      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
+    )
+  );
+  assert.ok(audit.audit.some((entry) => entry.action === "workspace.member_role_reaffirmed"));
+  const roleUpdateAudit = audit.audit.find((entry) => entry.action === "workspace.member_role_updated");
+  assert.equal(roleUpdateAudit.details.previousRole, "member");
+  assert.equal(roleUpdateAudit.details.role, "admin");
 });
 
 test("service records workflow dispatch metadata and workflow-driven build completion", async () => {

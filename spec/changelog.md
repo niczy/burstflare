@@ -1364,3 +1364,24 @@ This file records what has already been implemented in the repository and what h
   - release filtering by template
   - session lifecycle via noun-first commands
 - Verified locally with `npm run ci`, including the new CLI alias/filter test coverage.
+
+## 85. Membership Edge-Case Audit Coverage
+
+- Workspace membership audit logging now covers the failure and no-op paths that were previously silent:
+  - `workspace.invite_rejected_existing_member`
+  - `workspace.invite_rejected_duplicate`
+  - `workspace.invite_accept_failed`
+  - `workspace.member_role_reaffirmed`
+  - `workspace.member_role_update_failed`
+- Successful invite acceptance and member role changes now record richer audit details, including invite email/role and the previous role for role changes.
+- Service-level transactions now persist audit entries for audit-tagged failures before the original error is rethrown, so failed membership actions are no longer invisible to operators.
+- Added focused service and Worker coverage for:
+  - existing-member invite rejection
+  - duplicate pending invite rejection
+  - email-mismatch and already-used invite acceptance failures
+  - no-op role reaffirmation
+  - role-change audit metadata
+- Verified locally with `npm run ci`.
+- Verified live on the public Cloudflare deployment that:
+  - `POST /api/workspaces/current/invites` returns `409` for a self-invite to an existing member
+  - `GET /api/audit?limit=20` now includes `workspace.invite_rejected_existing_member` with the current user email in `details.email`

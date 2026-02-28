@@ -55,15 +55,19 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 04: Workspace And Membership Model
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - personal workspaces
   - membership roles
   - invites
   - role changes
   - workspace rename/settings path across API, CLI, and web
-- Remaining:
-  - deeper audit coverage for all membership edge cases
+  - deeper audit coverage now exists for membership edge cases including:
+    - existing-member invite rejection
+    - duplicate pending invite rejection
+    - invite accept failures (`not_found`, `already_used`, `expired`, `email_mismatch`, `already_joined`)
+    - no-op member role reaffirmation
+    - failed member role changes for missing memberships and owner-role protection
 
 ### PR 05: Web App Shell And Dashboard
 
@@ -266,7 +270,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Tighten the earlier mostly-complete product surfaces in PR 04 and PR 07.
+1. Tighten the last mostly-complete product surface in PR 07.
 2. Treat the optional PR 02 repository-style data-access cleanup as a scale-oriented follow-up, not a blocker for the current beta baseline.
 3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
 

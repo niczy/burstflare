@@ -172,10 +172,24 @@ function fromBase64(value) {
 
 function ensure(condition, message, status = 400) {
   if (!condition) {
-    const error = new Error(message);
-    error.status = status;
-    throw error;
+    fail(message, status);
   }
+}
+
+function fail(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  throw error;
+}
+
+function auditAndThrow(_state, _clock, audit, message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  error.auditEvent = {
+    ...audit,
+    details: audit?.details || {}
+  };
+  throw error;
 }
 
 function canManageWorkspace(role) {
@@ -1345,12 +1359,30 @@ export function createBurstFlareService(options = {}) {
   const TEMPLATE_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
   const SESSION_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
   const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "workspaceInvites", "sessionEvents", "snapshots", "usageEvents"];
+  const TRANSACTION_ERROR = Symbol("transactionError");
 
-  function transact(collections, work) {
-    if (typeof store.transactCollections === "function") {
-      return store.transactCollections(collections, work);
+  async function transact(collections, work) {
+    const runner =
+      typeof store.transactCollections === "function"
+        ? (transactionWork) => store.transactCollections(collections, transactionWork)
+        : (transactionWork) => store.transact(transactionWork);
+    const result = await runner(async (state) => {
+      try {
+        return await work(state);
+      } catch (error) {
+        if (error?.auditEvent) {
+          writeAudit(state, clock, error.auditEvent);
+          return {
+            [TRANSACTION_ERROR]: error
+          };
+        }
+        throw error;
+      }
+    });
+    if (result && typeof result === "object" && TRANSACTION_ERROR in result) {
+      throw result[TRANSACTION_ERROR];
     }
-    return store.transact(work);
+    return result;
   }
 
   function getWorkspaceBuildRecords(state, workspaceId = null) {
@@ -2357,15 +2389,60 @@ export function createBurstFlareService(options = {}) {
         const auth = requireManageWorkspace(state, token, clock);
         ensure(email, "Email is required");
         ensure(["admin", "member", "viewer"].includes(role), "Invalid role");
-        const existing = findUserByEmail(state, email);
+        const inviteEmail = email.toLowerCase();
+        const existing = findUserByEmail(state, inviteEmail);
         if (existing) {
-          ensure(!getMembership(state, existing.id, auth.workspace.id), "User is already a member", 409);
+          if (getMembership(state, existing.id, auth.workspace.id)) {
+            auditAndThrow(
+              state,
+              clock,
+              {
+                action: "workspace.invite_rejected_existing_member",
+                actorUserId: auth.user.id,
+                workspaceId: auth.workspace.id,
+                targetType: "workspace",
+                targetId: auth.workspace.id,
+                details: {
+                  email: inviteEmail,
+                  existingUserId: existing.id
+                }
+              },
+              "User is already a member",
+              409
+            );
+          }
+        }
+        const existingPendingInvite = state.workspaceInvites.find(
+          (entry) =>
+            entry.workspaceId === auth.workspace.id &&
+            entry.email === inviteEmail &&
+            entry.status === "pending" &&
+            new Date(entry.expiresAt).getTime() > nowMs(clock)
+        );
+        if (existingPendingInvite) {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.invite_rejected_duplicate",
+              actorUserId: auth.user.id,
+              workspaceId: auth.workspace.id,
+              targetType: "workspace_invite",
+              targetId: existingPendingInvite.id,
+              details: {
+                email: inviteEmail,
+                role: existingPendingInvite.role
+              }
+            },
+            "Invite already pending",
+            409
+          );
         }
         const invite = {
           id: createId("inv"),
           code: createId("invite"),
           workspaceId: auth.workspace.id,
-          email: email.toLowerCase(),
+          email: inviteEmail,
           role,
           status: "pending",
           createdByUserId: auth.user.id,
@@ -2389,11 +2466,90 @@ export function createBurstFlareService(options = {}) {
       return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const invite = state.workspaceInvites.find((entry) => entry.code === inviteCode);
-        ensure(invite, "Invite not found", 404);
-        ensure(invite.status === "pending", "Invite already used", 409);
-        ensure(new Date(invite.expiresAt).getTime() > nowMs(clock), "Invite expired", 400);
-        ensure(invite.email === auth.user.email.toLowerCase(), "Invite email mismatch", 403);
-        ensure(!getMembership(state, auth.user.id, invite.workspaceId), "Already joined", 409);
+        if (!invite) {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.invite_accept_failed",
+              actorUserId: auth.user.id,
+              workspaceId: null,
+              targetType: "workspace_invite_code",
+              targetId: inviteCode || "unknown",
+              details: { reason: "not_found" }
+            },
+            "Invite not found",
+            404
+          );
+        }
+        if (invite.status !== "pending") {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.invite_accept_failed",
+              actorUserId: auth.user.id,
+              workspaceId: invite.workspaceId,
+              targetType: "workspace_invite",
+              targetId: invite.id,
+              details: { reason: "already_used", status: invite.status }
+            },
+            "Invite already used",
+            409
+          );
+        }
+        if (new Date(invite.expiresAt).getTime() <= nowMs(clock)) {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.invite_accept_failed",
+              actorUserId: auth.user.id,
+              workspaceId: invite.workspaceId,
+              targetType: "workspace_invite",
+              targetId: invite.id,
+              details: { reason: "expired" }
+            },
+            "Invite expired",
+            400
+          );
+        }
+        if (invite.email !== auth.user.email.toLowerCase()) {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.invite_accept_failed",
+              actorUserId: auth.user.id,
+              workspaceId: invite.workspaceId,
+              targetType: "workspace_invite",
+              targetId: invite.id,
+              details: {
+                reason: "email_mismatch",
+                inviteEmail: invite.email,
+                actorEmail: auth.user.email.toLowerCase()
+              }
+            },
+            "Invite email mismatch",
+            403
+          );
+        }
+        if (getMembership(state, auth.user.id, invite.workspaceId)) {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.invite_accept_failed",
+              actorUserId: auth.user.id,
+              workspaceId: invite.workspaceId,
+              targetType: "workspace_invite",
+              targetId: invite.id,
+              details: { reason: "already_joined" }
+            },
+            "Already joined",
+            409
+          );
+        }
 
         invite.status = "accepted";
         invite.acceptedAt = nowIso(clock);
@@ -2410,7 +2566,11 @@ export function createBurstFlareService(options = {}) {
           actorUserId: auth.user.id,
           workspaceId: invite.workspaceId,
           targetType: "workspace_invite",
-          targetId: invite.id
+          targetId: invite.id,
+          details: {
+            role: invite.role,
+            email: invite.email
+          }
         });
         return {
           workspace: formatWorkspace(state, workspace, invite.role)
@@ -2423,8 +2583,56 @@ export function createBurstFlareService(options = {}) {
         const auth = requireManageWorkspace(state, token, clock);
         ensure(["admin", "member", "viewer"].includes(role), "Invalid role");
         const membership = getMembership(state, userId, auth.workspace.id);
-        ensure(membership, "Membership not found", 404);
-        ensure(membership.role !== "owner", "Cannot change owner role", 409);
+        if (!membership) {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.member_role_update_failed",
+              actorUserId: auth.user.id,
+              workspaceId: auth.workspace.id,
+              targetType: "workspace_membership",
+              targetId: `${auth.workspace.id}:${userId}`,
+              details: {
+                requestedRole: role,
+                reason: "missing_membership"
+              }
+            },
+            "Membership not found",
+            404
+          );
+        }
+        if (membership.role === "owner") {
+          auditAndThrow(
+            state,
+            clock,
+            {
+              action: "workspace.member_role_update_failed",
+              actorUserId: auth.user.id,
+              workspaceId: auth.workspace.id,
+              targetType: "workspace_membership",
+              targetId: `${auth.workspace.id}:${userId}`,
+              details: {
+                requestedRole: role,
+                reason: "owner_locked"
+              }
+            },
+            "Cannot change owner role",
+            409
+          );
+        }
+        if (membership.role === role) {
+          writeAudit(state, clock, {
+            action: "workspace.member_role_reaffirmed",
+            actorUserId: auth.user.id,
+            workspaceId: auth.workspace.id,
+            targetType: "workspace_membership",
+            targetId: `${auth.workspace.id}:${userId}`,
+            details: { role }
+          });
+          return { membership };
+        }
+        const previousRole = membership.role;
         membership.role = role;
         writeAudit(state, clock, {
           action: "workspace.member_role_updated",
@@ -2432,7 +2640,10 @@ export function createBurstFlareService(options = {}) {
           workspaceId: auth.workspace.id,
           targetType: "workspace_membership",
           targetId: `${auth.workspace.id}:${userId}`,
-          details: { role }
+          details: {
+            previousRole,
+            role
+          }
         });
         return { membership };
       });

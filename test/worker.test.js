@@ -955,6 +955,128 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(activeOwner.response.status, 200);
 });
 
+test("worker records workspace membership edge cases in the audit log", async () => {
+  const app = createApp();
+
+  const owner = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "audit-owner@example.com", name: "Audit Owner" })
+  });
+  const teammate = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "audit-teammate@example.com", name: "Audit Teammate" })
+  });
+  const ownerHeaders = {
+    authorization: `Bearer ${owner.data.token}`
+  };
+  const teammateHeaders = {
+    authorization: `Bearer ${teammate.data.token}`
+  };
+
+  const invite = await requestJson(app, "/api/workspaces/current/invites", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      email: "audit-teammate@example.com",
+      role: "member"
+    })
+  });
+  assert.equal(invite.response.status, 200);
+
+  const accepted = await requestJson(app, "/api/workspaces/current/invites/accept", {
+    method: "POST",
+    headers: teammateHeaders,
+    body: JSON.stringify({ inviteCode: invite.data.invite.code })
+  });
+  assert.equal(accepted.response.status, 200);
+
+  const existingMemberInvite = await requestJson(app, "/api/workspaces/current/invites", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      email: "audit-teammate@example.com",
+      role: "member"
+    })
+  });
+  assert.equal(existingMemberInvite.response.status, 409);
+
+  const prospectInvite = await requestJson(app, "/api/workspaces/current/invites", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      email: "audit-prospect@example.com",
+      role: "viewer"
+    })
+  });
+  assert.equal(prospectInvite.response.status, 200);
+
+  const duplicateInvite = await requestJson(app, "/api/workspaces/current/invites", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      email: "audit-prospect@example.com",
+      role: "viewer"
+    })
+  });
+  assert.equal(duplicateInvite.response.status, 409);
+
+  const mismatchedAccept = await requestJson(app, "/api/workspaces/current/invites/accept", {
+    method: "POST",
+    headers: teammateHeaders,
+    body: JSON.stringify({ inviteCode: prospectInvite.data.invite.code })
+  });
+  assert.equal(mismatchedAccept.response.status, 403);
+
+  const reusedAccept = await requestJson(app, "/api/workspaces/current/invites/accept", {
+    method: "POST",
+    headers: teammateHeaders,
+    body: JSON.stringify({ inviteCode: invite.data.invite.code })
+  });
+  assert.equal(reusedAccept.response.status, 409);
+
+  const members = await requestJson(app, "/api/workspaces/current/members", {
+    headers: ownerHeaders
+  });
+  assert.equal(members.response.status, 200);
+  const teammateMembership = members.data.members.find((entry) => entry.userId === teammate.data.user.id);
+  assert.ok(teammateMembership);
+
+  const reaffirmedRole = await requestJson(app, `/api/workspaces/current/members/${teammate.data.user.id}/role`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({ role: teammateMembership.role })
+  });
+  assert.equal(reaffirmedRole.response.status, 200);
+
+  const elevatedRole = await requestJson(app, `/api/workspaces/current/members/${teammate.data.user.id}/role`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({ role: "admin" })
+  });
+  assert.equal(elevatedRole.response.status, 200);
+
+  const audit = await requestJson(app, "/api/audit", {
+    headers: ownerHeaders
+  });
+  assert.equal(audit.response.status, 200);
+  assert.ok(audit.data.audit.some((entry) => entry.action === "workspace.invite_rejected_existing_member"));
+  assert.ok(audit.data.audit.some((entry) => entry.action === "workspace.invite_rejected_duplicate"));
+  assert.ok(
+    audit.data.audit.some(
+      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
+    )
+  );
+  assert.ok(
+    audit.data.audit.some(
+      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
+    )
+  );
+  assert.ok(audit.data.audit.some((entry) => entry.action === "workspace.member_role_reaffirmed"));
+  const roleAudit = audit.data.audit.find((entry) => entry.action === "workspace.member_role_updated");
+  assert.equal(roleAudit.details.previousRole, "member");
+  assert.equal(roleAudit.details.role, "admin");
+});
+
 test("worker scheduled handler enqueues reconcile jobs", async () => {
   const messages = [];
   await handleScheduled(
