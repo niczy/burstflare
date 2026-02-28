@@ -548,7 +548,32 @@ function syncSessionRuntimeSnapshot(session, runtime, clock) {
   session.runtimeDesiredState = runtime.desiredState || session.runtimeDesiredState || null;
   session.runtimeStatus = runtime.status || session.runtimeStatus || null;
   session.runtimeState = runtime.runtimeState || session.runtimeState || null;
+  if (Number.isInteger(runtime.version)) {
+    session.runtimeVersion = runtime.version;
+  }
+  if (runtime.operationId) {
+    session.runtimeOperationId = runtime.operationId;
+  }
   session.runtimeUpdatedAt = nowIso(clock);
+}
+
+function isStaleRuntimeSnapshot(session, runtime) {
+  if (!runtime || !Number.isInteger(runtime.version)) {
+    return false;
+  }
+  const currentVersion = Number.isInteger(session.runtimeVersion) ? session.runtimeVersion : 0;
+  if (runtime.version < currentVersion) {
+    return true;
+  }
+  if (
+    runtime.version === currentVersion &&
+    runtime.operationId &&
+    session.runtimeOperationId &&
+    runtime.operationId !== session.runtimeOperationId
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function resolveSessionStateFromRuntime(action, runtime) {
@@ -2653,6 +2678,8 @@ export function createBurstFlareService(options = {}) {
           runtimeDesiredState: null,
           runtimeStatus: null,
           runtimeState: null,
+          runtimeVersion: 0,
+          runtimeOperationId: null,
           runtimeUpdatedAt: null,
           persistedPaths: [...(activeVersion.manifest?.persistedPaths || [])],
           sleepTtlSeconds: activeVersion.manifest?.sleepTtlSeconds || null,
@@ -2722,10 +2749,21 @@ export function createBurstFlareService(options = {}) {
     },
 
     async transitionSessionWithRuntime(token, sessionId, action, applyRuntime) {
-      return transact(SESSION_SCOPE, async (state) => {
+      ensure(typeof applyRuntime === "function", "Runtime transition handler is required");
+      const session = await transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        ensure(typeof applyRuntime === "function", "Runtime transition handler is required");
-        const runtime = await applyRuntime(formatSession(state, auth.session));
+        return formatSession(state, auth.session);
+      });
+      const runtime = await applyRuntime(session);
+      return transact(SESSION_SCOPE, (state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        if (isStaleRuntimeSnapshot(auth.session, runtime)) {
+          return {
+            session: formatSession(state, auth.session),
+            runtime,
+            stale: true
+          };
+        }
         return applySessionTransition({
           state,
           clock,
@@ -2749,6 +2787,13 @@ export function createBurstFlareService(options = {}) {
       return transact(SESSION_SCOPE, (state) => {
         const session = state.sessions.find((entry) => entry.id === sessionId);
         ensure(session, "Session not found", 404);
+        if (isStaleRuntimeSnapshot(session, runtime)) {
+          return {
+            session: formatSession(state, session),
+            runtime,
+            stale: true
+          };
+        }
         const workspace = state.workspaces.find((entry) => entry.id === session.workspaceId) || {
           id: session.workspaceId,
           plan: "free"

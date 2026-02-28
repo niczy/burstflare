@@ -8,7 +8,6 @@ This file lists the remaining work required to close the gap between the current
 
 - Implement real asynchronous build execution:
   - real image build metadata
-- Finish the remaining distributed locking and reconciliation work around the Durable Object-backed session state machine.
 - Replace the current container-backed shell bridge with a standards-compliant `sshd`-backed SSH proxy.
 - Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
 
@@ -146,7 +145,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 10: Session API And Durable Object State Machine
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - session APIs
   - lifecycle transitions
@@ -156,8 +155,7 @@ This file lists the remaining work required to close the gap between the current
   - lifecycle routes now use the Durable Object runtime transition result as the source of truth before persisting the session transition
   - session records now persist the last-known runtime snapshot fields (`runtimeStatus`, `runtimeState`, `runtimeDesiredState`, `runtimeUpdatedAt`)
   - queued reconcile now stops running container sessions through the runtime binding before persisting the sleep transition
-- Remaining:
-  - stronger distributed concurrent-request protection across state persistence and runtime coordination
+  - runtime transitions now carry monotonic operation versions and stale runtime snapshots are rejected instead of overwriting newer persisted state
 
 ### PR 11: Cloudflare Container Runtime Bootstrap
 

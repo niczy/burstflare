@@ -24,6 +24,8 @@ export class BurstFlareSessionContainer extends Container {
       status: "idle",
       runtimeState: "stopped",
       bootCount: 0,
+      operationVersion: 0,
+      lastOperationId: null,
       lastCommand: null,
       lastCommandAt: null,
       lastStartedAt: null,
@@ -59,7 +61,16 @@ export class BurstFlareSessionContainer extends Container {
     const current = await this.readRuntimeState();
     return {
       ...current,
+      version: current.operationVersion || 0,
+      operationId: current.lastOperationId || null,
       runtimeState: current.runtimeState || (await this.getContainerStatus())
+    };
+  }
+
+  nextOperation(current) {
+    return {
+      operationVersion: (current?.operationVersion || 0) + 1,
+      lastOperationId: globalThis.crypto.randomUUID()
     };
   }
 
@@ -79,17 +90,20 @@ export class BurstFlareSessionContainer extends Container {
     await this.startAndWaitForPorts();
     const containerState = await this.getContainerStatus();
     const startedAt = nowIso();
-    return this.writeRuntimeState({
+    const operation = this.nextOperation(current);
+    await this.writeRuntimeState({
       sessionId: metadata.sessionId || current.sessionId || null,
       desiredState: "running",
       status: "running",
       runtimeState: containerState,
+      ...operation,
       bootCount: current.status === "running" ? current.bootCount || 0 : (current.bootCount || 0) + 1,
       lastCommand: "start",
       lastCommandAt: startedAt,
       lastStartedAt: startedAt,
       lastError: null
     });
+    return this.getRuntimeState();
   }
 
   async stopRuntime(reason = "stop") {
@@ -100,17 +114,20 @@ export class BurstFlareSessionContainer extends Container {
     }
     const stoppedAt = nowIso();
     const current = await this.readRuntimeState();
-    return this.writeRuntimeState({
+    const operation = this.nextOperation(current);
+    await this.writeRuntimeState({
       sessionId: current.sessionId || null,
       desiredState: "sleeping",
       status: "sleeping",
       runtimeState: "stopped",
+      ...operation,
       lastCommand: "stop",
       lastCommandAt: stoppedAt,
       lastStoppedAt: stoppedAt,
       lastStopReason: reason,
       lastError: null
     });
+    return this.getRuntimeState();
   }
 
   async restartRuntime(metadata = {}) {
@@ -123,11 +140,13 @@ export class BurstFlareSessionContainer extends Container {
     await this.startAndWaitForPorts();
     const nextCurrent = await this.readRuntimeState();
     const restartedAt = nowIso();
-    return this.writeRuntimeState({
+    const operation = this.nextOperation(nextCurrent);
+    await this.writeRuntimeState({
       sessionId: metadata.sessionId || nextCurrent.sessionId || null,
       desiredState: "running",
       status: "running",
       runtimeState: await this.getContainerStatus(),
+      ...operation,
       bootCount: (nextCurrent.bootCount || 0) + 1,
       lastCommand: "restart",
       lastCommandAt: restartedAt,
@@ -136,6 +155,7 @@ export class BurstFlareSessionContainer extends Container {
       lastStopReason: "restart",
       lastError: null
     });
+    return this.getRuntimeState();
   }
 
   async deleteRuntime() {
@@ -143,17 +163,20 @@ export class BurstFlareSessionContainer extends Container {
     await this.waitForContainerStopped();
     const deletedAt = nowIso();
     const current = await this.readRuntimeState();
-    return this.writeRuntimeState({
+    const operation = this.nextOperation(current);
+    await this.writeRuntimeState({
       sessionId: current.sessionId || null,
       desiredState: "deleted",
       status: "deleted",
       runtimeState: "stopped",
+      ...operation,
       lastCommand: "delete",
       lastCommandAt: deletedAt,
       lastStoppedAt: deletedAt,
       lastStopReason: "delete",
       lastError: null
     });
+    return this.getRuntimeState();
   }
 
   async onStart() {

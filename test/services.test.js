@@ -655,3 +655,56 @@ test("service can roll back a template to a prior release", async () => {
   assert.equal(templateReleases.at(-1).mode, "rollback");
   assert.equal(templateReleases.at(-1).templateVersionId, versionOne.templateVersion.id);
 });
+
+test("service ignores stale runtime transitions that arrive after a newer runtime state", async () => {
+  const service = createBurstFlareService();
+  const owner = await service.registerUser({
+    email: "runtime-stale@example.com",
+    name: "Runtime Stale"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "runtime-stale",
+    description: "Runtime stale template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/runtime-stale:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const created = await service.createSession(owner.token, {
+    name: "runtime-stale-session",
+    templateId: template.template.id
+  });
+
+  const started = await service.transitionSessionWithRuntime(owner.token, created.session.id, "start", async () => ({
+    desiredState: "running",
+    status: "running",
+    runtimeState: "healthy",
+    version: 2,
+    operationId: "op_new"
+  }));
+  assert.equal(started.session.state, "running");
+  assert.equal(started.session.runtimeVersion, 2);
+  assert.equal(started.session.runtimeOperationId, "op_new");
+
+  const staleStop = await service.transitionSessionWithRuntime(owner.token, created.session.id, "stop", async () => ({
+    desiredState: "sleeping",
+    status: "sleeping",
+    runtimeState: "stopped",
+    version: 1,
+    operationId: "op_old"
+  }));
+  assert.equal(staleStop.stale, true);
+  assert.equal(staleStop.session.state, "running");
+  assert.equal(staleStop.session.runtimeVersion, 2);
+  assert.equal(staleStop.session.runtimeOperationId, "op_new");
+
+  const detail = await service.getSession(owner.token, created.session.id);
+  assert.equal(detail.session.state, "running");
+  assert.equal(detail.session.runtimeVersion, 2);
+  assert.equal(detail.session.runtimeOperationId, "op_new");
+});

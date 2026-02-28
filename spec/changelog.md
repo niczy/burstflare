@@ -1121,3 +1121,20 @@ This file records what has already been implemented in the repository and what h
   - preview HTML shows the allowed restored file path
   - preview HTML does not show the blocked file path
   - autosaved runtime snapshot content preserves both the `persistedPaths` list and the restored persisted file entry
+
+## 74. Runtime Transition Version Guards
+
+- Durable Object runtime transitions now carry monotonic operation versions and operation ids.
+- Session records now persist:
+  - `runtimeVersion`
+  - `runtimeOperationId`
+- The service layer now performs runtime-backed lifecycle transitions in two phases:
+  - authorize and snapshot the target session
+  - execute the runtime transition
+  - reload the current session and reject the result if the runtime snapshot is stale
+- This prevents an older runtime transition result from overwriting a newer persisted session state.
+- Added service test coverage for stale runtime transition rejection.
+- Expanded Worker lifecycle tests to assert runtime version tracking across start, restart, and stop.
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - runtime versions increment monotonically across session lifecycle transitions
+  - the persisted session detail keeps the latest runtime version and operation id

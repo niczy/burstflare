@@ -1106,7 +1106,9 @@ test("worker coordinates session lifecycle through the session container durable
     desiredState: "stopped",
     status: "idle",
     runtimeState: "stopped",
-    bootCount: 0
+    bootCount: 0,
+    version: 0,
+    operationId: null
   };
 
   const service = createWorkerService();
@@ -1123,6 +1125,8 @@ test("worker coordinates session lifecycle through the session container durable
             status: "running",
             runtimeState: "healthy",
             bootCount: runtime.bootCount + 1,
+            version: runtime.version + 1,
+            operationId: `op-${runtime.version + 1}`,
             lastCommand: "start"
           };
           calls.push(`start:${sessionId}`);
@@ -1134,6 +1138,8 @@ test("worker coordinates session lifecycle through the session container durable
             desiredState: "sleeping",
             status: "sleeping",
             runtimeState: "stopped",
+            version: runtime.version + 1,
+            operationId: `op-${runtime.version + 1}`,
             lastCommand: "stop",
             lastStopReason: reason
           };
@@ -1148,6 +1154,8 @@ test("worker coordinates session lifecycle through the session container durable
             status: "running",
             runtimeState: "healthy",
             bootCount: runtime.bootCount + 1,
+            version: runtime.version + 1,
+            operationId: `op-${runtime.version + 1}`,
             lastCommand: "restart",
             lastStopReason: "restart"
           };
@@ -1160,6 +1168,8 @@ test("worker coordinates session lifecycle through the session container durable
             desiredState: "deleted",
             status: "deleted",
             runtimeState: "stopped",
+            version: runtime.version + 1,
+            operationId: `op-${runtime.version + 1}`,
             lastCommand: "delete"
           };
           calls.push("delete");
@@ -1205,8 +1215,11 @@ test("worker coordinates session lifecycle through the session container durable
   assert.equal(started.data.session.state, "running");
   assert.equal(started.data.session.runtimeStatus, "running");
   assert.equal(started.data.session.runtimeState, "healthy");
+  assert.equal(started.data.session.runtimeVersion, 1);
+  assert.equal(started.data.session.runtimeOperationId, "op-1");
   assert.equal(started.data.runtime.status, "running");
   assert.equal(started.data.runtime.bootCount, 1);
+  assert.equal(started.data.runtime.version, 1);
 
   const detail = await requestJson(app, `/api/sessions/${sessionId}`, {
     headers: authHeaders
@@ -1215,6 +1228,7 @@ test("worker coordinates session lifecycle through the session container durable
   assert.equal(detail.data.session.runtimeStatus, "running");
   assert.equal(detail.data.session.runtime.status, "running");
   assert.equal(detail.data.session.runtime.runtimeState, "healthy");
+  assert.equal(detail.data.session.runtimeVersion, 1);
 
   const listed = await requestJson(app, "/api/sessions", {
     headers: authHeaders
@@ -1230,8 +1244,10 @@ test("worker coordinates session lifecycle through the session container durable
   assert.equal(stopped.response.status, 200);
   assert.equal(stopped.data.session.state, "sleeping");
   assert.equal(stopped.data.session.runtimeStatus, "sleeping");
+  assert.equal(stopped.data.session.runtimeVersion, 2);
   assert.equal(stopped.data.runtime.status, "sleeping");
   assert.equal(stopped.data.runtime.lastStopReason, "session_stop");
+  assert.equal(stopped.data.runtime.version, 2);
 
   const restarted = await requestJson(app, `/api/sessions/${sessionId}/restart`, {
     method: "POST",
@@ -1240,8 +1256,10 @@ test("worker coordinates session lifecycle through the session container durable
   assert.equal(restarted.response.status, 200);
   assert.equal(restarted.data.session.state, "running");
   assert.equal(restarted.data.session.runtimeStatus, "running");
+  assert.equal(restarted.data.session.runtimeVersion, 3);
   assert.equal(restarted.data.runtime.status, "running");
   assert.equal(restarted.data.runtime.bootCount, 2);
+  assert.equal(restarted.data.runtime.version, 3);
 
   const deleted = await requestJson(app, `/api/sessions/${sessionId}`, {
     method: "DELETE",
@@ -1250,7 +1268,9 @@ test("worker coordinates session lifecycle through the session container durable
   assert.equal(deleted.response.status, 200);
   assert.equal(deleted.data.session.state, "deleted");
   assert.equal(deleted.data.session.runtimeStatus, "deleted");
+  assert.equal(deleted.data.session.runtimeVersion, 4);
   assert.equal(deleted.data.runtime.status, "deleted");
+  assert.equal(deleted.data.runtime.version, 4);
 
   assert.deepEqual(calls, [
     `start:${sessionId}`,
