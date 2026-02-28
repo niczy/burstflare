@@ -185,10 +185,23 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(deletedSnapshot.ok, true);
   await assert.rejects(() => service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id), /Snapshot not found/);
 
+  const cleanupSnapshot = await service.createSnapshot(switched.token, session.session.id, {
+    label: "cleanup"
+  });
+  await service.uploadSnapshotContent(switched.token, session.session.id, cleanupSnapshot.snapshot.id, {
+    body: "cleanup-state",
+    contentType: "text/plain"
+  });
+  await service.deleteSession(switched.token, session.session.id);
+  const cleanup = await service.reconcile(owner.token);
+  assert.equal(cleanup.purgedDeletedSessions, 1);
+  assert.equal(cleanup.purgedSnapshots, 1);
+  await assert.rejects(() => service.getSession(switched.token, session.session.id), /Session not found/);
+
   const usage = await service.getUsage(owner.token);
   assert.deepEqual(usage.usage, {
     runtimeMinutes: 2,
-    snapshots: 1,
+    snapshots: 2,
     templateBuilds: 2
   });
 

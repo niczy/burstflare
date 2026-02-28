@@ -1618,7 +1618,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async reconcile(token) {
-      return store.transact((state) => {
+      return store.transact(async (state) => {
         const auth = token ? requireManageWorkspace(state, token, clock) : null;
         const workspaceId = auth?.workspace.id || null;
 
@@ -1668,9 +1668,49 @@ export function createBurstFlareService(options = {}) {
           processedBuilds += 1;
         }
 
+        const deletedSessionIds = new Set(
+          state.sessions
+            .filter((entry) => entry.state === "deleted" && (!workspaceId || entry.workspaceId === workspaceId))
+            .map((entry) => entry.id)
+        );
+
+        let purgedSnapshots = 0;
+        const retainedSnapshots = [];
+        for (const snapshot of state.snapshots) {
+          const session = state.sessions.find((entry) => entry.id === snapshot.sessionId) || null;
+          const shouldPurge =
+            deletedSessionIds.has(snapshot.sessionId) ||
+            (!session && !workspaceId) ||
+            (!session && workspaceId && snapshot.objectKey.startsWith(`snapshots/${workspaceId}/`));
+
+          if (!shouldPurge) {
+            retainedSnapshots.push(snapshot);
+            continue;
+          }
+
+          if (objects?.deleteSnapshot) {
+            await objects.deleteSnapshot({
+              workspace: session ? { id: session.workspaceId } : { id: workspaceId },
+              session,
+              snapshot
+            });
+          }
+          purgedSnapshots += 1;
+        }
+        state.snapshots = retainedSnapshots;
+
+        const purgedDeletedSessions = deletedSessionIds.size;
+        if (purgedDeletedSessions > 0) {
+          state.sessions = state.sessions.filter((entry) => !deletedSessionIds.has(entry.id));
+          state.sessionEvents = state.sessionEvents.filter((entry) => !deletedSessionIds.has(entry.sessionId));
+          state.authTokens = state.authTokens.filter((entry) => !(entry.sessionId && deletedSessionIds.has(entry.sessionId)));
+        }
+
         return {
           sleptSessions,
-          processedBuilds
+          processedBuilds,
+          purgedDeletedSessions,
+          purgedSnapshots
         };
       });
     },

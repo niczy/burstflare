@@ -222,3 +222,13 @@ This file records what has already been implemented in the repository and what h
   - delete a stored snapshot
   - remove it from the snapshot list
   - return `404` for the deleted snapshot content
+
+## 23. Deleted Session Purge In Reconcile
+
+- Extended reconcile to permanently purge sessions already marked `deleted`.
+- Extended reconcile to remove snapshot records and snapshot artifacts for purged deleted sessions.
+- Extended reconcile to remove session events and session-bound runtime tokens for purged deleted sessions.
+- Verified the live Worker can:
+  - delete a session
+  - enqueue reconcile
+  - return `404` for both the purged session record and its snapshot artifact after cleanup

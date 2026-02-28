@@ -335,6 +335,41 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: { authorization: `Bearer ${refreshed.data.token}` }
   });
   assert.equal(revoked.response.status, 401);
+
+  const cleanupSnapshot = await requestJson(app, `/api/sessions/${sessionId}/snapshots`, {
+    method: "POST",
+    headers: switchedHeaders,
+    body: JSON.stringify({ label: "cleanup" })
+  });
+  assert.equal(cleanupSnapshot.response.status, 200);
+  const cleanupUpload = await requestJson(
+    app,
+    `/api/sessions/${sessionId}/snapshots/${cleanupSnapshot.data.snapshot.id}/content`,
+    {
+      method: "PUT",
+      headers: {
+        ...switchedHeaders,
+        "content-type": "text/plain"
+      },
+      body: "cleanup payload"
+    }
+  );
+  assert.equal(cleanupUpload.response.status, 200);
+  const deletedSession = await requestJson(app, `/api/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: switchedHeaders
+  });
+  assert.equal(deletedSession.response.status, 200);
+  const cleanupRun = await requestJson(app, "/api/admin/reconcile", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(cleanupRun.response.status, 200);
+  assert.equal(cleanupRun.data.purgedDeletedSessions, 1);
+  const removedSession = await requestJson(app, `/api/sessions/${sessionId}`, {
+    headers: switchedHeaders
+  });
+  assert.equal(removedSession.response.status, 404);
 });
 
 test("worker scheduled handler enqueues reconcile jobs", async () => {
