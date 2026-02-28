@@ -1465,3 +1465,85 @@ test("worker auto-captures snapshot content from a running container", async () 
   assert.equal(content.status, 200);
   assert.equal(await content.text(), autosavePayload);
 });
+
+test("preview route rehydrates the restored snapshot before proxying", async () => {
+  const forwarded = [];
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer() {
+      return {
+        async fetch(request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/snapshot/restore") {
+            forwarded.push({
+              path: url.pathname,
+              payload: JSON.parse(await request.text())
+            });
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8"
+              }
+            });
+          }
+          forwarded.push({
+            path: url.pathname
+          });
+          return new Response("preview ok", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8"
+            }
+          });
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "preview-rehydrate@example.com",
+    name: "Preview Rehydrate"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "preview-rehydrate",
+    description: "Preview rehydrate template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/preview-rehydrate:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const created = await service.createSession(owner.token, {
+    name: "preview-rehydrate-session",
+    templateId: template.template.id
+  });
+  await service.startSession(owner.token, created.session.id);
+
+  const snapshot = await service.createSnapshot(owner.token, created.session.id, {
+    label: "preview-restore"
+  });
+  await service.uploadSnapshotContent(owner.token, created.session.id, snapshot.snapshot.id, {
+    body: "preview restore payload",
+    contentType: "text/plain"
+  });
+  await service.restoreSnapshot(owner.token, created.session.id, snapshot.snapshot.id);
+
+  const preview = await app.fetch(
+    new Request(`http://example.test/runtime/sessions/${created.session.id}/preview`, {
+      headers: {
+        authorization: `Bearer ${owner.token}`
+      }
+    })
+  );
+  assert.equal(preview.status, 200);
+  assert.equal(await preview.text(), "preview ok");
+  assert.equal(forwarded.length, 2);
+  assert.equal(forwarded[0].path, "/snapshot/restore");
+  assert.equal(forwarded[0].payload.snapshotId, snapshot.snapshot.id);
+  assert.equal(Buffer.from(forwarded[0].payload.contentBase64, "base64").toString("utf8"), "preview restore payload");
+  assert.equal(forwarded[1].path, "/");
+});

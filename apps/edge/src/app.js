@@ -791,15 +791,7 @@ export function createApp(options = {}) {
       result.session.state === "running" &&
       result.session.lastRestoredSnapshotId
     ) {
-      const runtimeRestore = await applySnapshotToRuntime(
-        token,
-        sessionId,
-        result.session.lastRestoredSnapshotId,
-        {
-          id: result.session.lastRestoredSnapshotId,
-          label: result.session.lastRestoredSnapshotId
-        }
-      );
+      const runtimeRestore = await applyRuntimeSnapshotHydration(token, result.session);
       if (runtimeRestore) {
         result.runtimeRestore = runtimeRestore;
       }
@@ -855,12 +847,11 @@ export function createApp(options = {}) {
     });
   }
 
-  async function applySnapshotToRuntime(token, sessionId, snapshotId, snapshot) {
+  async function applySnapshotContentToRuntime(sessionId, snapshotId, snapshot, content) {
     const container = getSessionContainer(sessionId);
     if (!container || typeof container.fetch !== "function") {
       return null;
     }
-    const content = await service.getSnapshotContent(token, sessionId, snapshotId);
     const response = await container.fetch(createSnapshotRestoreRequest(sessionId, snapshotId, snapshot, content));
     if (!response.ok) {
       const message = await response.text().catch(() => "Snapshot restore failed");
@@ -874,6 +865,29 @@ export function createApp(options = {}) {
       snapshotId,
       ...data
     };
+  }
+
+  async function applySnapshotToRuntime(token, sessionId, snapshotId, snapshot) {
+    const content = await service.getSnapshotContent(token, sessionId, snapshotId);
+    return applySnapshotContentToRuntime(sessionId, snapshotId, snapshot, content);
+  }
+
+  async function applyRuntimeSnapshotHydration(token, session, { runtimeToken = false } = {}) {
+    if (!session?.lastRestoredSnapshotId) {
+      return null;
+    }
+    const content = runtimeToken
+      ? await service.getRuntimeSnapshotContent(token, session.id, session.lastRestoredSnapshotId)
+      : await service.getSnapshotContent(token, session.id, session.lastRestoredSnapshotId);
+    return applySnapshotContentToRuntime(
+      session.id,
+      session.lastRestoredSnapshotId,
+      {
+        id: session.lastRestoredSnapshotId,
+        label: session.lastRestoredSnapshotId
+      },
+      content
+    );
   }
 
   async function captureSnapshotFromRuntime(sessionId) {
@@ -2050,13 +2064,16 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        await service.getSession(token, sessionId);
+        const detail = await service.getSession(token, sessionId);
         const container = await startSessionContainer(sessionId);
         if (!container) {
           return new Response("Session container runtime is not bound in this deployment.", {
             status: 503,
             headers: { "content-type": "text/plain; charset=utf-8" }
           });
+        }
+        if (detail.session.lastRestoredSnapshotId) {
+          await applyRuntimeSnapshotHydration(token, detail.session);
         }
         return container.fetch(createPreviewRequest(request, sessionId));
       })
@@ -2070,7 +2087,7 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized("Runtime token missing");
         }
-        await service.validateRuntimeToken(token, sessionId);
+        const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
         if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
           return new Response("WebSocket upgrade required for SSH attach.", {
             status: 426,
@@ -2079,6 +2096,9 @@ export function createApp(options = {}) {
         }
         const container = await startSessionContainer(sessionId);
         if (container && typeof container.fetch === "function") {
+          if (runtimeAccess.session?.lastRestoredSnapshotId) {
+            await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
+          }
           return container.fetch(createRuntimeSshRequest(request, sessionId));
         }
         const bridge = createRuntimeSshBridge(sessionId);

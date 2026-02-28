@@ -169,6 +169,7 @@ This file lists the remaining work required to close the gap between the current
   - container-backed preview path
   - live deploy verification
   - snapshot-aware boot now replays the last restored snapshot into the runtime on session start/restart
+  - preview and SSH now also rehydrate the last restored snapshot when they boot the runtime outside the normal session-start path
 - Remaining:
   - startup hydration from persisted state
   - sleep/stop hooks

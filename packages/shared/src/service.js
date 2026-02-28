@@ -2721,6 +2721,40 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async getRuntimeSnapshotContent(token, sessionId, snapshotId) {
+      return transact(SESSION_SCOPE, async (state) => {
+        const access = requireRuntimeToken(state, token, sessionId, clock);
+        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === access.session.id);
+        ensure(snapshot, "Snapshot not found", 404);
+        ensure(snapshot.uploadedAt, "Snapshot content not uploaded", 404);
+        const workspace = state.workspaces.find((entry) => entry.id === access.session.workspaceId);
+        ensure(workspace, "Workspace not found", 404);
+
+        if (objects?.getSnapshot) {
+          const content = await objects.getSnapshot({
+            workspace,
+            session: access.session,
+            snapshot
+          });
+          ensure(content, "Snapshot content not found", 404);
+          return {
+            body: content.body,
+            contentType: content.contentType || snapshot.contentType || "application/octet-stream",
+            bytes: content.bytes ?? snapshot.bytes,
+            fileName: `${snapshot.label || snapshot.id}.snapshot`
+          };
+        }
+
+        ensure(snapshot.inlineContentBase64, "Snapshot content not found", 404);
+        return {
+          body: fromBase64(snapshot.inlineContentBase64),
+          contentType: snapshot.contentType || "application/octet-stream",
+          bytes: snapshot.bytes,
+          fileName: `${snapshot.label || snapshot.id}.snapshot`
+        };
+      });
+    },
+
     async restoreSnapshot(token, sessionId, snapshotId) {
       return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
@@ -2809,8 +2843,12 @@ export function createBurstFlareService(options = {}) {
 
     async validateRuntimeToken(token, sessionId) {
       return transact(SESSION_SCOPE, (state) => {
-        requireRuntimeToken(state, token, sessionId, clock);
-        return { ok: true, sessionId };
+        const access = requireRuntimeToken(state, token, sessionId, clock);
+        return {
+          ok: true,
+          sessionId,
+          session: formatSession(state, access.session)
+        };
       });
     },
 

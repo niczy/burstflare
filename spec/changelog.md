@@ -968,3 +968,17 @@ This file records what has already been implemented in the repository and what h
   - snapshot creation on a running session now returns `runtimeCapture`
   - the live auto-captured snapshot content is persisted immediately
   - the captured snapshot content includes the running session id
+
+## 66. Preview And SSH Snapshot Rehydration
+
+- Added runtime snapshot hydration for non-lifecycle runtime entry paths.
+- The Worker now reapplies the last restored snapshot before proxying into the container on:
+  - `/runtime/sessions/:sessionId/preview`
+  - `/runtime/sessions/:sessionId/ssh`
+- Added runtime-token-safe snapshot reads in the service layer so the SSH path can rehydrate snapshot content without needing a browser auth token.
+- This closes the gap where preview or SSH could boot a container outside the normal `session start` route and miss the restored snapshot state.
+- Added Worker test coverage that proves:
+  - a restored snapshot on a running session is rehydrated before preview proxying
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - restoring a snapshot on a non-running session does not apply it immediately
+  - the first preview request can now boot the container and still render the restored snapshot id
