@@ -430,3 +430,17 @@ This file records what has already been implemented in the repository and what h
   - list multiple active auth sessions for the same user
   - revoke a non-current auth session by `authSessionId`
   - reject the revoked session token while keeping the current session active
+
+## 38. Browser Auth Session Controls
+
+- Added a dedicated Auth Sessions card in the web app.
+- Added browser controls to:
+  - refresh the current auth-session list
+  - revoke a non-current auth session
+  - trigger `logout-all` from the browser shell
+- Added UI state clearing so auth-session data is removed on logout, logout-all, or failed session restore.
+- Added app-bundle coverage in the Worker test suite for the new auth-session UI wiring.
+- Verified the live app now serves:
+  - an `Auth Sessions` management card
+  - a `Logout All Sessions` control
+  - browser bundle wiring for `/api/auth/sessions`, targeted revoke, and `/api/auth/logout-all`

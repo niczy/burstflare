@@ -232,6 +232,16 @@ export const html = `<!doctype html>
         </div>
 
         <div class="card stack">
+          <h2>Auth Sessions</h2>
+          <div class="muted">Review and revoke active browser or CLI sign-ins without forcing a full account-wide logout.</div>
+          <div class="row">
+            <button class="secondary" id="authSessionsButton">Refresh Sessions</button>
+            <button class="secondary" id="logoutAllButton">Logout All Sessions</button>
+          </div>
+          <div class="list" id="authSessions"></div>
+        </div>
+
+        <div class="card stack">
           <h2>Templates</h2>
           <div>
             <label for="templateName">Template Name</label>
@@ -411,6 +421,27 @@ function renderMembers(membersData) {
   byId("members").innerHTML = members.concat(invites).join("");
 }
 
+function renderAuthSessions(authSessions) {
+  byId("authSessions").innerHTML = authSessions.map((session) => {
+    const kinds = session.tokenKinds.join(", ");
+    const action = session.current
+      ? '<span class="pill" style="margin-top:8px">Current</span>'
+      : '<button class="secondary" data-auth-session-revoke="' + session.id + '">Revoke</button>';
+    return '<div class="item"><strong>' + session.id + '</strong><br><span class="muted">' + session.workspaceId +
+      '</span><br><span class="muted">' + kinds + ' / ' + session.tokenCount + ' token(s)</span><br><span class="muted">expires ' +
+      session.expiresAt + '</span><div class="row" style="margin-top:8px">' + action + '</div></div>';
+  }).join("");
+
+  document.querySelectorAll("[data-auth-session-revoke]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!window.confirm('Revoke this sign-in session?')) {
+        return;
+      }
+      await perform(async () => api('/api/auth/sessions/' + button.dataset.authSessionRevoke, { method: 'DELETE' }));
+    });
+  });
+}
+
 function renderTemplates(templates) {
   byId("templates").innerHTML = templates.map((template) => {
     const active = template.activeVersion ? template.activeVersion.version : "none";
@@ -459,6 +490,18 @@ function renderSessions(sessions) {
       '<button class="secondary" data-events="' + session.id + '">Events</button>' +
       '<button class="secondary" data-delete="' + session.id + '">Delete</button></div></div>';
   }).join("");
+}
+
+function clearPanels() {
+  byId("members").textContent = "";
+  byId("authSessions").textContent = "";
+  byId("templates").textContent = "";
+  byId("builds").textContent = "";
+  byId("sessions").textContent = "";
+  byId("usage").textContent = "";
+  byId("report").textContent = "";
+  byId("releases").textContent = "";
+  byId("audit").textContent = "";
 }
 
 function attachSessionButtons() {
@@ -512,6 +555,8 @@ async function refresh() {
   state.me = await api('/api/auth/me');
   renderIdentity();
   renderMembers(await api('/api/workspaces/current/members'));
+  const authSessions = await api('/api/auth/sessions');
+  renderAuthSessions(authSessions.sessions);
   const templates = await api('/api/templates');
   renderTemplates(templates.templates);
   const builds = await api('/api/template-builds');
@@ -583,14 +628,25 @@ byId("logoutButton").addEventListener("click", async () => {
     setAuth("", "");
     state.me = null;
     renderIdentity();
-    byId("members").textContent = "";
-    byId("templates").textContent = "";
-    byId("builds").textContent = "";
-    byId("sessions").textContent = "";
-    byId("usage").textContent = "";
-    byId("report").textContent = "";
-    byId("releases").textContent = "";
-    byId("audit").textContent = "";
+    clearPanels();
+  }
+});
+
+byId("logoutAllButton").addEventListener("click", async () => {
+  setError("");
+  try {
+    if (state.refreshToken || state.csrfToken) {
+      await api('/api/auth/logout-all', {
+        method: 'POST'
+      });
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    setAuth("", "");
+    state.me = null;
+    renderIdentity();
+    clearPanels();
   }
 });
 
@@ -605,6 +661,8 @@ byId("inviteButton").addEventListener("click", async () => {
 });
 
 byId("membersButton").addEventListener("click", () => perform(async () => {}));
+
+byId("authSessionsButton").addEventListener("click", () => perform(async () => {}));
 
 byId("acceptInviteButton").addEventListener("click", async () => {
   await perform(async () => {
@@ -706,6 +764,7 @@ if (state.refreshToken || state.csrfToken) {
     setAuth("", "");
     state.me = null;
     renderIdentity();
+    clearPanels();
     setError(error.message || "Could not restore session");
   });
 } else {

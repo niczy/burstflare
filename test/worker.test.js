@@ -87,6 +87,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const appScript = await appScriptResponse.text();
   assert.match(appScript, /burstflare_refresh_token/);
   assert.match(appScript, /x-burstflare-csrf/);
+  assert.match(appScript, /api\/auth\/sessions/);
+  assert.match(appScript, /logout-all/);
   assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
   assert.doesNotMatch(appScript, /state\.token/);
 
