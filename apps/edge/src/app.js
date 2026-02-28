@@ -501,6 +501,11 @@ export function createApp(options = {}) {
     return getSessionRuntimeState(session.id);
   }
 
+  async function attachRuntimeToSession(session) {
+    const runtime = await getSessionRuntimeState(session.id);
+    return runtime ? { ...session, runtime } : session;
+  }
+
   function createPreviewRequest(request, sessionId) {
     const url = new URL(request.url);
     url.pathname = "/";
@@ -1150,7 +1155,10 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.listSessions(token));
+        const result = await service.listSessions(token);
+        return toJson({
+          sessions: await Promise.all(result.sessions.map((session) => attachRuntimeToSession(session)))
+        });
       })
     },
     {
@@ -1174,8 +1182,10 @@ export function createApp(options = {}) {
           return unauthorized();
         }
         const result = await service.getSession(token, sessionId);
-        const runtime = await getSessionRuntimeState(sessionId);
-        return toJson(runtime ? { ...result, runtime } : result);
+        return toJson({
+          ...result,
+          session: await attachRuntimeToSession(result.session)
+        });
       })
     },
     {

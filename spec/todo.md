@@ -146,7 +146,7 @@ This file lists the remaining work required to close the gap between the current
   - lifecycle transitions
   - start/stop-style control paths
   - lifecycle routes now coordinate through the session container Durable Object
-  - per-session runtime coordinator state is now persisted and exposed on session detail responses
+  - per-session runtime coordinator state is now persisted and exposed on session detail and session list responses
 - Remaining:
   - move service-side state transitions under the Durable Object lock for full per-session serialization
   - stronger concurrent-request protection across state persistence and runtime coordination
@@ -187,6 +187,7 @@ This file lists the remaining work required to close the gap between the current
   - basic web controls for sessions
   - browser terminal panel wired to the container-backed SSH WebSocket shell
   - automatic live dashboard refresh while the browser session is active
+  - session cards now surface runtime coordinator state from the control plane
 - Remaining:
   - richer container-native terminal/editor integration
   - shared parity with CLI session controls

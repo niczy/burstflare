@@ -746,11 +746,14 @@ function renderTemplates(templates) {
 
 function renderSessions(sessions) {
   const items = sessions.map((session) => {
+    const runtimeMeta = session.runtime
+      ? '<br><span class="muted">runtime: ' + session.runtime.status + ' / ' + session.runtime.runtimeState + '</span>'
+      : '';
     const restoreMeta = session.lastRestoredSnapshotId
       ? '<br><span class="muted">restored: ' + session.lastRestoredSnapshotId + '</span>'
       : '';
     return '<div class="item"><strong>' + session.name + '</strong><br><span class="muted">' + session.id +
-      '</span><br><span class="muted">' + session.templateName + ' / ' + session.state + '</span>' + restoreMeta + '<div class="row" style="margin-top:8px">' +
+      '</span><br><span class="muted">' + session.templateName + ' / ' + session.state + '</span>' + runtimeMeta + restoreMeta + '<div class="row" style="margin-top:8px">' +
       '<button data-start="' + session.id + '">Start</button>' +
       '<button class="secondary" data-stop="' + session.id + '">Stop</button>' +
       '<button class="secondary" data-restart="' + session.id + '">Restart</button>' +

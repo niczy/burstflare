@@ -1002,8 +1002,15 @@ test("worker coordinates session lifecycle through the session container durable
     headers: authHeaders
   });
   assert.equal(detail.response.status, 200);
-  assert.equal(detail.data.runtime.status, "running");
-  assert.equal(detail.data.runtime.runtimeState, "healthy");
+  assert.equal(detail.data.session.runtime.status, "running");
+  assert.equal(detail.data.session.runtime.runtimeState, "healthy");
+
+  const listed = await requestJson(app, "/api/sessions", {
+    headers: authHeaders
+  });
+  assert.equal(listed.response.status, 200);
+  const listedSession = listed.data.sessions.find((entry) => entry.id === sessionId);
+  assert.equal(listedSession.runtime.status, "running");
 
   const stopped = await requestJson(app, `/api/sessions/${sessionId}/stop`, {
     method: "POST",

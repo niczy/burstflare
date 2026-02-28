@@ -744,3 +744,15 @@ This file records what has already been implemented in the repository and what h
   - stop a session and report `runtime.status = sleeping`
   - restart that session immediately and report `runtime.status = running`
   - delete that session and report `runtime.status = deleted`
+
+## 56. Session List Runtime State Surfacing
+
+- Extended the session list API to include runtime coordinator state for each session when the container binding is present.
+- Session detail now returns runtime state nested on the `session` object, matching the list shape.
+- The browser dashboard now renders runtime status directly on session cards using the attached session-runtime metadata.
+- Added Worker test coverage for:
+  - runtime state on `GET /api/sessions`
+  - runtime state on `GET /api/sessions/:sessionId`
+- Verified the live Worker can:
+  - return `runtime.status = running` in the session list after a session start
+  - return the same runtime state in the session detail response
