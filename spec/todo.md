@@ -97,9 +97,11 @@ This file lists the remaining work required to close the gap between the current
   - template records
   - template version records
   - template list/create flows
+  - authenticated bundle upload endpoint
+  - authenticated bundle download endpoint
+  - R2-backed template-bundle storage
 - Remaining:
   - signed R2 upload URLs
-  - real bundle upload path
   - manifest validation and size-limit enforcement
   - admin-grade template management UX
 
@@ -110,6 +112,8 @@ This file lists the remaining work required to close the gap between the current
   - build records
   - build status transitions
   - manual process/retry API
+  - build-log generation and retrieval
+  - R2-backed build-log storage
 - Remaining:
   - actual queue consumer
   - workflow orchestration

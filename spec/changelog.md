@@ -108,7 +108,23 @@ This file records what has already been implemented in the repository and what h
   - fetch the preview route
 - Confirmed the preview response comes from the running container path.
 
-## 13. Current State
+## 13. R2-Backed Template Artifacts And Build Logs
+
+- Added authenticated template-bundle upload routes.
+- Added authenticated template-bundle download routes.
+- Added R2-backed template-bundle storage through the Worker.
+- Added persisted build-log generation during template-build processing.
+- Added build-log retrieval routes backed by R2.
+- Extended the CLI to:
+  - upload a real bundle file with `template upload --file`
+  - fetch stored build logs with `build log`
+- Verified the live Worker can:
+  - upload a template bundle
+  - download the same template bundle
+  - process the build
+  - return a build log that reflects the uploaded bundle
+
+## 14. Current State
 
 - The project is now a working, deployable Cloudflare-backed control plane with:
   - web UI
@@ -116,5 +132,6 @@ This file records what has already been implemented in the repository and what h
   - live Worker deployment
   - provisioned D1, KV, R2, and Queue resources
   - a container-backed preview path
+  - R2-backed template artifacts and build logs
 - The system is not yet at the full production-beta scope described in `spec/plan.md`.
 - The remaining work is tracked in `spec/todo.md`.

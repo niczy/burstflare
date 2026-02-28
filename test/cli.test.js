@@ -2,10 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { runCli } from "../apps/cli/src/cli.js";
 import { createApp } from "../apps/edge/src/app.js";
-import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
 
 function capture() {
   return {
@@ -25,17 +24,62 @@ function createFetch(app) {
     );
 }
 
+function toBytes(value) {
+  if (value instanceof Uint8Array) {
+    return value.slice();
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value);
+  }
+  return new Uint8Array();
+}
+
+function createBucket() {
+  const values = new Map();
+
+  return {
+    async put(key, value, options = {}) {
+      values.set(key, {
+        body: toBytes(value),
+        contentType: options.httpMetadata?.contentType || "application/octet-stream"
+      });
+    },
+    async get(key) {
+      const entry = values.get(key);
+      if (!entry) {
+        return null;
+      }
+      return {
+        size: entry.body.byteLength,
+        httpMetadata: { contentType: entry.contentType },
+        async arrayBuffer() {
+          return entry.body.slice().buffer;
+        },
+        async text() {
+          return new TextDecoder().decode(entry.body);
+        }
+      };
+    }
+  };
+}
+
 test("cli can run device flow, build processing, session lifecycle, and reporting", async () => {
-  const service = createBurstFlareService({
-    store: createMemoryStore()
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket()
   });
-  const app = createApp({ service });
   const fetchImpl = createFetch(app);
   const stdout = capture();
   const stderr = capture();
   const configPath = path.join(os.tmpdir(), `burstflare-cli-${Date.now()}.json`);
+  const bundlePath = path.join(os.tmpdir(), `burstflare-bundle-${Date.now()}.txt`);
 
   try {
+    await writeFile(bundlePath, "cli bundle payload");
+
     let code = await runCli(["auth", "register", "--email", "cli@example.com", "--name", "CLI User", "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -89,15 +133,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
-    code = await runCli(["template", "upload", templateId, "--version", "1.0.0", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
+    code = await runCli(
+      ["template", "upload", templateId, "--version", "1.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
     assert.equal(code, 0);
     const versionOutput = JSON.parse(stdout.data.trim());
     const versionId = versionOutput.templateVersion.id;
+    assert.equal(versionOutput.bundle.contentType, "text/plain");
 
     stdout.data = "";
 
@@ -110,6 +158,17 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     const processOutput = JSON.parse(stdout.data.trim());
     assert.equal(processOutput.processed, 1);
+
+    stdout.data = "";
+
+    code = await runCli(["build", "log", versionOutput.build.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    assert.match(stdout.data, /bundle_uploaded=true/);
 
     stdout.data = "";
 
@@ -170,5 +229,6 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(stderr.data, "");
   } finally {
     await rm(configPath, { force: true });
+    await rm(bundlePath, { force: true });
   }
 });

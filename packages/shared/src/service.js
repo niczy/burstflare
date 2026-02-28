@@ -37,6 +37,22 @@ function getPlan(name) {
   return PLANS[name] || PLANS.free;
 }
 
+function toUint8Array(value) {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value);
+  }
+  return new Uint8Array();
+}
+
 function ensure(condition, message, status = 400) {
   if (!condition) {
     const error = new Error(message);
@@ -253,9 +269,27 @@ function formatSession(state, session) {
   };
 }
 
+function buildTemplateBuildLog(build, template, templateVersion) {
+  const lines = [
+    `build_id=${build.id}`,
+    `template_id=${template.id}`,
+    `template_name=${template.name}`,
+    `template_version_id=${templateVersion.id}`,
+    `template_version=${templateVersion.version}`,
+    `bundle_uploaded=${templateVersion.bundleUploadedAt ? "true" : "false"}`,
+    `bundle_key=${templateVersion.bundleKey || ""}`,
+    `build_status=${build.status}`,
+    `attempts=${build.attempts}`,
+    `started_at=${build.startedAt || ""}`,
+    `finished_at=${build.finishedAt || ""}`
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
 export function createBurstFlareService(options = {}) {
   const store = options.store || createMemoryStore();
   const clock = options.clock || (() => Date.now());
+  const objects = options.objects || null;
 
   return {
     sessionCookieName: SESSION_COOKIE,
@@ -722,6 +756,10 @@ export function createBurstFlareService(options = {}) {
           status: "queued",
           notes,
           manifest,
+          bundleKey: null,
+          bundleUploadedAt: null,
+          bundleContentType: null,
+          bundleBytes: 0,
           buildLogKey: `builds/${templateId}/${version}.log`,
           createdAt: nowIso(clock),
           builtAt: null
@@ -753,8 +791,91 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async uploadTemplateVersionBundle(token, templateId, versionId, { body, contentType = "application/octet-stream" } = {}) {
+      return store.transact(async (state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
+        const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
+        ensure(templateVersion, "Template version not found", 404);
+
+        const bundleBody = toUint8Array(body);
+        ensure(bundleBody.byteLength > 0, "Bundle body is required");
+
+        templateVersion.bundleKey =
+          templateVersion.bundleKey ||
+          `templates/${auth.workspace.id}/${auth.template.id}/${templateVersion.id}/bundle.bin`;
+        templateVersion.bundleUploadedAt = nowIso(clock);
+        templateVersion.bundleContentType = contentType;
+        templateVersion.bundleBytes = bundleBody.byteLength;
+
+        if (objects?.putTemplateVersionBundle) {
+          await objects.putTemplateVersionBundle({
+            workspace: auth.workspace,
+            template: auth.template,
+            templateVersion,
+            body: bundleBody,
+            contentType
+          });
+        }
+
+        writeAudit(state, clock, {
+          action: "template.bundle_uploaded",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "template_version",
+          targetId: templateVersion.id,
+          details: {
+            contentType,
+            bytes: bundleBody.byteLength
+          }
+        });
+
+        return {
+          templateVersion,
+          bundle: {
+            key: templateVersion.bundleKey,
+            uploadedAt: templateVersion.bundleUploadedAt,
+            contentType: templateVersion.bundleContentType,
+            bytes: templateVersion.bundleBytes
+          }
+        };
+      });
+    },
+
+    async getTemplateVersionBundle(token, templateId, versionId) {
+      return store.transact(async (state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
+        ensure(templateVersion, "Template version not found", 404);
+        ensure(templateVersion.bundleUploadedAt, "Template bundle not uploaded", 404);
+
+        if (objects?.getTemplateVersionBundle) {
+          const bundle = await objects.getTemplateVersionBundle({
+            workspace: auth.workspace,
+            template: auth.template,
+            templateVersion
+          });
+          ensure(bundle, "Template bundle not found", 404);
+          return {
+            body: bundle.body,
+            contentType: bundle.contentType || templateVersion.bundleContentType || "application/octet-stream",
+            bytes: bundle.bytes ?? templateVersion.bundleBytes,
+            fileName: `${templateVersion.version}.bundle`
+          };
+        }
+
+        const fallbackBody = JSON.stringify({ manifest: templateVersion.manifest }, null, 2);
+        return {
+          body: fallbackBody,
+          contentType: "application/json; charset=utf-8",
+          bytes: fallbackBody.length,
+          fileName: `${templateVersion.version}.json`
+        };
+      });
+    },
+
     async processTemplateBuilds(token) {
-      return store.transact((state) => {
+      return store.transact(async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const builds = [];
         for (const build of state.templateBuilds) {
@@ -780,6 +901,16 @@ export function createBurstFlareService(options = {}) {
           build.updatedAt = nowIso(clock);
           version.status = "ready";
           version.builtAt = nowIso(clock);
+          const buildLog = buildTemplateBuildLog(build, template, version);
+          if (objects?.putBuildLog) {
+            await objects.putBuildLog({
+              workspace: auth.workspace,
+              template,
+              templateVersion: version,
+              build,
+              log: buildLog
+            });
+          }
           writeUsage(state, clock, {
             workspaceId: auth.workspace.id,
             kind: "template_build",
@@ -801,6 +932,42 @@ export function createBurstFlareService(options = {}) {
           });
         }
         return { builds, processed: builds.length };
+      });
+    },
+
+    async getTemplateBuildLog(token, buildId) {
+      return store.transact(async (state) => {
+        const auth = requireAuth(state, token, clock);
+        const build = state.templateBuilds.find((entry) => entry.id === buildId);
+        ensure(build, "Build not found", 404);
+        const templateVersion = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+        ensure(templateVersion, "Template version missing", 404);
+        const template = state.templates.find((entry) => entry.id === templateVersion.templateId);
+        ensure(template && template.workspaceId === auth.workspace.id, "Build not found", 404);
+
+        if (objects?.getBuildLog) {
+          const log = await objects.getBuildLog({
+            workspace: auth.workspace,
+            template,
+            templateVersion,
+            build
+          });
+          if (log?.text) {
+            return {
+              buildId,
+              buildLogKey: templateVersion.buildLogKey,
+              contentType: log.contentType || "text/plain; charset=utf-8",
+              text: log.text
+            };
+          }
+        }
+
+        return {
+          buildId,
+          buildLogKey: templateVersion.buildLogKey,
+          contentType: "text/plain; charset=utf-8",
+          text: buildTemplateBuildLog(build, template, templateVersion)
+        };
       });
     },
 

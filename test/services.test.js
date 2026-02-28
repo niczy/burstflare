@@ -2,10 +2,57 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
 
+function createObjectStore() {
+  const bundles = new Map();
+  const logs = new Map();
+  const decoder = new TextDecoder();
+
+  return {
+    async putTemplateVersionBundle({ templateVersion, body, contentType }) {
+      bundles.set(templateVersion.id, {
+        key: templateVersion.bundleKey,
+        body: body.slice(),
+        contentType
+      });
+    },
+    async getTemplateVersionBundle({ templateVersion }) {
+      const entry = bundles.get(templateVersion.id);
+      if (!entry) {
+        return null;
+      }
+      return {
+        body: entry.body.slice(),
+        contentType: entry.contentType,
+        bytes: entry.body.byteLength
+      };
+    },
+    async putBuildLog({ templateVersion, log }) {
+      logs.set(templateVersion.id, log);
+    },
+    async getBuildLog({ templateVersion }) {
+      const text = logs.get(templateVersion.id);
+      if (!text) {
+        return null;
+      }
+      return {
+        text,
+        contentType: "text/plain; charset=utf-8",
+        bytes: new TextEncoder().encode(text).byteLength
+      };
+    },
+    readBundleText(templateVersionId) {
+      const entry = bundles.get(templateVersionId);
+      return entry ? decoder.decode(entry.body) : null;
+    }
+  };
+}
+
 test("service covers invites, queued builds, releases, session events, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
+  const objects = createObjectStore();
   const service = createBurstFlareService({
     store: createMemoryStore(),
+    objects,
     clock: () => {
       tick += 1000;
       return tick;
@@ -42,6 +89,14 @@ test("service covers invites, queued builds, releases, session events, usage, an
     manifest: { image: "registry.cloudflare.com/test/node-dev:1.0.0" }
   });
   assert.equal(version.build.status, "queued");
+  const uploaded = await service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
+    body: "console.log('bundle');",
+    contentType: "application/javascript"
+  });
+  assert.equal(uploaded.bundle.bytes, 22);
+  assert.equal(objects.readBundleText(version.templateVersion.id), "console.log('bundle');");
+  const bundle = await service.getTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id);
+  assert.equal(new TextDecoder().decode(bundle.body), "console.log('bundle');");
   await assert.rejects(
     () => service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id),
     /build-ready/
@@ -49,6 +104,8 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const processed = await service.processTemplateBuilds(owner.token);
   assert.equal(processed.processed, 1);
+  const buildLog = await service.getTemplateBuildLog(owner.token, version.build.id);
+  assert.match(buildLog.text, /bundle_uploaded=true/);
 
   const promoted = await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
   assert.equal(promoted.activeVersion.id, version.templateVersion.id);

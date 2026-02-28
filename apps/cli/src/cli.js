@@ -55,6 +55,17 @@ async function requestJson(url, options = {}, fetchImpl = fetch) {
   return data;
 }
 
+async function requestText(url, options = {}, fetchImpl = fetch) {
+  const response = await fetchImpl(url, options);
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(text || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  return text;
+}
+
 function headers(token, withJson = true) {
   const map = {};
   if (withJson) {
@@ -104,10 +115,11 @@ function helpText() {
     "burstflare workspace set-role <userId> --role viewer",
     "burstflare workspace plan <free|pro|enterprise>",
     "burstflare template create <name> [--description ...]",
-    "burstflare template upload <templateId> --version 1.0.0 [--notes ...]",
+    "burstflare template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...]",
     "burstflare template promote <templateId> <versionId>",
     "burstflare template list",
     "burstflare build list",
+    "burstflare build log <buildId>",
     "burstflare build process",
     "burstflare build retry <buildId>",
     "burstflare release list",
@@ -352,7 +364,7 @@ export async function runCli(argv, dependencies = {}) {
 
       if (subcommand === "upload") {
         const templateId = rest[0];
-        const data = await requestJson(
+        const created = await requestJson(
           `${baseUrl}/api/templates/${templateId}/versions`,
           {
             method: "POST",
@@ -368,7 +380,28 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        print(stdout, JSON.stringify(data, null, 2));
+        let result = created;
+        if (options.file) {
+          const bundleBody = await readFile(options.file);
+          const uploaded = await requestJson(
+            `${baseUrl}/api/templates/${templateId}/versions/${created.templateVersion.id}/bundle`,
+            {
+              method: "PUT",
+              headers: {
+                ...headers(token, false),
+                "content-type": options["content-type"] || "application/octet-stream"
+              },
+              body: bundleBody
+            },
+            fetchImpl
+          );
+          result = {
+            ...created,
+            templateVersion: uploaded.templateVersion,
+            bundle: uploaded.bundle
+          };
+        }
+        print(stdout, JSON.stringify(result, null, 2));
         return 0;
       }
 
@@ -411,6 +444,19 @@ export async function runCli(argv, dependencies = {}) {
           fetchImpl
         );
         print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "log") {
+        const buildId = rest[0];
+        const data = await requestText(
+          `${baseUrl}/api/template-builds/${buildId}/log`,
+          {
+            headers: headers(token, false)
+          },
+          fetchImpl
+        );
+        print(stdout, data.trimEnd());
         return 0;
       }
 

@@ -1,7 +1,48 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../apps/edge/src/app.js";
-import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
+
+function toBytes(value) {
+  if (value instanceof Uint8Array) {
+    return value.slice();
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value);
+  }
+  return new Uint8Array();
+}
+
+function createBucket() {
+  const values = new Map();
+
+  return {
+    async put(key, value, options = {}) {
+      values.set(key, {
+        body: toBytes(value),
+        contentType: options.httpMetadata?.contentType || "application/octet-stream"
+      });
+    },
+    async get(key) {
+      const entry = values.get(key);
+      if (!entry) {
+        return null;
+      }
+      return {
+        size: entry.body.byteLength,
+        httpMetadata: { contentType: entry.contentType },
+        async arrayBuffer() {
+          return entry.body.slice().buffer;
+        },
+        async text() {
+          return new TextDecoder().decode(entry.body);
+        }
+      };
+    }
+  };
+}
 
 async function requestJson(app, path, init = {}) {
   const response = await app.fetch(
@@ -13,11 +54,11 @@ async function requestJson(app, path, init = {}) {
   return { response, data };
 }
 
-test("worker serves invite flow, build queue flow, session events, and runtime validation", async () => {
-  const service = createBurstFlareService({
-    store: createMemoryStore()
+test("worker serves invite flow, bundle upload, build logs, session events, and runtime validation", async () => {
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket()
   });
-  const app = createApp({ service });
 
   const health = await requestJson(app, "/api/health");
   assert.equal(health.response.status, 200);
@@ -77,6 +118,26 @@ test("worker serves invite flow, build queue flow, session events, and runtime v
   });
   assert.equal(version.data.build.status, "queued");
 
+  const bundleBody = "print('hello from bundle')";
+  const bundleUpload = await requestJson(app, `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`, {
+    method: "PUT",
+    headers: {
+      ...ownerHeaders,
+      "content-type": "text/x-python"
+    },
+    body: bundleBody
+  });
+  assert.equal(bundleUpload.response.status, 200);
+  assert.equal(bundleUpload.data.bundle.contentType, "text/x-python");
+
+  const downloadedBundle = await app.fetch(
+    new Request(`http://example.test/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`, {
+      headers: ownerHeaders
+    })
+  );
+  assert.equal(downloadedBundle.status, 200);
+  assert.equal(await downloadedBundle.text(), bundleBody);
+
   const prematurePromote = await requestJson(app, `/api/templates/${templateId}/promote`, {
     method: "POST",
     headers: ownerHeaders,
@@ -89,6 +150,14 @@ test("worker serves invite flow, build queue flow, session events, and runtime v
     headers: ownerHeaders
   });
   assert.equal(buildProcess.data.processed, 1);
+
+  const buildLog = await app.fetch(
+    new Request(`http://example.test/api/template-builds/${version.data.build.id}/log`, {
+      headers: ownerHeaders
+    })
+  );
+  assert.equal(buildLog.status, 200);
+  assert.match(await buildLog.text(), /bundle_uploaded=true/);
 
   const promoted = await requestJson(app, `/api/templates/${templateId}/promote`, {
     method: "POST",

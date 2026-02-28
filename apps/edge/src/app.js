@@ -107,11 +107,70 @@ function devicePage(code) {
 </html>`;
 }
 
+function createObjectStore(options) {
+  if (!options.TEMPLATE_BUCKET && !options.BUILD_BUCKET) {
+    return null;
+  }
+
+  return {
+    async putTemplateVersionBundle({ templateVersion, body, contentType }) {
+      if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
+        return null;
+      }
+      await options.TEMPLATE_BUCKET.put(templateVersion.bundleKey, body, {
+        httpMetadata: { contentType }
+      });
+      return { key: templateVersion.bundleKey };
+    },
+
+    async getTemplateVersionBundle({ templateVersion }) {
+      if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
+        return null;
+      }
+      const object = await options.TEMPLATE_BUCKET.get(templateVersion.bundleKey);
+      if (!object) {
+        return null;
+      }
+      return {
+        body: await object.arrayBuffer(),
+        contentType: object.httpMetadata?.contentType || templateVersion.bundleContentType || "application/octet-stream",
+        bytes: object.size ?? templateVersion.bundleBytes
+      };
+    },
+
+    async putBuildLog({ templateVersion, log }) {
+      if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
+        return null;
+      }
+      await options.BUILD_BUCKET.put(templateVersion.buildLogKey, log, {
+        httpMetadata: { contentType: "text/plain; charset=utf-8" }
+      });
+      return { key: templateVersion.buildLogKey };
+    },
+
+    async getBuildLog({ templateVersion }) {
+      if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
+        return null;
+      }
+      const object = await options.BUILD_BUCKET.get(templateVersion.buildLogKey);
+      if (!object) {
+        return null;
+      }
+      return {
+        text: await object.text(),
+        contentType: object.httpMetadata?.contentType || "text/plain; charset=utf-8",
+        bytes: object.size ?? 0
+      };
+    }
+  };
+}
+
 export function createApp(options = {}) {
   const service =
     options.service ||
     createBurstFlareService({
-      store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore()
+      store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore(),
+      objects: createObjectStore(options)
     });
 
   function hasContainerBinding() {
@@ -385,6 +444,40 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "PUT",
+      pattern: "/api/templates/:templateId/versions/:versionId/bundle",
+      handler: withErrorHandling(async (request, { templateId, versionId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(
+          await service.uploadTemplateVersionBundle(token, templateId, versionId, {
+            body: await request.arrayBuffer(),
+            contentType: request.headers.get("content-type") || "application/octet-stream"
+          })
+        );
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/api/templates/:templateId/versions/:versionId/bundle",
+      handler: withErrorHandling(async (request, { templateId, versionId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const bundle = await service.getTemplateVersionBundle(token, templateId, versionId);
+        return new Response(bundle.body, {
+          headers: {
+            "content-type": bundle.contentType,
+            "content-disposition": `inline; filename="${bundle.fileName}"`,
+            "content-length": String(bundle.bytes)
+          }
+        });
+      })
+    },
+    {
       method: "POST",
       pattern: "/api/templates/:templateId/promote",
       handler: withErrorHandling(async (request, { templateId }) => {
@@ -416,6 +509,22 @@ export function createApp(options = {}) {
           return unauthorized();
         }
         return toJson(await service.processTemplateBuilds(token));
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/api/template-builds/:buildId/log",
+      handler: withErrorHandling(async (request, { buildId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const log = await service.getTemplateBuildLog(token, buildId);
+        return new Response(log.text, {
+          headers: {
+            "content-type": log.contentType
+          }
+        });
       })
     },
     {
