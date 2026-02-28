@@ -211,12 +211,13 @@ This file lists the remaining work required to close the gap between the current
 - Status: partially complete
 - Done:
   - reconcile concepts and queue scaffolding exist
+  - queue-driven reconcile enqueue and consumer execution
 - Remaining:
-  - scheduled jobs
   - stuck-build recovery
   - stale-session cleanup
   - orphaned snapshot cleanup
   - idempotent operator reports
+  - scheduled jobs
 
 ### PR 17: Security Hardening And Audit Completeness
 

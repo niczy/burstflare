@@ -69,6 +69,9 @@ function createBucket() {
 test("cli can run device flow, build processing, session lifecycle, and reporting", async () => {
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),
+    RECONCILE_QUEUE: {
+      async send() {}
+    },
     BUILD_BUCKET: createBucket(),
     SNAPSHOT_BUCKET: createBucket()
   });
@@ -282,6 +285,28 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const cleared = JSON.parse(await readFile(configPath, "utf8"));
     assert.equal(cleared.token, "");
     assert.equal(cleared.refreshToken, "");
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "login", "--email", "cli@example.com", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+
+    stdout.data = "";
+
+    code = await runCli(["reconcile", "--enqueue", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const reconcileOutput = JSON.parse(stdout.data.trim());
+    assert.equal(reconcileOutput.queued, true);
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });

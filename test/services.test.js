@@ -69,12 +69,16 @@ test("service covers invites, queued builds, releases, session events, usage, an
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();
   const queuedBuilds = [];
+  let reconcileJobs = 0;
   const service = createBurstFlareService({
     store: createMemoryStore(),
     objects,
     jobs: {
       async enqueueBuild(buildId) {
         queuedBuilds.push(buildId);
+      },
+      async enqueueReconcile() {
+        reconcileJobs += 1;
       }
     },
     clock: () => {
@@ -189,6 +193,10 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const logout = await service.logout(refreshed.token, refreshed.refreshToken);
   assert.equal(logout.ok, true);
   await assert.rejects(() => service.authenticate(refreshed.token), /Unauthorized/);
+
+  const enqueued = await service.enqueueReconcile(owner.token);
+  assert.equal(enqueued.queued, true);
+  assert.equal(reconcileJobs, 1);
 
   const report = await service.getAdminReport(owner.token);
   assert.equal(report.report.members, 2);

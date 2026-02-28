@@ -186,3 +186,14 @@ This file records what has already been implemented in the repository and what h
   - enqueue a template build
   - process it asynchronously through the build queue consumer
   - promote the version without calling the manual process endpoint
+
+## 19. Queue-Driven Reconciliation
+
+- Added an authenticated reconcile-enqueue control-plane route.
+- Added service-layer support for queueing reconcile work.
+- Added CLI support for `reconcile --enqueue`.
+- Reused the existing reconcile queue consumer to execute queued reconciliation jobs.
+- Verified the live Worker can:
+  - enqueue a reconcile job
+  - process it through the reconcile queue consumer
+  - move a running session to `sleeping` asynchronously

@@ -56,11 +56,17 @@ async function requestJson(app, path, init = {}) {
 
 test("worker serves invite flow, bundle upload, build logs, session events, and runtime validation", async () => {
   const queuedBuilds = [];
+  const queuedReconcile = [];
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),
     BUILD_QUEUE: {
       async send(body) {
         queuedBuilds.push(body);
+      }
+    },
+    RECONCILE_QUEUE: {
+      async send(body) {
+        queuedReconcile.push(body);
       }
     },
     BUILD_BUCKET: createBucket(),
@@ -287,6 +293,13 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerHeaders
   });
   assert.equal(report.data.report.releases, 1);
+
+  const enqueued = await requestJson(app, "/api/admin/reconcile/enqueue", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(enqueued.response.status, 200);
+  assert.deepEqual(queuedReconcile, [{ type: "reconcile" }]);
 
   const refreshed = await requestJson(app, "/api/auth/refresh", {
     method: "POST",

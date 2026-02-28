@@ -1643,6 +1643,26 @@ export function createBurstFlareService(options = {}) {
           processedBuilds
         };
       });
+    },
+
+    async enqueueReconcile(token) {
+      return store.transact(async (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        if (jobs?.enqueueReconcile) {
+          await jobs.enqueueReconcile();
+        }
+        writeAudit(state, clock, {
+          action: "admin.reconcile_enqueued",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id
+        });
+        return {
+          ok: true,
+          queued: Boolean(jobs?.enqueueReconcile)
+        };
+      });
     }
   };
 }

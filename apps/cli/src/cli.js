@@ -154,7 +154,7 @@ function helpText() {
     "burstflare snapshot get <sessionId> <snapshotId> [--output restored.bin]",
     "burstflare usage",
     "burstflare report",
-    "burstflare reconcile",
+    "burstflare reconcile [--enqueue]",
     "burstflare preview <sessionId>",
     "burstflare ssh <sessionId>"
   ].join("\n");
@@ -770,8 +770,9 @@ export async function runCli(argv, dependencies = {}) {
     }
 
     if (command === "reconcile") {
+      const route = options.enqueue ? "/api/admin/reconcile/enqueue" : "/api/admin/reconcile";
       const data = await requestJson(
-        `${baseUrl}/api/admin/reconcile`,
+        `${baseUrl}${route}`,
         {
           method: "POST",
           headers: headers(token)

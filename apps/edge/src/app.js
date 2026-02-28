@@ -973,6 +973,17 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "POST",
+      pattern: "/api/admin/reconcile/enqueue",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.enqueueReconcile(token));
+      })
+    },
+    {
       method: "GET",
       pattern: "/runtime/sessions/:sessionId/preview",
       handler: withErrorHandling(async (request, { sessionId }) => {
