@@ -718,3 +718,29 @@ This file records what has already been implemented in the repository and what h
   - serve the Turnstile widget container without leaking HTML placeholders
   - serve the dynamic Turnstile client wiring in the public app bundle
   - continue to accept auth flows in the no-key fallback mode
+
+## 55. Durable Object Session Runtime Coordination
+
+- Added real session-runtime coordination methods to the session container Durable Object.
+- The session container now persists runtime coordination state, including:
+  - `desiredState`
+  - `status`
+  - `runtimeState`
+  - `bootCount`
+  - last command / start / stop metadata
+  - last error information
+- Session lifecycle routes now coordinate with the session Durable Object:
+  - `POST /api/sessions/:sessionId/start`
+  - `POST /api/sessions/:sessionId/stop`
+  - `POST /api/sessions/:sessionId/restart`
+  - `DELETE /api/sessions/:sessionId`
+- Session detail now includes the current runtime coordinator state when the container binding is present.
+- Stop/restart/delete now wait for the container to finish tearing down before the next transition is reported complete, which removes the immediate restart race from the public API path.
+- Added Worker test coverage for:
+  - lifecycle-route coordination with a session container stub
+  - runtime-state inclusion on session detail responses
+- Verified the live Worker can:
+  - start a session and report `runtime.status = running`
+  - stop a session and report `runtime.status = sleeping`
+  - restart that session immediately and report `runtime.status = running`
+  - delete that session and report `runtime.status = deleted`

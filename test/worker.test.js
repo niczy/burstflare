@@ -891,3 +891,150 @@ test("worker proxies runtime SSH websocket upgrades into the session container",
   assert.equal(forwarded.requestSessionId, session.session.id);
   assert.equal(forwarded.upgrade, "websocket");
 });
+
+test("worker coordinates session lifecycle through the session container durable object", async () => {
+  const calls = [];
+  let runtime = {
+    desiredState: "stopped",
+    status: "idle",
+    runtimeState: "stopped",
+    bootCount: 0
+  };
+
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer() {
+      return {
+        async startRuntime({ sessionId }) {
+          runtime = {
+            ...runtime,
+            sessionId,
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy",
+            bootCount: runtime.bootCount + 1,
+            lastCommand: "start"
+          };
+          calls.push(`start:${sessionId}`);
+          return runtime;
+        },
+        async stopRuntime(reason) {
+          runtime = {
+            ...runtime,
+            desiredState: "sleeping",
+            status: "sleeping",
+            runtimeState: "stopped",
+            lastCommand: "stop",
+            lastStopReason: reason
+          };
+          calls.push(`stop:${reason}`);
+          return runtime;
+        },
+        async restartRuntime({ sessionId }) {
+          runtime = {
+            ...runtime,
+            sessionId,
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy",
+            bootCount: runtime.bootCount + 1,
+            lastCommand: "restart",
+            lastStopReason: "restart"
+          };
+          calls.push(`restart:${sessionId}`);
+          return runtime;
+        },
+        async deleteRuntime() {
+          runtime = {
+            ...runtime,
+            desiredState: "deleted",
+            status: "deleted",
+            runtimeState: "stopped",
+            lastCommand: "delete"
+          };
+          calls.push("delete");
+          return runtime;
+        },
+        async getRuntimeState() {
+          return runtime;
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "runtime-do@example.com",
+    name: "Runtime DO"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "runtime-do",
+    description: "Runtime coordination template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/runtime-do:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+  const createdSession = await service.createSession(owner.token, {
+    name: "runtime-coordination",
+    templateId: template.template.id
+  });
+  const sessionId = createdSession.session.id;
+  const authHeaders = {
+    authorization: `Bearer ${owner.token}`
+  };
+
+  const started = await requestJson(app, `/api/sessions/${sessionId}/start`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(started.response.status, 200);
+  assert.equal(started.data.session.state, "running");
+  assert.equal(started.data.runtime.status, "running");
+  assert.equal(started.data.runtime.bootCount, 1);
+
+  const detail = await requestJson(app, `/api/sessions/${sessionId}`, {
+    headers: authHeaders
+  });
+  assert.equal(detail.response.status, 200);
+  assert.equal(detail.data.runtime.status, "running");
+  assert.equal(detail.data.runtime.runtimeState, "healthy");
+
+  const stopped = await requestJson(app, `/api/sessions/${sessionId}/stop`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(stopped.response.status, 200);
+  assert.equal(stopped.data.session.state, "sleeping");
+  assert.equal(stopped.data.runtime.status, "sleeping");
+  assert.equal(stopped.data.runtime.lastStopReason, "session_stop");
+
+  const restarted = await requestJson(app, `/api/sessions/${sessionId}/restart`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(restarted.response.status, 200);
+  assert.equal(restarted.data.session.state, "running");
+  assert.equal(restarted.data.runtime.status, "running");
+  assert.equal(restarted.data.runtime.bootCount, 2);
+
+  const deleted = await requestJson(app, `/api/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: authHeaders
+  });
+  assert.equal(deleted.response.status, 200);
+  assert.equal(deleted.data.session.state, "deleted");
+  assert.equal(deleted.data.runtime.status, "deleted");
+
+  assert.deepEqual(calls, [
+    `start:${sessionId}`,
+    "stop:session_stop",
+    `restart:${sessionId}`,
+    "delete"
+  ]);
+});

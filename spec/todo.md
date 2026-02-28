@@ -14,7 +14,7 @@ This file lists the remaining work required to close the gap between the current
 - Implement real asynchronous build execution:
   - workflow orchestration
   - real image build metadata
-- Replace the current session lifecycle shim with a real Durable Object state machine and per-session locking.
+- Finish moving the session lifecycle under a real Durable Object state machine and per-session locking.
 - Replace the current container-backed shell bridge with a standards-compliant `sshd`-backed SSH proxy.
 - Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
 - Implement real container-side snapshot upload, restore, and persisted-path behavior for running containers.
@@ -145,9 +145,11 @@ This file lists the remaining work required to close the gap between the current
   - session APIs
   - lifecycle transitions
   - start/stop-style control paths
+  - lifecycle routes now coordinate through the session container Durable Object
+  - per-session runtime coordinator state is now persisted and exposed on session detail responses
 - Remaining:
-  - real Durable Object lock/state machine
-  - stronger concurrent-request protection
+  - move service-side state transitions under the Durable Object lock for full per-session serialization
+  - stronger concurrent-request protection across state persistence and runtime coordination
   - persistent session reconciliation behavior
 
 ### PR 11: Cloudflare Container Runtime Bootstrap

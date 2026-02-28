@@ -433,6 +433,74 @@ export function createApp(options = {}) {
     return container;
   }
 
+  async function getSessionRuntimeState(sessionId) {
+    const container = getSessionContainer(sessionId);
+    if (!container) {
+      return null;
+    }
+    if (typeof container.getRuntimeState === "function") {
+      return container.getRuntimeState();
+    }
+    if (typeof container.getState === "function") {
+      const state = await container.getState();
+      return {
+        desiredState: ["healthy", "running"].includes(state?.status) ? "running" : "sleeping",
+        status: ["healthy", "running"].includes(state?.status) ? "running" : "sleeping",
+        runtimeState: state?.status || "unknown"
+      };
+    }
+    return null;
+  }
+
+  async function syncSessionRuntime(action, session) {
+    const container = getSessionContainer(session.id);
+    if (!container) {
+      return null;
+    }
+    if (action === "start") {
+      if (typeof container.startRuntime === "function") {
+        return container.startRuntime({
+          sessionId: session.id,
+          previewUrl: session.previewUrl
+        });
+      }
+      await startSessionContainer(session.id);
+      return getSessionRuntimeState(session.id);
+    }
+    if (action === "stop") {
+      if (typeof container.stopRuntime === "function") {
+        return container.stopRuntime("session_stop");
+      }
+      if (typeof container.stop === "function") {
+        await container.stop();
+      }
+      return getSessionRuntimeState(session.id);
+    }
+    if (action === "restart") {
+      if (typeof container.restartRuntime === "function") {
+        return container.restartRuntime({
+          sessionId: session.id,
+          previewUrl: session.previewUrl
+        });
+      }
+      if (typeof container.stop === "function") {
+        await container.stop();
+      }
+      await startSessionContainer(session.id);
+      return getSessionRuntimeState(session.id);
+    }
+    if (action === "delete") {
+      if (typeof container.deleteRuntime === "function") {
+        return container.deleteRuntime();
+      }
+      if (typeof container.destroy === "function") {
+        await container.destroy();
+      }
+      return getSessionRuntimeState(session.id);
+    }
+    return getSessionRuntimeState(session.id);
+  }
+
   function createPreviewRequest(request, sessionId) {
     const url = new URL(request.url);
     url.pathname = "/";
@@ -1105,7 +1173,9 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.getSession(token, sessionId));
+        const result = await service.getSession(token, sessionId);
+        const runtime = await getSessionRuntimeState(sessionId);
+        return toJson(runtime ? { ...result, runtime } : result);
       })
     },
     {
@@ -1128,8 +1198,8 @@ export function createApp(options = {}) {
           return unauthorized();
         }
         const result = await service.startSession(token, sessionId);
-        await startSessionContainer(sessionId);
-        return toJson(result);
+        const runtime = await syncSessionRuntime("start", result.session);
+        return toJson(runtime ? { ...result, runtime } : result);
       })
     },
     {
@@ -1140,7 +1210,9 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.stopSession(token, sessionId));
+        const result = await service.stopSession(token, sessionId);
+        const runtime = await syncSessionRuntime("stop", result.session);
+        return toJson(runtime ? { ...result, runtime } : result);
       })
     },
     {
@@ -1151,7 +1223,9 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.restartSession(token, sessionId));
+        const result = await service.restartSession(token, sessionId);
+        const runtime = await syncSessionRuntime("restart", result.session);
+        return toJson(runtime ? { ...result, runtime } : result);
       })
     },
     {
@@ -1162,7 +1236,9 @@ export function createApp(options = {}) {
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.deleteSession(token, sessionId));
+        const result = await service.deleteSession(token, sessionId);
+        const runtime = await syncSessionRuntime("delete", result.session);
+        return toJson(runtime ? { ...result, runtime } : result);
       })
     },
     {
