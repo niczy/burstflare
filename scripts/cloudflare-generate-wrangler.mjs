@@ -53,6 +53,14 @@ queue = "${resources.queues.builds.name}"`);
     lines.push(`[[queues.producers]]
 binding = "RECONCILE_QUEUE"
 queue = "${resources.queues.reconcile.name}"`);
+    lines.push(`[[queues.consumers]]
+queue = "${resources.queues.builds.name}"
+max_batch_size = 1
+max_batch_timeout = 1`);
+    lines.push(`[[queues.consumers]]
+queue = "${resources.queues.reconcile.name}"
+max_batch_size = 1
+max_batch_timeout = 1`);
   }
 
   return `${lines.join("\n\n")}\n`;

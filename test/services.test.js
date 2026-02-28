@@ -68,9 +68,15 @@ function createObjectStore() {
 test("service covers invites, queued builds, releases, session events, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();
+  const queuedBuilds = [];
   const service = createBurstFlareService({
     store: createMemoryStore(),
     objects,
+    jobs: {
+      async enqueueBuild(buildId) {
+        queuedBuilds.push(buildId);
+      }
+    },
     clock: () => {
       tick += 1000;
       return tick;
@@ -108,6 +114,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
     manifest: { image: "registry.cloudflare.com/test/node-dev:1.0.0" }
   });
   assert.equal(version.build.status, "queued");
+  assert.deepEqual(queuedBuilds, [version.build.id]);
   const uploaded = await service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
     body: "console.log('bundle');",
     contentType: "application/javascript"
@@ -120,6 +127,13 @@ test("service covers invites, queued builds, releases, session events, usage, an
     () => service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id),
     /build-ready/
   );
+
+  const secondVersion = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.1.0",
+    manifest: { image: "registry.cloudflare.com/test/node-dev:1.1.0" }
+  });
+  const queuedProcessed = await service.processTemplateBuildById(secondVersion.build.id);
+  assert.equal(queuedProcessed.processed, 1);
 
   const processed = await service.processTemplateBuilds(owner.token);
   assert.equal(processed.processed, 1);
@@ -165,7 +179,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.deepEqual(usage.usage, {
     runtimeMinutes: 2,
     snapshots: 1,
-    templateBuilds: 1
+    templateBuilds: 2
   });
 
   const refreshed = await service.refreshSession(owner.refreshToken);

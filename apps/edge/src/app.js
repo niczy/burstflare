@@ -190,6 +190,35 @@ function createObjectStore(options) {
   };
 }
 
+function createJobQueue(options) {
+  if (!options.BUILD_QUEUE && !options.RECONCILE_QUEUE) {
+    return null;
+  }
+
+  return {
+    async enqueueBuild(buildId) {
+      if (!options.BUILD_QUEUE) {
+        return null;
+      }
+      await options.BUILD_QUEUE.send({
+        type: "build",
+        buildId
+      });
+      return { buildId };
+    },
+
+    async enqueueReconcile() {
+      if (!options.RECONCILE_QUEUE) {
+        return null;
+      }
+      await options.RECONCILE_QUEUE.send({
+        type: "reconcile"
+      });
+      return { ok: true };
+    }
+  };
+}
+
 function createRateLimiter(options) {
   const storage = options.AUTH_KV || options.CACHE_KV || null;
   const local = new Map();
@@ -254,13 +283,19 @@ function requestIdentity(request) {
   return "anonymous";
 }
 
+export function createWorkerService(options = {}) {
+  if (options.service) {
+    return options.service;
+  }
+  return createBurstFlareService({
+    store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore(),
+    objects: createObjectStore(options),
+    jobs: createJobQueue(options)
+  });
+}
+
 export function createApp(options = {}) {
-  const service =
-    options.service ||
-    createBurstFlareService({
-      store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore(),
-      objects: createObjectStore(options)
-    });
+  const service = createWorkerService(options);
   const rateLimiter = createRateLimiter(options);
 
   function hasContainerBinding() {

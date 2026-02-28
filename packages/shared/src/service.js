@@ -323,10 +323,61 @@ function buildTemplateBuildLog(build, template, templateVersion) {
   return `${lines.join("\n")}\n`;
 }
 
+async function processBuildRecord({ state, clock, objects, build, template, templateVersion, source = "manual", actorUserId = null }) {
+  if (!["queued", "retrying"].includes(build.status)) {
+    return null;
+  }
+
+  build.status = "building";
+  build.startedAt = nowIso(clock);
+  build.updatedAt = nowIso(clock);
+  build.attempts += 1;
+  templateVersion.status = "building";
+
+  build.status = "succeeded";
+  build.finishedAt = nowIso(clock);
+  build.updatedAt = nowIso(clock);
+  templateVersion.status = "ready";
+  templateVersion.builtAt = nowIso(clock);
+
+  const buildLog = buildTemplateBuildLog(build, template, templateVersion);
+  if (objects?.putBuildLog) {
+    await objects.putBuildLog({
+      workspace: { id: template.workspaceId },
+      template,
+      templateVersion,
+      build,
+      log: buildLog
+    });
+  }
+
+  writeUsage(state, clock, {
+    workspaceId: template.workspaceId,
+    kind: "template_build",
+    value: 1,
+    details: { templateId: template.id, templateVersionId: templateVersion.id, source }
+  });
+  writeAudit(state, clock, {
+    action: "template.build_succeeded",
+    actorUserId,
+    workspaceId: template.workspaceId,
+    targetType: "template_build",
+    targetId: build.id,
+    details: { templateId: template.id, templateVersionId: templateVersion.id, source }
+  });
+
+  return {
+    ...build,
+    templateId: template.id,
+    templateVersionId: templateVersion.id
+  };
+}
+
 export function createBurstFlareService(options = {}) {
   const store = options.store || createMemoryStore();
   const clock = options.clock || (() => Date.now());
   const objects = options.objects || null;
+  const jobs = options.jobs || null;
 
   return {
     sessionCookieName: SESSION_COOKIE,
@@ -854,7 +905,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async addTemplateVersion(token, templateId, { version, manifest = {}, notes = "" }) {
-      return store.transact((state) => {
+      return store.transact(async (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
         ensure(version, "Version is required");
@@ -900,6 +951,10 @@ export function createBurstFlareService(options = {}) {
           targetId: templateVersion.id,
           details: { version }
         });
+
+        if (jobs?.enqueueBuild) {
+          await jobs.enqueueBuild(build.id);
+        }
 
         return { templateVersion, build };
       });
@@ -1001,51 +1056,48 @@ export function createBurstFlareService(options = {}) {
           if (!template || template.workspaceId !== auth.workspace.id) {
             continue;
           }
-          if (!["queued", "retrying"].includes(build.status)) {
-            continue;
+          const processedBuild = await processBuildRecord({
+            state,
+            clock,
+            objects,
+            build,
+            template,
+            templateVersion: version,
+            source: "manual",
+            actorUserId: auth.user.id
+          });
+          if (processedBuild) {
+            builds.push(processedBuild);
           }
-          build.status = "building";
-          build.startedAt = nowIso(clock);
-          build.updatedAt = nowIso(clock);
-          build.attempts += 1;
-          version.status = "building";
-
-          build.status = "succeeded";
-          build.finishedAt = nowIso(clock);
-          build.updatedAt = nowIso(clock);
-          version.status = "ready";
-          version.builtAt = nowIso(clock);
-          const buildLog = buildTemplateBuildLog(build, template, version);
-          if (objects?.putBuildLog) {
-            await objects.putBuildLog({
-              workspace: auth.workspace,
-              template,
-              templateVersion: version,
-              build,
-              log: buildLog
-            });
-          }
-          writeUsage(state, clock, {
-            workspaceId: auth.workspace.id,
-            kind: "template_build",
-            value: 1,
-            details: { templateId: template.id, templateVersionId: version.id }
-          });
-          writeAudit(state, clock, {
-            action: "template.build_succeeded",
-            actorUserId: auth.user.id,
-            workspaceId: auth.workspace.id,
-            targetType: "template_build",
-            targetId: build.id,
-            details: { templateId: template.id, templateVersionId: version.id }
-          });
-          builds.push({
-            ...build,
-            templateId: template.id,
-            templateVersionId: version.id
-          });
         }
         return { builds, processed: builds.length };
+      });
+    },
+
+    async processTemplateBuildById(buildId, { source = "queue", actorUserId = null } = {}) {
+      return store.transact(async (state) => {
+        const build = state.templateBuilds.find((entry) => entry.id === buildId);
+        ensure(build, "Build not found", 404);
+        const templateVersion = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+        ensure(templateVersion, "Template version missing", 404);
+        const template = state.templates.find((entry) => entry.id === templateVersion.templateId);
+        ensure(template, "Template missing", 404);
+
+        const processedBuild = await processBuildRecord({
+          state,
+          clock,
+          objects,
+          build,
+          template,
+          templateVersion,
+          source,
+          actorUserId
+        });
+
+        return {
+          build: processedBuild,
+          processed: processedBuild ? 1 : 0
+        };
       });
     },
 
@@ -1086,7 +1138,7 @@ export function createBurstFlareService(options = {}) {
     },
 
     async retryTemplateBuild(token, buildId) {
-      return store.transact((state) => {
+      return store.transact(async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const build = state.templateBuilds.find((entry) => entry.id === buildId);
         ensure(build, "Build not found", 404);
@@ -1104,6 +1156,9 @@ export function createBurstFlareService(options = {}) {
           targetType: "template_build",
           targetId: build.id
         });
+        if (jobs?.enqueueBuild) {
+          await jobs.enqueueBuild(build.id);
+        }
         return { build };
       });
     },

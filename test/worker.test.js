@@ -55,8 +55,14 @@ async function requestJson(app, path, init = {}) {
 }
 
 test("worker serves invite flow, bundle upload, build logs, session events, and runtime validation", async () => {
+  const queuedBuilds = [];
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),
+    BUILD_QUEUE: {
+      async send(body) {
+        queuedBuilds.push(body);
+      }
+    },
     BUILD_BUCKET: createBucket(),
     SNAPSHOT_BUCKET: createBucket()
   });
@@ -119,6 +125,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     })
   });
   assert.equal(version.data.build.status, "queued");
+  assert.deepEqual(queuedBuilds, [{ type: "build", buildId: version.data.build.id }]);
 
   const bundleBody = "print('hello from bundle')";
   const bundleUpload = await requestJson(app, `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`, {

@@ -116,11 +116,10 @@ This file lists the remaining work required to close the gap between the current
   - manual process/retry API
   - build-log generation and retrieval
   - R2-backed build-log storage
+  - queue-backed build enqueue and consumer processing
 - Remaining:
-  - actual queue consumer
   - workflow orchestration
   - real builder execution
-  - R2-backed build logs
   - failure recovery and DLQ behavior
 
 ### PR 09: Generated Runtime Binding Catalog And Deploy Automation

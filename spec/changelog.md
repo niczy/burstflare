@@ -173,3 +173,16 @@ This file records what has already been implemented in the repository and what h
   - rotate it once
   - reject the old refresh token after rotation
   - revoke the new access token on logout
+
+## 18. Queue-Driven Template Build Processing
+
+- Added build-job enqueue hooks when a template version is created.
+- Added build-job enqueue hooks when a build is retried.
+- Added Worker queue consumers for:
+  - build processing
+  - reconciliation messages
+- Added a single-build processor that queue consumers can execute directly.
+- Verified the live Worker can:
+  - enqueue a template build
+  - process it asynchronously through the build queue consumer
+  - promote the version without calling the manual process endpoint
