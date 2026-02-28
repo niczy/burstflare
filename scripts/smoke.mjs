@@ -159,6 +159,55 @@ async function main() {
     method: "POST",
     headers: authHeaders
   });
+  if (started.session.state !== "running") {
+    throw new Error(`Session did not start correctly (state=${started.session.state})`);
+  }
+  if (started.runtime && started.runtime.status !== "running") {
+    throw new Error(`Runtime did not start correctly (status=${started.runtime.status})`);
+  }
+
+  const listed = await requestJson(baseUrl, "/api/sessions", {
+    headers: authHeaders
+  });
+  const listedSession = listed.sessions.find((entry) => entry.id === session.session.id);
+  if (!listedSession) {
+    throw new Error("Started session was not returned by the session list");
+  }
+  if (listedSession.runtime && listedSession.runtime.status !== "running") {
+    throw new Error(`Listed runtime did not report running (status=${listedSession.runtime.status})`);
+  }
+
+  const stopped = await requestJson(baseUrl, `/api/sessions/${session.session.id}/stop`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  if (stopped.session.state !== "sleeping") {
+    throw new Error(`Session did not stop correctly (state=${stopped.session.state})`);
+  }
+  if (stopped.runtime && stopped.runtime.status !== "sleeping") {
+    throw new Error(`Runtime did not stop correctly (status=${stopped.runtime.status})`);
+  }
+
+  const restarted = await requestJson(baseUrl, `/api/sessions/${session.session.id}/restart`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  if (restarted.session.state !== "running") {
+    throw new Error(`Session did not restart correctly (state=${restarted.session.state})`);
+  }
+  if (restarted.runtime && restarted.runtime.status !== "running") {
+    throw new Error(`Runtime did not restart correctly (status=${restarted.runtime.status})`);
+  }
+
+  const detail = await requestJson(baseUrl, `/api/sessions/${session.session.id}`, {
+    headers: authHeaders
+  });
+  if (detail.session.state !== "running") {
+    throw new Error(`Session detail did not report running (state=${detail.session.state})`);
+  }
+  if (detail.session.runtime && detail.session.runtime.status !== "running") {
+    throw new Error(`Session detail runtime did not report running (status=${detail.session.runtime.status})`);
+  }
 
   const snapshot = await requestJson(baseUrl, `/api/sessions/${session.session.id}/snapshots`, {
     method: "POST",
@@ -182,6 +231,9 @@ async function main() {
         processedBuilds: buildResult.processed,
         activeVersionId: promoted.activeVersion.id,
         sessionState: started.session.state,
+        stoppedState: stopped.session.state,
+        restartedState: restarted.session.state,
+        detailState: detail.session.state,
         snapshotId: snapshot.snapshot.id,
         templates: report.report.templates,
         sessionsTotal: report.report.sessionsTotal

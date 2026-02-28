@@ -756,3 +756,19 @@ This file records what has already been implemented in the repository and what h
 - Verified the live Worker can:
   - return `runtime.status = running` in the session list after a session start
   - return the same runtime state in the session detail response
+
+## 57. Stronger Synthetic Session Lifecycle Smoke Coverage
+
+- Expanded the synthetic smoke script to cover more of the session lifecycle.
+- The smoke flow now verifies:
+  - session start
+  - session list visibility after start
+  - session stop
+  - session restart
+  - session detail after restart
+- The smoke script now validates runtime coordinator state when it is present, while still working in local non-container mode.
+- The smoke output now reports:
+  - `stoppedState`
+  - `restartedState`
+  - `detailState`
+- Verified locally by running the updated smoke flow against the dev server and confirming the stricter lifecycle assertions passed.

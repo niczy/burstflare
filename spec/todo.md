@@ -256,6 +256,7 @@ This file lists the remaining work required to close the gap between the current
 - Status: not complete
 - Done:
   - baseline synthetic smoke coverage exists for auth, build, session, snapshot, and report flows
+  - synthetic smoke coverage now includes start, list, stop, restart, and detail validation for session lifecycle
   - production and staging deployment modes are now separated in the Cloudflare tooling
 - Remaining:
   - operator runbooks
