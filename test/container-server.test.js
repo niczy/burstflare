@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   applySnapshotRestore,
+  applyRuntimeBootstrap,
   exportSnapshotPayload,
   listEditorFiles,
+  recordLifecycleHook,
   resetRuntimeState,
   runtimeState,
   updateEditorFile
@@ -78,4 +80,32 @@ test("session container editor writes stay inside the configured persisted paths
     () => updateEditorFile("/tmp/blocked.txt", "nope", ["/workspace/project"]),
     /persisted paths/
   );
+});
+
+test("session container bootstrap and lifecycle hooks persist runtime metadata files", async () => {
+  resetRuntimeState();
+
+  const bootstrapped = applyRuntimeBootstrap({
+    sessionId: "ses_bootstrap",
+    workspaceId: "ws_test",
+    templateId: "tpl_test",
+    templateName: "Runtime Template",
+    state: "running",
+    lastRestoredSnapshotId: "snap_boot",
+    persistedPaths: ["/workspace/project"],
+    runtimeVersion: 3
+  });
+  assert.equal(bootstrapped.ok, true);
+  assert.equal(bootstrapped.bootstrap.sessionId, "ses_bootstrap");
+  assert.deepEqual(runtimeState.persistedPaths, ["/workspace/project"]);
+  assert.match(runtimeState.files.get("/workspace/.burstflare/session.json"), /Runtime Template/);
+
+  const lifecycle = recordLifecycleHook({
+    sessionId: "ses_bootstrap",
+    phase: "sleep",
+    reason: "session_stop"
+  });
+  assert.equal(lifecycle.ok, true);
+  assert.equal(lifecycle.lifecycle.phase, "sleep");
+  assert.match(runtimeState.files.get("/workspace/.burstflare/lifecycle.json"), /session_stop/);
 });

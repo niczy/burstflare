@@ -18,6 +18,8 @@ const runtimeState = {
   restoredBytes: 0,
   restoredContentType: null,
   persistedPaths: [],
+  bootstrap: null,
+  lastLifecycle: null,
   files: new Map()
 };
 
@@ -198,7 +200,47 @@ function resetRuntimeState() {
   runtimeState.restoredBytes = 0;
   runtimeState.restoredContentType = null;
   runtimeState.persistedPaths = [];
+  runtimeState.bootstrap = null;
+  runtimeState.lastLifecycle = null;
   runtimeState.files.clear();
+}
+
+function applyRuntimeBootstrap(payload) {
+  const persistedPaths = getEditorScope(payload?.persistedPaths || runtimeState.persistedPaths);
+  const bootstrap = {
+    sessionId: String(payload?.sessionId || "unknown"),
+    workspaceId: payload?.workspaceId || null,
+    templateId: payload?.templateId || null,
+    templateName: payload?.templateName || null,
+    state: payload?.state || null,
+    previewUrl: payload?.previewUrl || null,
+    lastRestoredSnapshotId: payload?.lastRestoredSnapshotId || null,
+    persistedPaths,
+    runtimeVersion: Number.isInteger(payload?.runtimeVersion) ? payload.runtimeVersion : 0,
+    bootstrappedAt: new Date().toISOString()
+  };
+  runtimeState.persistedPaths = persistedPaths;
+  runtimeState.bootstrap = bootstrap;
+  runtimeState.files.set("/workspace/.burstflare/session.json", JSON.stringify(bootstrap, null, 2));
+  return {
+    ok: true,
+    bootstrap
+  };
+}
+
+function recordLifecycleHook(payload) {
+  const lifecycle = {
+    sessionId: String(payload?.sessionId || runtimeState.bootstrap?.sessionId || "unknown"),
+    phase: String(payload?.phase || "unknown"),
+    reason: String(payload?.reason || payload?.phase || "unknown"),
+    recordedAt: new Date().toISOString()
+  };
+  runtimeState.lastLifecycle = lifecycle;
+  runtimeState.files.set("/workspace/.burstflare/lifecycle.json", JSON.stringify(lifecycle, null, 2));
+  return {
+    ok: true,
+    lifecycle
+  };
 }
 
 function escapeHtml(value) {
@@ -477,6 +519,8 @@ function renderHtml(req) {
           node: process.version,
           restoredSnapshotId: runtimeState.restoredSnapshotId,
           restoredAt: runtimeState.restoredAt,
+          bootstrap: runtimeState.bootstrap,
+          lastLifecycle: runtimeState.lastLifecycle,
           persistedPaths: runtimeState.persistedPaths,
           restoredFiles: Array.from(runtimeState.files.keys())
         },
@@ -908,9 +952,29 @@ const server = http.createServer(async (req, res) => {
         hostname: os.hostname(),
         node: process.version,
         restoredSnapshotId: runtimeState.restoredSnapshotId,
-        restoredAt: runtimeState.restoredAt
+        restoredAt: runtimeState.restoredAt,
+        bootstrap: runtimeState.bootstrap,
+        lastLifecycle: runtimeState.lastLifecycle
       })
     );
+    return;
+  }
+
+  if (url.pathname === "/runtime/bootstrap" && req.method === "POST") {
+    const body = await readRequestBody(req);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    const bootstrapped = applyRuntimeBootstrap(payload);
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(bootstrapped));
+    return;
+  }
+
+  if (url.pathname === "/runtime/lifecycle" && req.method === "POST") {
+    const body = await readRequestBody(req);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    const recorded = recordLifecycleHook(payload);
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(recorded));
     return;
   }
 
@@ -1021,10 +1085,12 @@ if (isMain) {
 
 export {
   applySnapshotRestore,
+  applyRuntimeBootstrap,
   createSnapshotEnvelope,
   exportSnapshotPayload,
   listEditorFiles,
   normalizePersistedPaths,
+  recordLifecycleHook,
   resetRuntimeState,
   runtimeState,
   updateEditorFile

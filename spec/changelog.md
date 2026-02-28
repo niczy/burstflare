@@ -1198,3 +1198,28 @@ This file records what has already been implemented in the repository and what h
 - Verified locally through `npm run ci` and in the live Cloudflare deployment that:
   - `GET /api/template-builds/:id/artifact` now returns OCI-style image metadata for a fresh build
   - `POST /api/templates/:id/promote` returns a release binding whose `imageReference` and `imageDigest` match the stored build artifact
+
+## 78. Runtime Bootstrap And Lifecycle Hooks
+
+- Added runtime bootstrap control requests so the Worker now pushes persisted session metadata into the live container after start and on runtime-driven attach paths.
+- The container runtime now persists bootstrap metadata in:
+  - in-memory runtime state
+  - `/workspace/.burstflare/session.json`
+- Added lifecycle hook control requests so stop, reconcile, restart, and delete now record runtime lifecycle transitions before the container changes state.
+- The container runtime now persists the most recent lifecycle hook in:
+  - in-memory runtime state
+  - `/workspace/.burstflare/lifecycle.json`
+- The session container Durable Object now records lifecycle analytics fields in its runtime state, including:
+  - `lastBootstrapAt`
+  - `lastBootstrapSnapshotId`
+  - `lastBootstrapState`
+  - `lastLifecyclePhase`
+  - `lastLifecycleAt`
+  - `lastLifecycleReason`
+- Session detail and session list responses now inherit those runtime analytics fields through the existing runtime-state attachment path.
+- Added direct container-runtime tests for bootstrap and lifecycle persistence.
+- Added Worker tests for runtime bootstrap on start and lifecycle hooks on stop.
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - starting a public session records `lastBootstrapAt` and `lastBootstrapState = running`
+  - preview now exposes the bootstrap file path in the runtime-rendered container HTML
+  - stopping a public session records and persists `lastLifecyclePhase = sleep` and `lastLifecycleReason = session_stop`

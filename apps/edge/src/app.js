@@ -746,10 +746,89 @@ async function readContainerRuntimeState(container) {
   return null;
 }
 
-async function stopContainerRuntime(container, reason = "reconcile") {
+function createContainerControlRequest(pathname, payload) {
+  return new Request(`http://runtime.internal${pathname}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+async function applyRuntimeBootstrapToContainer(container, session) {
+  if (!container || !session) {
+    return null;
+  }
+
+  const payload = {
+    sessionId: session.id,
+    workspaceId: session.workspaceId || null,
+    templateId: session.templateId || null,
+    templateName: session.templateName || null,
+    state: session.state || null,
+    previewUrl: session.previewUrl || null,
+    lastRestoredSnapshotId: session.lastRestoredSnapshotId || null,
+    persistedPaths: Array.isArray(session.persistedPaths) ? session.persistedPaths : [],
+    runtimeVersion: Number.isInteger(session.runtimeVersion) ? session.runtimeVersion : 0
+  };
+
+  let result = null;
+  if (typeof container.fetch === "function") {
+    try {
+      const response = await container.fetch(createContainerControlRequest("/runtime/bootstrap", payload));
+      if (response.ok) {
+        result = await response.json().catch(() => null);
+      }
+    } catch (_error) {
+      result = null;
+    }
+  }
+  if (typeof container.recordBootstrap === "function") {
+    try {
+      await container.recordBootstrap(payload);
+    } catch (_error) {}
+  }
+  return result;
+}
+
+async function emitRuntimeLifecycleHook(container, sessionId, phase, reason = "", { writeRuntimeFile = false } = {}) {
+  if (!container || !sessionId || !phase) {
+    return null;
+  }
+
+  const payload = {
+    sessionId,
+    phase,
+    reason: reason || phase
+  };
+
+  let result = null;
+  if (typeof container.recordLifecycleHook === "function") {
+    try {
+      await container.recordLifecycleHook(payload);
+    } catch (_error) {}
+  }
+  if (writeRuntimeFile && typeof container.fetch === "function") {
+    try {
+      const response = await container.fetch(createContainerControlRequest("/runtime/lifecycle", payload));
+      if (response.ok) {
+        result = await response.json().catch(() => null);
+      }
+    } catch (_error) {
+      result = null;
+    }
+  }
+  return result;
+}
+
+async function stopContainerRuntime(container, reason = "reconcile", sessionId = null) {
   if (!container) {
     return null;
   }
+  await emitRuntimeLifecycleHook(container, sessionId, "sleep", reason, {
+    writeRuntimeFile: true
+  });
   if (typeof container.stopRuntime === "function") {
     return container.stopRuntime(reason);
   }
@@ -773,7 +852,7 @@ export async function runReconcile(options = {}) {
       if (!container) {
         continue;
       }
-      const runtime = await stopContainerRuntime(container, "reconcile");
+      const runtime = await stopContainerRuntime(container, "reconcile", session.id);
       await service.applySystemSessionTransition(session.id, "stop", runtime);
       runtimeSleptSessions += 1;
     }
@@ -848,9 +927,14 @@ export function createApp(options = {}) {
       return getSessionRuntimeState(session.id);
     }
     if (action === "stop") {
-      return stopContainerRuntime(container, "session_stop");
+      return stopContainerRuntime(container, "session_stop", session.id);
     }
     if (action === "restart") {
+      if (session.state === "running") {
+        await emitRuntimeLifecycleHook(container, session.id, "restart", "restart", {
+          writeRuntimeFile: true
+        });
+      }
       if (typeof container.restartRuntime === "function") {
         return container.restartRuntime({
           sessionId: session.id,
@@ -864,6 +948,9 @@ export function createApp(options = {}) {
       return getSessionRuntimeState(session.id);
     }
     if (action === "delete") {
+      await emitRuntimeLifecycleHook(container, session.id, "delete", "delete", {
+        writeRuntimeFile: session.state === "running"
+      });
       if (typeof container.deleteRuntime === "function") {
         return container.deleteRuntime();
       }
@@ -896,11 +983,15 @@ export function createApp(options = {}) {
     if (
       ["start", "restart"].includes(action) &&
       result.session.state === "running" &&
-      result.session.lastRestoredSnapshotId
+      !result.stale
     ) {
-      const runtimeRestore = await applyRuntimeSnapshotHydration(token, result.session);
-      if (runtimeRestore) {
-        result.runtimeRestore = runtimeRestore;
+      const container = getSessionContainer(result.session.id);
+      await applyRuntimeBootstrapToContainer(container, result.session);
+      if (result.session.lastRestoredSnapshotId) {
+        const runtimeRestore = await applyRuntimeSnapshotHydration(token, result.session);
+        if (runtimeRestore) {
+          result.runtimeRestore = runtimeRestore;
+        }
       }
     }
     return result;
@@ -2252,6 +2343,7 @@ export function createApp(options = {}) {
             headers: { "content-type": "text/plain; charset=utf-8" }
           });
         }
+        await applyRuntimeBootstrapToContainer(container, detail.session);
         if (detail.session.lastRestoredSnapshotId) {
           await applyRuntimeSnapshotHydration(token, detail.session);
         }
@@ -2274,6 +2366,7 @@ export function createApp(options = {}) {
             headers: { "content-type": "text/plain; charset=utf-8" }
           });
         }
+        await applyRuntimeBootstrapToContainer(container, detail.session);
         if (detail.session.lastRestoredSnapshotId) {
           await applyRuntimeSnapshotHydration(auth.token, detail.session);
         }
@@ -2296,6 +2389,7 @@ export function createApp(options = {}) {
             headers: { "content-type": "text/plain; charset=utf-8" }
           });
         }
+        await applyRuntimeBootstrapToContainer(container, detail.session);
         if (detail.session.lastRestoredSnapshotId) {
           await applyRuntimeSnapshotHydration(auth.token, detail.session);
         }
@@ -2320,6 +2414,7 @@ export function createApp(options = {}) {
         }
         const container = await startSessionContainer(sessionId);
         if (container && typeof container.fetch === "function") {
+          await applyRuntimeBootstrapToContainer(container, runtimeAccess.session);
           if (runtimeAccess.session?.lastRestoredSnapshotId) {
             await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
           }
@@ -2356,6 +2451,7 @@ export function createApp(options = {}) {
         }
         const container = await startSessionContainer(sessionId);
         if (container && typeof container.fetch === "function") {
+          await applyRuntimeBootstrapToContainer(container, runtimeAccess.session);
           if (runtimeAccess.session?.lastRestoredSnapshotId) {
             await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
           }

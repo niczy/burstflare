@@ -1284,6 +1284,107 @@ test("worker proxies browser editor requests into the session container editor r
   assert.match(forwarded.bodyText || "", /content=draft\+2/);
 });
 
+test("worker bootstraps runtime containers on start and records lifecycle hooks on stop", async () => {
+  const forwarded = {
+    bootstrap: null,
+    lifecycle: null
+  };
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer() {
+      return {
+        async startRuntime({ sessionId }) {
+          return {
+            sessionId,
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy",
+            version: 1,
+            operationId: "op-start"
+          };
+        },
+        async stopRuntime() {
+          return {
+            desiredState: "sleeping",
+            status: "sleeping",
+            runtimeState: "stopped",
+            version: 2,
+            operationId: "op-stop"
+          };
+        },
+        async fetch(request) {
+          const url = new URL(request.url);
+          const payload = JSON.parse(await request.text());
+          if (url.pathname === "/runtime/bootstrap") {
+            forwarded.bootstrap = payload;
+            return new Response(JSON.stringify({ ok: true, bootstrap: payload }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8"
+              }
+            });
+          }
+          if (url.pathname === "/runtime/lifecycle") {
+            forwarded.lifecycle = payload;
+            return new Response(JSON.stringify({ ok: true, lifecycle: payload }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8"
+              }
+            });
+          }
+          return new Response("unexpected", { status: 404 });
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "bootstrap-hooks@example.com",
+    name: "Bootstrap Hooks"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "bootstrap-hooks",
+    description: "Template for lifecycle hook coverage"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/test/bootstrap-hooks:1.0.0",
+      persistedPaths: ["/workspace/project"]
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const session = await service.createSession(owner.token, {
+    name: "bootstrap-hooks-session",
+    templateId: template.template.id
+  });
+
+  const started = await requestJson(app, `/api/sessions/${session.session.id}/start`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.token}`
+    }
+  });
+  assert.equal(started.response.status, 200);
+  assert.equal(forwarded.bootstrap.sessionId, session.session.id);
+  assert.equal(forwarded.bootstrap.state, "running");
+  assert.deepEqual(forwarded.bootstrap.persistedPaths, ["/workspace/project"]);
+
+  const stopped = await requestJson(app, `/api/sessions/${session.session.id}/stop`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.token}`
+    }
+  });
+  assert.equal(stopped.response.status, 200);
+  assert.equal(forwarded.lifecycle.sessionId, session.session.id);
+  assert.equal(forwarded.lifecycle.phase, "sleep");
+  assert.equal(forwarded.lifecycle.reason, "session_stop");
+});
+
 test("worker coordinates session lifecycle through the session container durable object", async () => {
   const calls = [];
   let runtime = {
@@ -1771,7 +1872,7 @@ test("preview route rehydrates the restored snapshot before proxying", async () 
       return {
         async fetch(request) {
           const url = new URL(request.url);
-          if (url.pathname === "/snapshot/restore") {
+          if (url.pathname === "/runtime/bootstrap" || url.pathname === "/snapshot/restore") {
             forwarded.push({
               path: url.pathname,
               payload: JSON.parse(await request.text())
@@ -1836,11 +1937,13 @@ test("preview route rehydrates the restored snapshot before proxying", async () 
   );
   assert.equal(preview.status, 200);
   assert.equal(await preview.text(), "preview ok");
-  assert.equal(forwarded.length, 2);
-  assert.equal(forwarded[0].path, "/snapshot/restore");
-  assert.equal(forwarded[0].payload.snapshotId, snapshot.snapshot.id);
-  assert.equal(Buffer.from(forwarded[0].payload.contentBase64, "base64").toString("utf8"), "preview restore payload");
-  assert.equal(forwarded[1].path, "/");
+  assert.equal(forwarded.length, 3);
+  assert.equal(forwarded[0].path, "/runtime/bootstrap");
+  assert.equal(forwarded[0].payload.sessionId, created.session.id);
+  assert.equal(forwarded[1].path, "/snapshot/restore");
+  assert.equal(forwarded[1].payload.snapshotId, snapshot.snapshot.id);
+  assert.equal(Buffer.from(forwarded[1].payload.contentBase64, "base64").toString("utf8"), "preview restore payload");
+  assert.equal(forwarded[2].path, "/");
 });
 
 test("worker can roll back a template through the API", async () => {

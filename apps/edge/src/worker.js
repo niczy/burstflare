@@ -31,6 +31,12 @@ export class BurstFlareSessionContainer extends Container {
       lastStartedAt: null,
       lastStoppedAt: null,
       lastStopReason: null,
+      lastBootstrapAt: null,
+      lastBootstrapSnapshotId: null,
+      lastBootstrapState: null,
+      lastLifecyclePhase: null,
+      lastLifecycleAt: null,
+      lastLifecycleReason: null,
       lastExitCode: null,
       lastError: null,
       updatedAt: null
@@ -175,6 +181,26 @@ export class BurstFlareSessionContainer extends Container {
       lastStoppedAt: deletedAt,
       lastStopReason: "delete",
       lastError: null
+    });
+    return this.getRuntimeState();
+  }
+
+  async recordBootstrap(metadata = {}) {
+    await this.writeRuntimeState({
+      sessionId: metadata.sessionId || null,
+      lastBootstrapAt: nowIso(),
+      lastBootstrapSnapshotId: metadata.lastRestoredSnapshotId || null,
+      lastBootstrapState: metadata.state || null
+    });
+    return this.getRuntimeState();
+  }
+
+  async recordLifecycleHook(metadata = {}) {
+    await this.writeRuntimeState({
+      sessionId: metadata.sessionId || null,
+      lastLifecyclePhase: metadata.phase || null,
+      lastLifecycleAt: nowIso(),
+      lastLifecycleReason: metadata.reason || metadata.phase || null
     });
     return this.getRuntimeState();
   }

@@ -154,7 +154,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 11: Cloudflare Container Runtime Bootstrap
 
-- Status: partially complete
+- Status: complete
 - Done:
   - container image
   - container binding
@@ -162,10 +162,10 @@ This file lists the remaining work required to close the gap between the current
   - live deploy verification
   - snapshot-aware boot now replays the last restored snapshot into the runtime on session start/restart
   - preview and SSH now also rehydrate the last restored snapshot when they boot the runtime outside the normal session-start path
-- Remaining:
-  - startup hydration from persisted state
-  - sleep/stop hooks
-  - lifecycle analytics emission
+  - runtime start, preview, editor, SSH, and terminal attach paths now bootstrap persisted session metadata into the running container
+  - the runtime now writes bootstrap metadata to `/workspace/.burstflare/session.json`
+  - stop, reconcile, restart, and delete paths now emit lifecycle hooks into the runtime and record them in runtime state
+  - runtime state now surfaces lifecycle analytics fields such as `lastBootstrapAt`, `lastLifecyclePhase`, and `lastLifecycleReason`
 
 ### PR 12: SSH Over WebSocket End-To-End
 
