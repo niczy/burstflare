@@ -157,3 +157,19 @@ This file records what has already been implemented in the repository and what h
   - upload a file when creating a snapshot
   - restore snapshot content to a local output path
 - Verified the live Worker can round-trip snapshot content through the public API.
+
+## 17. Refresh Tokens And Logout Revocation
+
+- Added refresh-token issuance for:
+  - browser registration
+  - browser login
+  - CLI login and device exchange
+  - workspace switching
+- Added refresh-token rotation through `/api/auth/refresh`.
+- Added explicit logout and token revocation through `/api/auth/logout`.
+- Added CLI support for `auth refresh` and `auth logout`.
+- Verified the live Worker can:
+  - issue a refresh token
+  - rotate it once
+  - reject the old refresh token after rotation
+  - revoke the new access token on logout

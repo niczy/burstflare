@@ -49,6 +49,8 @@ This file lists the remaining work required to close the gap between the current
 - Status: partially complete
 - Done:
   - basic registration and token-based auth flows exist
+  - refresh-token rotation
+  - explicit logout for issued access tokens
 - Remaining:
   - WebAuthn
   - Turnstile
@@ -86,8 +88,8 @@ This file lists the remaining work required to close the gap between the current
   - CLI package
   - device-style auth flow
   - auth/session-oriented commands
+  - refresh and logout commands
 - Remaining:
-  - secure refresh-token lifecycle
   - broader CLI coverage and command ergonomics
 
 ### PR 07: Template Catalog CRUD And R2 Storage

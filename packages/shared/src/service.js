@@ -3,6 +3,7 @@ import { createId, defaultNameFromEmail } from "./utils.js";
 
 const SESSION_COOKIE = "burstflare_session";
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const REFRESH_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const RUNTIME_TOKEN_TTL_MS = 1000 * 60 * 15;
 const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
 
@@ -110,7 +111,7 @@ function getTokenRecord(state, token) {
   return state.authTokens.find((entry) => entry.token === token && !entry.revokedAt) || null;
 }
 
-function createToken(state, clock, { userId, workspaceId, kind, sessionId = null }) {
+function createToken(state, clock, { userId, workspaceId, kind, sessionId = null, grantKind = null }) {
   const record = {
     id: createId("tok"),
     token: createId(kind),
@@ -118,12 +119,31 @@ function createToken(state, clock, { userId, workspaceId, kind, sessionId = null
     workspaceId,
     kind,
     sessionId,
+    grantKind,
     createdAt: nowIso(clock),
-    expiresAt: futureIso(clock, kind === "runtime" ? RUNTIME_TOKEN_TTL_MS : TOKEN_TTL_MS),
+    expiresAt: futureIso(
+      clock,
+      kind === "runtime" ? RUNTIME_TOKEN_TTL_MS : kind === "refresh" ? REFRESH_TOKEN_TTL_MS : TOKEN_TTL_MS
+    ),
     revokedAt: null
   };
   state.authTokens.push(record);
   return record;
+}
+
+function issueSessionTokens(state, clock, { userId, workspaceId, accessKind }) {
+  const accessToken = createToken(state, clock, {
+    userId,
+    workspaceId,
+    kind: accessKind
+  });
+  const refreshToken = createToken(state, clock, {
+    userId,
+    workspaceId,
+    kind: "refresh",
+    grantKind: accessKind
+  });
+  return { accessToken, refreshToken };
 }
 
 function writeAudit(state, clock, { action, actorUserId, workspaceId, targetType, targetId, details = {} }) {
@@ -350,17 +370,18 @@ export function createBurstFlareService(options = {}) {
 
         const workspace = getUserWorkspace(state, user.id);
         ensure(workspace, "Workspace not found", 500);
-        const sessionToken = createToken(state, clock, {
+        const sessionTokens = issueSessionTokens(state, clock, {
           userId: user.id,
           workspaceId: workspace.id,
-          kind: "browser"
+          accessKind: "browser"
         });
 
         return {
           user,
           workspace: formatWorkspace(state, workspace, "owner"),
-          token: sessionToken.token,
-          tokenKind: sessionToken.kind
+          token: sessionTokens.accessToken.token,
+          tokenKind: sessionTokens.accessToken.kind,
+          refreshToken: sessionTokens.refreshToken.token
         };
       });
     },
@@ -377,10 +398,10 @@ export function createBurstFlareService(options = {}) {
         const membership = getMembership(state, user.id, workspace.id);
         ensure(membership, "Unauthorized workspace", 403);
 
-        const sessionToken = createToken(state, clock, {
+        const sessionTokens = issueSessionTokens(state, clock, {
           userId: user.id,
           workspaceId: workspace.id,
-          kind
+          accessKind: kind
         });
 
         writeAudit(state, clock, {
@@ -395,8 +416,9 @@ export function createBurstFlareService(options = {}) {
         return {
           user,
           workspace: formatWorkspace(state, workspace, membership.role),
-          token: sessionToken.token,
-          tokenKind: sessionToken.kind
+          token: sessionTokens.accessToken.token,
+          tokenKind: sessionTokens.accessToken.kind,
+          refreshToken: sessionTokens.refreshToken.token
         };
       });
     },
@@ -408,10 +430,10 @@ export function createBurstFlareService(options = {}) {
         ensure(workspace, "Workspace not found", 404);
         const membership = getMembership(state, auth.user.id, workspace.id);
         ensure(membership, "Unauthorized workspace", 403);
-        const sessionToken = createToken(state, clock, {
+        const sessionTokens = issueSessionTokens(state, clock, {
           userId: auth.user.id,
           workspaceId: workspace.id,
-          kind: auth.auth.kind === "browser" ? "browser" : "api"
+          accessKind: auth.auth.kind === "browser" ? "browser" : "api"
         });
         writeAudit(state, clock, {
           action: "workspace.switched",
@@ -423,8 +445,9 @@ export function createBurstFlareService(options = {}) {
         return {
           user: auth.user,
           workspace: formatWorkspace(state, workspace, membership.role),
-          token: sessionToken.token,
-          tokenKind: sessionToken.kind
+          token: sessionTokens.accessToken.token,
+          tokenKind: sessionTokens.accessToken.kind,
+          refreshToken: sessionTokens.refreshToken.token
         };
       });
     },
@@ -493,10 +516,10 @@ export function createBurstFlareService(options = {}) {
         ensure(deviceCode.status === "approved", "Device code not approved", 409);
         deviceCode.status = "exchanged";
 
-        const token = createToken(state, clock, {
+        const sessionTokens = issueSessionTokens(state, clock, {
           userId: deviceCode.userId,
           workspaceId: deviceCode.workspaceId,
-          kind: "api"
+          accessKind: "api"
         });
         const user = findUserById(state, deviceCode.userId);
         const workspace = state.workspaces.find((entry) => entry.id === deviceCode.workspaceId);
@@ -515,8 +538,82 @@ export function createBurstFlareService(options = {}) {
         return {
           user,
           workspace: formatWorkspace(state, workspace, membership.role),
-          token: token.token,
-          tokenKind: token.kind
+          token: sessionTokens.accessToken.token,
+          tokenKind: sessionTokens.accessToken.kind,
+          refreshToken: sessionTokens.refreshToken.token
+        };
+      });
+    },
+
+    async refreshSession(refreshTokenValue) {
+      return store.transact((state) => {
+        const refreshRecord = getTokenRecord(state, refreshTokenValue);
+        ensure(refreshRecord && new Date(refreshRecord.expiresAt).getTime() > nowMs(clock), "Unauthorized", 401);
+        ensure(refreshRecord.kind === "refresh", "Refresh token required", 401);
+        const user = findUserById(state, refreshRecord.userId);
+        const workspace = state.workspaces.find((entry) => entry.id === refreshRecord.workspaceId);
+        ensure(user && workspace, "Unauthorized", 401);
+        const membership = getMembership(state, user.id, workspace.id);
+        ensure(membership, "Unauthorized", 401);
+
+        refreshRecord.revokedAt = nowIso(clock);
+        const sessionTokens = issueSessionTokens(state, clock, {
+          userId: user.id,
+          workspaceId: workspace.id,
+          accessKind: refreshRecord.grantKind || "api"
+        });
+
+        writeAudit(state, clock, {
+          action: "auth.refreshed",
+          actorUserId: user.id,
+          workspaceId: workspace.id,
+          targetType: "auth_token",
+          targetId: refreshRecord.id,
+          details: { grantKind: refreshRecord.grantKind || "api" }
+        });
+
+        return {
+          user,
+          workspace: formatWorkspace(state, workspace, membership.role),
+          token: sessionTokens.accessToken.token,
+          tokenKind: sessionTokens.accessToken.kind,
+          refreshToken: sessionTokens.refreshToken.token
+        };
+      });
+    },
+
+    async logout(token, refreshTokenValue = null) {
+      return store.transact((state) => {
+        const auth = requireAuth(state, token, clock);
+        auth.auth.revokedAt = nowIso(clock);
+        let revokedRefreshTokens = 0;
+        for (const record of state.authTokens) {
+          const isMatchingRefresh =
+            record.kind === "refresh" &&
+            record.userId === auth.user.id &&
+            record.workspaceId === auth.workspace.id &&
+            record.grantKind === auth.auth.kind &&
+            !record.revokedAt;
+          const isExplicitRefresh = refreshTokenValue && record.token === refreshTokenValue && !record.revokedAt;
+          if (isMatchingRefresh || isExplicitRefresh) {
+            record.revokedAt = nowIso(clock);
+            revokedRefreshTokens += 1;
+          }
+        }
+        writeAudit(state, clock, {
+          action: "auth.logged_out",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "auth_token",
+          targetId: auth.auth.id,
+          details: {
+            revokedRefreshTokens
+          }
+        });
+        return {
+          ok: true,
+          revokedAccessToken: auth.auth.id,
+          revokedRefreshTokens
         };
       });
     },

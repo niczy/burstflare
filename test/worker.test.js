@@ -70,6 +70,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     body: JSON.stringify({ email: "ops@example.com", name: "Ops" })
   });
   const ownerToken = owner.data.token;
+  const ownerRefreshToken = owner.data.refreshToken;
   const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
 
   const teammate = await requestJson(app, "/api/auth/register", {
@@ -279,4 +280,23 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerHeaders
   });
   assert.equal(report.data.report.releases, 1);
+
+  const refreshed = await requestJson(app, "/api/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken: ownerRefreshToken })
+  });
+  assert.equal(refreshed.response.status, 200);
+  assert.ok(refreshed.data.refreshToken);
+
+  const loggedOut = await requestJson(app, "/api/auth/logout", {
+    method: "POST",
+    headers: { authorization: `Bearer ${refreshed.data.token}` },
+    body: JSON.stringify({ refreshToken: refreshed.data.refreshToken })
+  });
+  assert.equal(loggedOut.response.status, 200);
+
+  const revoked = await requestJson(app, "/api/auth/me", {
+    headers: { authorization: `Bearer ${refreshed.data.token}` }
+  });
+  assert.equal(revoked.response.status, 401);
 });

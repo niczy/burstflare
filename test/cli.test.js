@@ -120,6 +120,20 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       configPath
     });
     assert.equal(code, 0);
+    const exchanged = JSON.parse(stdout.data.trim());
+    assert.ok(exchanged.refreshToken);
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "refresh", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const refreshed = JSON.parse(stdout.data.trim());
+    assert.ok(refreshed.refreshToken);
 
     stdout.data = "";
 
@@ -255,6 +269,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     assert.match(stdout.data, /ssh -o ProxyCommand=/);
     assert.equal(stderr.data, "");
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "logout", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const cleared = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(cleared.token, "");
+    assert.equal(cleared.refreshToken, "");
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });

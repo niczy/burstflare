@@ -89,13 +89,29 @@ function getToken(options, config) {
   return options.token || config.token || "";
 }
 
+function getRefreshToken(options, config) {
+  return options["refresh-token"] || config.refreshToken || "";
+}
+
 async function saveAuthConfig(configPath, config, baseUrl, payload) {
   await writeConfig(configPath, {
     ...config,
     baseUrl,
     token: payload.token,
+    refreshToken: payload.refreshToken || "",
     workspaceId: payload.workspace.id,
     userEmail: payload.user.email
+  });
+}
+
+async function clearAuthConfig(configPath, config, baseUrl) {
+  await writeConfig(configPath, {
+    ...config,
+    baseUrl,
+    token: "",
+    refreshToken: "",
+    workspaceId: "",
+    userEmail: config.userEmail || ""
   });
 }
 
@@ -103,6 +119,8 @@ function helpText() {
   return [
     "burstflare auth register --email you@example.com [--name Name]",
     "burstflare auth login --email you@example.com",
+    "burstflare auth refresh",
+    "burstflare auth logout",
     "burstflare auth device-start --email you@example.com",
     "burstflare auth device-approve --code device_xxx",
     "burstflare auth device-exchange --code device_xxx",
@@ -152,6 +170,7 @@ export async function runCli(argv, dependencies = {}) {
   const { positionals, options } = parseArgs(argv);
   const baseUrl = getBaseUrl(options, config);
   const token = getToken(options, config);
+  const refreshToken = getRefreshToken(options, config);
   const [command = "help", subcommand, ...rest] = positionals;
 
   try {
@@ -230,6 +249,36 @@ export async function runCli(argv, dependencies = {}) {
           fetchImpl
         );
         await saveAuthConfig(configPath, config, baseUrl, data);
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "refresh") {
+        const data = await requestJson(
+          `${baseUrl}/api/auth/refresh`,
+          {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ refreshToken })
+          },
+          fetchImpl
+        );
+        await saveAuthConfig(configPath, config, baseUrl, data);
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "logout") {
+        const data = await requestJson(
+          `${baseUrl}/api/auth/logout`,
+          {
+            method: "POST",
+            headers: headers(token),
+            body: JSON.stringify({ refreshToken })
+          },
+          fetchImpl
+        );
+        await clearAuthConfig(configPath, config, baseUrl);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }

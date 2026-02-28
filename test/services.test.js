@@ -81,6 +81,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
     email: "owner@example.com",
     name: "Owner User"
   });
+  assert.ok(owner.refreshToken);
   const teammate = await service.registerUser({
     email: "teammate@example.com",
     name: "Teammate User"
@@ -166,6 +167,14 @@ test("service covers invites, queued builds, releases, session events, usage, an
     snapshots: 1,
     templateBuilds: 1
   });
+
+  const refreshed = await service.refreshSession(owner.refreshToken);
+  assert.ok(refreshed.token);
+  assert.ok(refreshed.refreshToken);
+  await assert.rejects(() => service.refreshSession(owner.refreshToken), /Unauthorized/);
+  const logout = await service.logout(refreshed.token, refreshed.refreshToken);
+  assert.equal(logout.ok, true);
+  await assert.rejects(() => service.authenticate(refreshed.token), /Unauthorized/);
 
   const report = await service.getAdminReport(owner.token);
   assert.equal(report.report.members, 2);
