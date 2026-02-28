@@ -535,6 +535,29 @@ export function createApp(options = {}) {
     },
     {
       method: "POST",
+      pattern: "/api/auth/recover",
+      handler: withRateLimit(
+        {
+          scope: "auth-recover",
+          limit: 6,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          const result = await service.recoverWithCode(body);
+          const csrfToken = createCsrfToken();
+          return toJsonWithCookies(
+            {
+              ...result,
+              csrfToken
+            },
+            authCookies(service, result.token, csrfToken)
+          );
+        })
+      )
+    },
+    {
+      method: "POST",
       pattern: "/api/auth/refresh",
       handler: withRateLimit(
         {
@@ -610,6 +633,18 @@ export function createApp(options = {}) {
           return unauthorized();
         }
         return toJson(await service.authenticate(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/auth/recovery-codes/generate",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.generateRecoveryCodes(token, body));
       })
     },
     {

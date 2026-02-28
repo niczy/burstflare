@@ -122,6 +122,18 @@ function findUserByEmail(state, email) {
   return state.users.find((user) => user.email.toLowerCase() === email.toLowerCase());
 }
 
+function getRecoveryCodes(user) {
+  if (!Array.isArray(user.recoveryCodes)) {
+    user.recoveryCodes = [];
+  }
+  return user.recoveryCodes;
+}
+
+function createRecoveryCode() {
+  const raw = globalThis.crypto.randomUUID().replace(/-/g, "").toUpperCase();
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+}
+
 function findUserById(state, userId) {
   return state.users.find((user) => user.id === userId) || null;
 }
@@ -668,6 +680,7 @@ export function createBurstFlareService(options = {}) {
             id: createId("usr"),
             email,
             name: name || defaultNameFromEmail(email),
+            recoveryCodes: [],
             createdAt: nowIso(clock)
           };
           state.users.push(user);
@@ -739,6 +752,74 @@ export function createBurstFlareService(options = {}) {
           targetType: "workspace",
           targetId: workspace.id,
           details: { kind }
+        });
+
+        return {
+          user,
+          workspace: formatWorkspace(state, workspace, membership.role),
+          token: sessionTokens.accessToken.token,
+          tokenKind: sessionTokens.accessToken.kind,
+          refreshToken: sessionTokens.refreshToken.token
+        };
+      });
+    },
+
+    async generateRecoveryCodes(token, { count = 8 } = {}) {
+      return store.transact((state) => {
+        const auth = requireAuth(state, token, clock);
+        ensure(Number.isInteger(count) && count >= 4 && count <= 12, "Recovery code count must be between 4 and 12");
+        const recoveryCodes = Array.from({ length: count }, () => ({
+          code: createRecoveryCode(),
+          createdAt: nowIso(clock),
+          usedAt: null
+        }));
+        auth.user.recoveryCodes = recoveryCodes;
+        writeAudit(state, clock, {
+          action: "auth.recovery_codes_generated",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "user",
+          targetId: auth.user.id,
+          details: {
+            count
+          }
+        });
+        return {
+          recoveryCodes: recoveryCodes.map((entry) => entry.code)
+        };
+      });
+    },
+
+    async recoverWithCode({ email, code, workspaceId = null }) {
+      return store.transact((state) => {
+        ensure(email, "Email is required");
+        ensure(code, "Recovery code is required");
+        const user = findUserByEmail(state, email);
+        ensure(user, "Recovery code invalid", 401);
+        const normalizedCode = String(code).trim().toUpperCase();
+        const recoveryCode = getRecoveryCodes(user).find((entry) => entry.code === normalizedCode && !entry.usedAt);
+        ensure(recoveryCode, "Recovery code invalid", 401);
+
+        const workspace = workspaceId
+          ? state.workspaces.find((entry) => entry.id === workspaceId)
+          : getUserWorkspace(state, user.id);
+        ensure(workspace, "Workspace not found", 404);
+        const membership = getMembership(state, user.id, workspace.id);
+        ensure(membership, "Unauthorized workspace", 403);
+
+        recoveryCode.usedAt = nowIso(clock);
+        const sessionTokens = issueSessionTokens(state, clock, {
+          userId: user.id,
+          workspaceId: workspace.id,
+          accessKind: "browser"
+        });
+
+        writeAudit(state, clock, {
+          action: "auth.recovered",
+          actorUserId: user.id,
+          workspaceId: workspace.id,
+          targetType: "user",
+          targetId: user.id
         });
 
         return {

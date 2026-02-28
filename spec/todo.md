@@ -59,7 +59,6 @@ This file lists the remaining work required to close the gap between the current
 - Remaining:
   - WebAuthn
   - Turnstile
-  - recovery codes
   - deeper device/session management UX beyond the current logout-all path
 
 ### PR 04: Workspace And Membership Model

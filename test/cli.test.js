@@ -162,6 +162,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["auth", "recovery-generate", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const recoveryOutput = JSON.parse(stdout.data.trim());
+    assert.equal(recoveryOutput.recoveryCodes.length, 8);
+    const recoveryCode = recoveryOutput.recoveryCodes[0];
+
+    stdout.data = "";
+
     code = await runCli(["template", "create", "go-dev", "--description", "Go runtime", "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -590,6 +603,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const clearedAll = JSON.parse(await readFile(configPath, "utf8"));
     assert.equal(clearedAll.token, "");
     assert.equal(clearedAll.refreshToken, "");
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "recover", "--email", "cli@example.com", "--code", recoveryCode, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const recoveredConfig = JSON.parse(await readFile(configPath, "utf8"));
+    assert.notEqual(recoveredConfig.token, "");
+    assert.notEqual(recoveredConfig.refreshToken, "");
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });

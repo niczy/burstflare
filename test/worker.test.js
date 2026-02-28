@@ -104,6 +104,32 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const ownerRefreshToken = owner.data.refreshToken;
   const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
 
+  const ownerRecovery = await requestJson(app, "/api/auth/recovery-codes/generate", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({})
+  });
+  assert.equal(ownerRecovery.response.status, 200);
+  assert.equal(ownerRecovery.data.recoveryCodes.length, 8);
+
+  const recoveredOwner = await requestJson(app, "/api/auth/recover", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "ops@example.com",
+      code: ownerRecovery.data.recoveryCodes[0]
+    })
+  });
+  assert.equal(recoveredOwner.response.status, 200);
+
+  const rejectedRecovery = await requestJson(app, "/api/auth/recover", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "ops@example.com",
+      code: ownerRecovery.data.recoveryCodes[0]
+    })
+  });
+  assert.equal(rejectedRecovery.response.status, 401);
+
   const csrfBlocked = await requestJson(app, "/api/templates", {
     method: "POST",
     headers: {

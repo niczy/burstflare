@@ -119,9 +119,11 @@ function helpText() {
   return [
     "burstflare auth register --email you@example.com [--name Name]",
     "burstflare auth login --email you@example.com",
+    "burstflare auth recover --email you@example.com --code XXXX-XXXX-XXXX",
     "burstflare auth refresh",
     "burstflare auth logout",
     "burstflare auth logout-all",
+    "burstflare auth recovery-generate",
     "burstflare auth device-start --email you@example.com",
     "burstflare auth device-approve --code device_xxx",
     "burstflare auth device-exchange --code device_xxx",
@@ -330,6 +332,21 @@ export async function runCli(argv, dependencies = {}) {
         return 0;
       }
 
+      if (subcommand === "recover") {
+        const data = await requestJson(
+          `${baseUrl}/api/auth/recover`,
+          {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ email: options.email, code: options.code, workspaceId: options["workspace-id"] || null })
+          },
+          fetchImpl
+        );
+        await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
       if (subcommand === "device-start") {
         const data = await requestJson(
           `${baseUrl}/api/cli/device/start`,
@@ -443,6 +460,19 @@ export async function runCli(argv, dependencies = {}) {
           `${baseUrl}/api/auth/me`,
           {
             headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "recovery-generate") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/auth/recovery-codes/generate`,
+          {
+            method: "POST",
+            headers: headers(undefined),
+            body: JSON.stringify({ count: options.count ? Number(options.count) : undefined })
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

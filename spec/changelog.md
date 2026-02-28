@@ -387,3 +387,17 @@ This file records what has already been implemented in the repository and what h
   - revoke at least two access tokens and two refresh tokens for the same user
   - reject both old access tokens after revocation
   - reject both old refresh tokens after revocation
+
+## 35. Recovery Codes
+
+- Added recovery-code generation for authenticated users.
+- Added one-time recovery-code login for browser sessions.
+- Added an authenticated `POST /api/auth/recovery-codes/generate` route.
+- Added a public `POST /api/auth/recover` route.
+- Added CLI support for:
+  - `burstflare auth recovery-generate`
+  - `burstflare auth recover --email ... --code ...`
+- Verified the live Worker can:
+  - generate recovery codes
+  - create a new browser session from a valid recovery code
+  - reject reuse of the same recovery code

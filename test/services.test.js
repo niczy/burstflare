@@ -104,6 +104,21 @@ test("service covers invites, queued builds, releases, session events, usage, an
     name: "Owner User"
   });
   assert.ok(owner.refreshToken);
+  const ownerRecovery = await service.generateRecoveryCodes(owner.token);
+  assert.equal(ownerRecovery.recoveryCodes.length, 8);
+  const recoveredOwner = await service.recoverWithCode({
+    email: "owner@example.com",
+    code: ownerRecovery.recoveryCodes[0]
+  });
+  assert.ok(recoveredOwner.refreshToken);
+  await assert.rejects(
+    () =>
+      service.recoverWithCode({
+        email: "owner@example.com",
+        code: ownerRecovery.recoveryCodes[0]
+      }),
+    /Recovery code invalid/
+  );
   const teammate = await service.registerUser({
     email: "teammate@example.com",
     name: "Teammate User"
