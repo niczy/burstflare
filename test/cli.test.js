@@ -515,6 +515,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     const reportOutput = JSON.parse(stdout.data.trim());
     assert.equal(reportOutput.report.releases, 1);
+    assert.equal(reportOutput.report.buildsBuilding, 0);
+    assert.equal(reportOutput.report.buildsStuck, 0);
     assert.equal(reportOutput.report.buildsDeadLettered, 1);
     assert.equal(reportOutput.report.sessionsSleeping, 1);
     assert.equal(reportOutput.report.activeUploadGrants, 0);
@@ -559,6 +561,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     });
     assert.equal(code, 0);
     const cleanupOutput = JSON.parse(stdout.data.trim());
+    assert.equal(cleanupOutput.recoveredStuckBuilds, 0);
     assert.equal(cleanupOutput.purgedStaleSleepingSessions, 1);
 
     stdout.data = "";

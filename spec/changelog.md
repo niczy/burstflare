@@ -557,3 +557,20 @@ This file records what has already been implemented in the repository and what h
   - serve the persisted-paths UI field in the web shell
   - accept persisted paths in template version creation
   - store the provided persisted paths in the returned manifest
+
+## 46. Stuck Build Recovery During Reconcile
+
+- Extended reconcile to recover stale builds left in `building`.
+- Added a stuck-build threshold (5 minutes) for operator recovery logic.
+- During reconcile, stale `building` builds now:
+  - move back into retry flow when attempts remain
+  - dead-letter when attempts are exhausted
+  - emit audit entries for recovery or terminal dead-lettering
+- Added `buildsBuilding` and `buildsStuck` to the admin report.
+- Added `recoveredStuckBuilds` to the reconcile response.
+- Added test coverage for:
+  - positive stuck-build recovery in the service suite
+  - the new report and reconcile fields in the Worker and CLI suites
+- Verified the live Worker now returns:
+  - `buildsBuilding` and `buildsStuck` in `/api/admin/report`
+  - `recoveredStuckBuilds` in `/api/admin/reconcile`

@@ -8,6 +8,7 @@ const RUNTIME_TOKEN_TTL_MS = 1000 * 60 * 15;
 const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
 const UPLOAD_GRANT_TTL_MS = 1000 * 60 * 10;
 const MAX_BUILD_ATTEMPTS = 3;
+const STUCK_BUILD_TTL_MS = 1000 * 60 * 5;
 const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
@@ -2336,6 +2337,11 @@ export function createBurstFlareService(options = {}) {
       return store.transact((state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const reportAt = nowMs(clock);
+        const workspaceBuilds = state.templateBuilds.filter((build) => {
+          const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+          const template = version && state.templates.find((entry) => entry.id === version.templateId);
+          return template && template.workspaceId === auth.workspace.id;
+        });
         const report = {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           members: state.memberships.filter((entry) => entry.workspaceId === auth.workspace.id).length,
@@ -2343,27 +2349,20 @@ export function createBurstFlareService(options = {}) {
           templatesArchived: state.templates.filter(
             (entry) => entry.workspaceId === auth.workspace.id && entry.archivedAt
           ).length,
-          buildsQueued: state.templateBuilds.filter((build) => {
-            const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-            const template = version && state.templates.find((entry) => entry.id === version.templateId);
-            return template && template.workspaceId === auth.workspace.id && ["queued", "retrying"].includes(build.status);
-          }).length,
-          buildsFailed: state.templateBuilds.filter((build) => {
-            if (build.status !== "failed") {
+          buildsQueued: workspaceBuilds.filter((build) => ["queued", "retrying"].includes(build.status)).length,
+          buildsBuilding: workspaceBuilds.filter((build) => build.status === "building").length,
+          buildsStuck: workspaceBuilds.filter((build) => {
+            if (build.status !== "building") {
               return false;
             }
-            const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-            const template = version && state.templates.find((entry) => entry.id === version.templateId);
-            return template && template.workspaceId === auth.workspace.id;
-          }).length,
-          buildsDeadLettered: state.templateBuilds.filter((build) => {
-            if (build.status !== "dead_lettered") {
+            const referenceTime = build.startedAt || build.updatedAt || build.createdAt;
+            if (!referenceTime) {
               return false;
             }
-            const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-            const template = version && state.templates.find((entry) => entry.id === version.templateId);
-            return template && template.workspaceId === auth.workspace.id;
+            return reportAt - new Date(referenceTime).getTime() >= STUCK_BUILD_TTL_MS;
           }).length,
+          buildsFailed: workspaceBuilds.filter((build) => build.status === "failed").length,
+          buildsDeadLettered: workspaceBuilds.filter((build) => build.status === "dead_lettered").length,
           sessionsRunning: getRunningSessionCount(state, auth.workspace.id),
           sessionsSleeping: state.sessions.filter(
             (entry) => entry.workspaceId === auth.workspace.id && entry.state === "sleeping"
@@ -2451,6 +2450,77 @@ export function createBurstFlareService(options = {}) {
           }
         }
 
+        const reconcileAt = nowMs(clock);
+
+        let recoveredStuckBuilds = 0;
+        for (const build of state.templateBuilds) {
+          if (build.status !== "building") {
+            continue;
+          }
+          const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
+          if (!version) {
+            continue;
+          }
+          const template = state.templates.find((entry) => entry.id === version.templateId);
+          if (!template) {
+            continue;
+          }
+          if (workspaceId && template.workspaceId !== workspaceId) {
+            continue;
+          }
+          const referenceTime = build.startedAt || build.updatedAt || build.createdAt;
+          if (!referenceTime || reconcileAt - new Date(referenceTime).getTime() < STUCK_BUILD_TTL_MS) {
+            continue;
+          }
+
+          const recoveredAt = nowIso(clock);
+          build.updatedAt = recoveredAt;
+          build.lastError = "Reconcile recovered stuck build";
+          build.lastFailureAt = recoveredAt;
+          version.status = "queued";
+
+          if (build.attempts >= MAX_BUILD_ATTEMPTS) {
+            build.status = "dead_lettered";
+            build.deadLetteredAt = recoveredAt;
+            writeAudit(state, clock, {
+              action: "template.build_dead_lettered",
+              actorUserId: auth?.user.id || null,
+              workspaceId: template.workspaceId,
+              targetType: "template_build",
+              targetId: build.id,
+              details: {
+                templateId: template.id,
+                templateVersionId: version.id,
+                source: "reconcile_stuck",
+                attempts: build.attempts,
+                maxAttempts: MAX_BUILD_ATTEMPTS,
+                error: build.lastError
+              }
+            });
+          } else {
+            build.status = "retrying";
+            build.deadLetteredAt = null;
+            if (jobs?.enqueueBuild) {
+              await jobs.enqueueBuild(build.id);
+            }
+            writeAudit(state, clock, {
+              action: "template.build_recovered",
+              actorUserId: auth?.user.id || null,
+              workspaceId: template.workspaceId,
+              targetType: "template_build",
+              targetId: build.id,
+              details: {
+                templateId: template.id,
+                templateVersionId: version.id,
+                source: "reconcile",
+                attempts: build.attempts,
+                maxAttempts: MAX_BUILD_ATTEMPTS
+              }
+            });
+          }
+          recoveredStuckBuilds += 1;
+        }
+
         let processedBuilds = 0;
         for (const build of state.templateBuilds) {
           if (!["queued", "retrying"].includes(build.status)) {
@@ -2483,7 +2553,6 @@ export function createBurstFlareService(options = {}) {
           }
         }
 
-        const reconcileAt = nowMs(clock);
         const staleSleepingSessionIds = new Set(
           state.sessions
             .filter((entry) => {
@@ -2566,6 +2635,7 @@ export function createBurstFlareService(options = {}) {
 
         return {
           sleptSessions,
+          recoveredStuckBuilds,
           processedBuilds,
           purgedDeletedSessions,
           purgedStaleSleepingSessions,

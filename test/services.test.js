@@ -82,8 +82,9 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const objects = createObjectStore();
   const queuedBuilds = [];
   let reconcileJobs = 0;
+  const store = createMemoryStore();
   const service = createBurstFlareService({
-    store: createMemoryStore(),
+    store,
     objects,
     jobs: {
       async enqueueBuild(buildId) {
@@ -212,6 +213,21 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(processed.processed, 1);
   const buildLog = await service.getTemplateBuildLog(owner.token, version.build.id);
   assert.match(buildLog.text, /bundle_uploaded=true/);
+
+  const stuckVersion = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.1.1",
+    manifest: { image: "registry.cloudflare.com/test/node-dev:1.1.1" }
+  });
+  await store.transact((state) => {
+    const build = state.templateBuilds.find((entry) => entry.id === stuckVersion.build.id);
+    assert.ok(build);
+    build.status = "building";
+    build.startedAt = new Date(tick - 1000 * 60 * 10).toISOString();
+    build.updatedAt = build.startedAt;
+  });
+  const recoveredStuck = await service.reconcile(owner.token);
+  assert.equal(recoveredStuck.recoveredStuckBuilds, 1);
+  assert.equal(recoveredStuck.processedBuilds, 1);
 
   const failingVersion = await service.addTemplateVersion(owner.token, template.template.id, {
     version: "1.2.0",
@@ -372,7 +388,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.deepEqual(usage.usage, {
     runtimeMinutes: 3,
     snapshots: 2,
-    templateBuilds: 3
+    templateBuilds: 4
   });
 
   const refreshed = await service.refreshSession(ownerSecondLogin.refreshToken);
@@ -390,6 +406,8 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const report = await service.getAdminReport(ownerSecondLogin.token);
   assert.equal(report.report.members, 2);
   assert.equal(report.report.releases, 1);
+  assert.equal(report.report.buildsBuilding, 0);
+  assert.equal(report.report.buildsStuck, 0);
   assert.equal(report.report.buildsDeadLettered, 1);
   assert.equal(report.report.sessionsTotal, 0);
   assert.equal(report.report.sessionsSleeping, 0);
