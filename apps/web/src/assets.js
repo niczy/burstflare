@@ -319,11 +319,12 @@ export const html = `<!doctype html>
 
 export const appJs = `
 const state = {
-  token: localStorage.getItem("burstflare_token") || "",
   refreshToken: localStorage.getItem("burstflare_refresh_token") || "",
   csrfToken: localStorage.getItem("burstflare_csrf") || "",
   me: null
 };
+
+localStorage.removeItem("burstflare_token");
 
 function byId(id) {
   return document.getElementById(id);
@@ -333,15 +334,9 @@ function setError(message) {
   byId("errors").textContent = message || "";
 }
 
-function setAuth(token, refreshToken = state.refreshToken, csrfToken = state.csrfToken) {
-  state.token = token || "";
+function setAuth(refreshToken = state.refreshToken, csrfToken = state.csrfToken) {
   state.refreshToken = refreshToken || "";
   state.csrfToken = csrfToken || "";
-  if (state.token) {
-    localStorage.setItem("burstflare_token", state.token);
-  } else {
-    localStorage.removeItem("burstflare_token");
-  }
   if (state.refreshToken) {
     localStorage.setItem("burstflare_refresh_token", state.refreshToken);
   } else {
@@ -370,7 +365,7 @@ async function refreshAuth() {
     setAuth("", "");
     throw new Error(data.error || "Authentication expired");
   }
-  setAuth(data.token, data.refreshToken, data.csrfToken || "");
+  setAuth(data.refreshToken, data.csrfToken || "");
   return data;
 }
 
@@ -381,9 +376,6 @@ async function api(path, options = {}, allowRetry = true) {
   }
   if (["POST", "PUT", "PATCH", "DELETE"].includes((options.method || "GET").toUpperCase()) && state.csrfToken) {
     headers.set("x-burstflare-csrf", state.csrfToken);
-  }
-  if (state.token) {
-    headers.set("authorization", "Bearer " + state.token);
   }
   const response = await fetch(path, { ...options, headers });
   const data = await response.json().catch(() => ({}));
@@ -510,7 +502,7 @@ function attachSessionButtons() {
 }
 
 async function refresh() {
-  if (!state.token) {
+  if (!state.refreshToken && !state.csrfToken) {
     return;
   }
   state.me = await api('/api/auth/me');
@@ -550,7 +542,7 @@ byId("registerButton").addEventListener("click", async () => {
       method: 'POST',
       body: JSON.stringify({ email: byId("email").value, name: byId("name").value })
     });
-    setAuth(data.token, data.refreshToken, data.csrfToken || "");
+    setAuth(data.refreshToken, data.csrfToken || "");
   });
 });
 
@@ -560,14 +552,14 @@ byId("loginButton").addEventListener("click", async () => {
       method: 'POST',
       body: JSON.stringify({ email: byId("email").value, kind: 'browser' })
     });
-    setAuth(data.token, data.refreshToken, data.csrfToken || "");
+    setAuth(data.refreshToken, data.csrfToken || "");
   });
 });
 
 byId("logoutButton").addEventListener("click", async () => {
   setError("");
   try {
-    if (state.token) {
+    if (state.refreshToken) {
       await api('/api/auth/logout', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: state.refreshToken })
@@ -696,7 +688,7 @@ byId("reconcileButton").addEventListener("click", async () => {
 
 byId("reportButton").addEventListener("click", () => perform(async () => {}));
 
-if (state.token) {
+if (state.refreshToken || state.csrfToken) {
   refresh().catch((error) => {
     console.error(error);
     setAuth("", "");
@@ -704,5 +696,7 @@ if (state.token) {
     renderIdentity();
     setError(error.message || "Could not restore session");
   });
+} else {
+  renderIdentity();
 }
 `;

@@ -54,10 +54,10 @@ This file lists the remaining work required to close the gap between the current
   - browser client token refresh and logout UX
   - browser session and CSRF cookies are issued on auth success paths
   - cookie-authenticated mutating requests require a matching CSRF token
+  - the web app now runs without storing bearer access tokens in local storage
 - Remaining:
   - WebAuthn
   - Turnstile
-  - full browser-first session flow that no longer depends on bearer tokens in local storage
   - recovery codes
   - immediate revocation semantics across browser sessions
 

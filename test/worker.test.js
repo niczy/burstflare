@@ -81,6 +81,14 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(health.response.status, 200);
   assert.equal(health.data.ok, true);
 
+  const appScriptResponse = await app.fetch(new Request("http://example.test/app.js"));
+  assert.equal(appScriptResponse.status, 200);
+  const appScript = await appScriptResponse.text();
+  assert.match(appScript, /burstflare_refresh_token/);
+  assert.match(appScript, /x-burstflare-csrf/);
+  assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
+  assert.doesNotMatch(appScript, /state\.token/);
+
   const owner = await requestJson(app, "/api/auth/register", {
     method: "POST",
     body: JSON.stringify({ email: "ops@example.com", name: "Ops" })

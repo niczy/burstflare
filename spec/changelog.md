@@ -360,3 +360,18 @@ This file records what has already been implemented in the repository and what h
   - usage events and audit logs
 - Added CLI support for `burstflare export` with optional `--output`.
 - Verified the live Worker can return a structured workspace export with templates and audit entries present
+
+## 33. Browser-Only Session Flow
+
+- Removed bearer-token storage from the web app client.
+- Removed bearer-token header injection from browser-originated API requests.
+- Kept the browser client on:
+  - session cookies
+  - refresh token storage
+  - CSRF token storage
+- Added a startup cleanup path that clears any legacy `burstflare_token` value from browser storage.
+- Verified the live `/app.js` bundle now:
+  - retains refresh-token storage
+  - retains CSRF header wiring
+  - does not inject `Authorization` headers
+  - does not reference `state.token`
