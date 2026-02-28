@@ -72,9 +72,9 @@ This file lists the remaining work required to close the gap between the current
 - Done:
   - web shell and basic management screens
   - browser auth-session list, revoke, and logout-all controls
+  - clearer empty states and last-sync visibility in the browser shell
 - Remaining:
   - more polished dashboard state
-  - complete empty/loading/error handling
   - stronger end-to-end UI smoke coverage
 
 ### PR 06: CLI Skeleton And Device Authorization

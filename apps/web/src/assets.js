@@ -210,6 +210,7 @@ export const html = `<!doctype html>
             <button class="secondary" id="logoutButton">Logout</button>
           </div>
           <div class="muted" id="identity">Not signed in</div>
+          <div class="muted" id="lastRefresh">Last refresh: never</div>
           <div class="error" id="errors"></div>
         </div>
       </section>
@@ -415,6 +416,10 @@ function setDeviceStatus(message) {
   byId("deviceStatus").textContent = message;
 }
 
+function setLastRefresh(value) {
+  byId("lastRefresh").textContent = value ? 'Last refresh: ' + value : 'Last refresh: never';
+}
+
 function appendTerminalOutput(message) {
   const current = byId("terminalOutput").textContent;
   byId("terminalOutput").textContent = current ? current + "\\n" + message : message;
@@ -602,11 +607,12 @@ function renderMembers(membersData) {
     return '<div class="item"><strong>' + invite.email + '</strong><br><span class="muted">' + invite.role +
       ' / ' + invite.code + '</span></div>';
   });
-  byId("members").innerHTML = members.concat(invites).join("");
+  const items = members.concat(invites);
+  byId("members").innerHTML = items.length ? items.join("") : '<div class="item muted">No members or invites yet.</div>';
 }
 
 function renderAuthSessions(authSessions) {
-  byId("authSessions").innerHTML = authSessions.map((session) => {
+  const items = authSessions.map((session) => {
     const kinds = session.tokenKinds.join(", ");
     const action = session.current
       ? '<span class="pill" style="margin-top:8px">Current</span>'
@@ -614,7 +620,8 @@ function renderAuthSessions(authSessions) {
     return '<div class="item"><strong>' + session.id + '</strong><br><span class="muted">' + session.workspaceId +
       '</span><br><span class="muted">' + kinds + ' / ' + session.tokenCount + ' token(s)</span><br><span class="muted">expires ' +
       session.expiresAt + '</span><div class="row" style="margin-top:8px">' + action + '</div></div>';
-  }).join("");
+  });
+  byId("authSessions").innerHTML = items.length ? items.join("") : '<div class="item muted">No active auth sessions.</div>';
 
   document.querySelectorAll("[data-auth-session-revoke]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -627,7 +634,7 @@ function renderAuthSessions(authSessions) {
 }
 
 function renderTemplates(templates) {
-  byId("templates").innerHTML = templates.map((template) => {
+  const items = templates.map((template) => {
     const active = template.activeVersion ? template.activeVersion.version : "none";
     const versions = template.versions.map((entry) => entry.version + ' (' + entry.status + ')').join(", ") || "no versions";
     const status = template.archivedAt ? 'archived' : 'active';
@@ -638,7 +645,8 @@ function renderTemplates(templates) {
     return '<div class="item"><strong>' + template.name + '</strong><br><span class="muted">' + template.id +
       '</span><br><span class="muted">status: ' + status + '</span><br><span class="muted">active: ' + active +
       '</span><br><span class="muted">versions: ' + versions + '</span><div class="row" style="margin-top:8px">' + stateAction + deleteAction + '</div></div>';
-  }).join("");
+  });
+  byId("templates").innerHTML = items.length ? items.join("") : '<div class="item muted">No templates yet.</div>';
 
   document.querySelectorAll("[data-template-archive]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -663,7 +671,7 @@ function renderTemplates(templates) {
 }
 
 function renderSessions(sessions) {
-  byId("sessions").innerHTML = sessions.map((session) => {
+  const items = sessions.map((session) => {
     return '<div class="item"><strong>' + session.name + '</strong><br><span class="muted">' + session.id +
       '</span><br><span class="muted">' + session.templateName + ' / ' + session.state + '</span><div class="row" style="margin-top:8px">' +
       '<button data-start="' + session.id + '">Start</button>' +
@@ -673,16 +681,18 @@ function renderSessions(sessions) {
       '<button class="secondary" data-ssh="' + session.id + '">SSH</button>' +
       '<button class="secondary" data-events="' + session.id + '">Events</button>' +
       '<button class="secondary" data-delete="' + session.id + '">Delete</button></div></div>';
-  }).join("");
+  });
+  byId("sessions").innerHTML = items.length ? items.join("") : '<div class="item muted">No sessions yet.</div>';
 }
 
 function renderSnapshots(snapshots) {
-  byId("snapshotList").innerHTML = snapshots.map((snapshot) => {
+  const items = snapshots.map((snapshot) => {
     return '<div class="item"><strong>' + snapshot.label + '</strong><br><span class="muted">' + snapshot.id +
       '</span><br><span class="muted">' + (snapshot.bytes || 0) + ' bytes</span><div class="row" style="margin-top:8px">' +
       '<button class="secondary" data-snapshot-download="' + snapshot.id + '">View</button>' +
       '<button class="secondary" data-snapshot-delete="' + snapshot.id + '">Delete</button></div></div>';
-  }).join("");
+  });
+  byId("snapshotList").innerHTML = items.length ? items.join("") : '<div class="item muted">No snapshots for this session.</div>';
 
   document.querySelectorAll("[data-snapshot-download]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -733,6 +743,7 @@ function clearPanels() {
   byId("snapshotContent").value = "";
   byId("snapshotList").textContent = "";
   byId("snapshotContentPreview").textContent = "No snapshot content loaded.";
+  setLastRefresh("");
   byId("usage").textContent = "";
   byId("report").textContent = "";
   byId("releases").textContent = "";
@@ -788,6 +799,7 @@ async function refresh() {
   }
   state.me = await api('/api/auth/me');
   startAutoRefresh();
+  setLastRefresh(new Date().toLocaleTimeString());
   renderIdentity();
   renderMembers(await api('/api/workspaces/current/members'));
   const authSessions = await api('/api/auth/sessions');

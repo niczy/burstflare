@@ -616,3 +616,19 @@ This file records what has already been implemented in the repository and what h
   - serve the device approval controls in the browser shell
   - approve a real device code from a browser-authenticated session
   - complete the device exchange flow afterward
+
+## 50. Dashboard Empty States And Last Sync
+
+- Added a visible `Last refresh` indicator to the browser shell.
+- The browser UI now records the last successful dashboard sync time.
+- Added clearer empty-state rendering for:
+  - members/invites
+  - auth sessions
+  - templates
+  - sessions
+  - snapshots
+- Added Worker test coverage for the new last-refresh and empty-state bundle wiring.
+- Verified the live shell now serves:
+  - the `Last refresh: never` placeholder before initial sync
+  - browser bundle wiring for `setLastRefresh(...)`
+  - explicit empty-state text for no-session scenarios

@@ -88,6 +88,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(rootHtml, /Browser Terminal/);
   assert.match(rootHtml, /Approve Device Code/);
   assert.match(rootHtml, /deviceStatus/);
+  assert.match(rootHtml, /lastRefresh/);
   assert.match(rootHtml, /terminalOutput/);
   assert.match(rootHtml, /persistedPaths/);
   assert.match(rootHtml, /snapshotList/);
@@ -103,6 +104,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /api\/workspaces\/current\/settings/);
   assert.match(appScript, /new WebSocket/);
   assert.match(appScript, /pendingDeviceCodes/);
+  assert.match(appScript, /setLastRefresh/);
   assert.match(appScript, /startAutoRefresh/);
   assert.match(appScript, /setInterval/);
   assert.match(appScript, /terminalSendButton/);
