@@ -123,6 +123,8 @@ function helpText() {
     "burstflare auth refresh",
     "burstflare auth logout",
     "burstflare auth logout-all",
+    "burstflare auth sessions",
+    "burstflare auth revoke-session <authSessionId>",
     "burstflare auth recovery-generate",
     "burstflare auth device-start --email you@example.com",
     "burstflare auth device-approve --code device_xxx",
@@ -482,6 +484,30 @@ export async function runCli(argv, dependencies = {}) {
             method: "POST",
             headers: headers(undefined),
             body: JSON.stringify({ count: options.count ? Number(options.count) : undefined })
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "sessions") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/auth/sessions`,
+          {
+            headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "revoke-session") {
+        const authSessionId = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/auth/sessions/${authSessionId}`,
+          {
+            method: "DELETE",
+            headers: headers(undefined, false)
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

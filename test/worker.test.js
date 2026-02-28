@@ -689,6 +689,37 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: teammateHeaders
   });
   assert.equal(revokedTeammate.response.status, 401);
+
+  const ownerSecondLogin = await requestJson(app, "/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email: "ops@example.com", kind: "browser" })
+  });
+  assert.equal(ownerSecondLogin.response.status, 200);
+  const ownerSecondHeaders = { authorization: `Bearer ${ownerSecondLogin.data.token}` };
+
+  const ownerSessions = await requestJson(app, "/api/auth/sessions", {
+    headers: ownerSecondHeaders
+  });
+  assert.equal(ownerSessions.response.status, 200);
+  assert.ok(ownerSessions.data.sessions.some((entry) => entry.id === owner.data.authSessionId));
+  assert.ok(ownerSessions.data.sessions.some((entry) => entry.current));
+
+  const ownerSessionRevoked = await requestJson(app, `/api/auth/sessions/${owner.data.authSessionId}`, {
+    method: "DELETE",
+    headers: ownerSecondHeaders
+  });
+  assert.equal(ownerSessionRevoked.response.status, 200);
+  assert.ok(ownerSessionRevoked.data.revokedTokens >= 1);
+
+  const revokedOwner = await requestJson(app, "/api/auth/me", {
+    headers: ownerHeaders
+  });
+  assert.equal(revokedOwner.response.status, 401);
+
+  const activeOwner = await requestJson(app, "/api/auth/me", {
+    headers: ownerSecondHeaders
+  });
+  assert.equal(activeOwner.response.status, 200);
 });
 
 test("worker scheduled handler enqueues reconcile jobs", async () => {

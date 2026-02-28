@@ -8,17 +8,11 @@ This file lists the remaining work required to close the gap between the current
 
 - Replace the current serialized Cloudflare state bridge with fully normalized persistence across D1, KV, and R2.
 - Implement production-grade browser auth:
-  - Turnstile verification
   - WebAuthn / passkeys
-  - cookie-backed browser sessions
-  - CSRF protection
-  - session revocation
-  - recovery codes
+  - Turnstile production enablement with a configured client widget and secret
+  - broader browser-facing auth-session management UX beyond the current list/revoke APIs
 - Implement real asynchronous build execution:
-  - queue consumers
-  - retry and dead-letter handling
   - workflow orchestration
-  - real build-log storage in R2
   - real image build metadata
 - Replace the current session lifecycle shim with a real Durable Object state machine and per-session locking.
 - Implement the actual SSH-over-WebSocket runtime path instead of the current placeholder route.
@@ -56,10 +50,12 @@ This file lists the remaining work required to close the gap between the current
   - browser session and CSRF cookies are issued on auth success paths
   - cookie-authenticated mutating requests require a matching CSRF token
   - the web app now runs without storing bearer access tokens in local storage
+  - auth-session list and targeted revoke APIs exist
+  - CLI support exists for listing and revoking individual auth sessions
 - Remaining:
   - WebAuthn
   - Turnstile production enablement with a configured `TURNSTILE_SECRET` and real client widget flow
-  - deeper device/session management UX beyond the current logout-all path
+  - richer browser-facing device/session management UX beyond the current logout-all and API/CLI list-revoke flows
 
 ### PR 04: Workspace And Membership Model
 

@@ -154,7 +154,7 @@ function getTokenRecord(state, token) {
   return state.authTokens.find((entry) => entry.token === token && !entry.revokedAt) || null;
 }
 
-function createToken(state, clock, { userId, workspaceId, kind, sessionId = null, grantKind = null }) {
+function createToken(state, clock, { userId, workspaceId, kind, sessionId = null, grantKind = null, sessionGroupId = null }) {
   const record = {
     id: createId("tok"),
     token: createId(kind),
@@ -162,6 +162,7 @@ function createToken(state, clock, { userId, workspaceId, kind, sessionId = null
     workspaceId,
     kind,
     sessionId,
+    sessionGroupId,
     grantKind,
     createdAt: nowIso(clock),
     expiresAt: futureIso(
@@ -175,16 +176,19 @@ function createToken(state, clock, { userId, workspaceId, kind, sessionId = null
 }
 
 function issueSessionTokens(state, clock, { userId, workspaceId, accessKind }) {
+  const sessionGroupId = createId("auths");
   const accessToken = createToken(state, clock, {
     userId,
     workspaceId,
-    kind: accessKind
+    kind: accessKind,
+    sessionGroupId
   });
   const refreshToken = createToken(state, clock, {
     userId,
     workspaceId,
     kind: "refresh",
-    grantKind: accessKind
+    grantKind: accessKind,
+    sessionGroupId
   });
   return { accessToken, refreshToken };
 }
@@ -720,6 +724,7 @@ export function createBurstFlareService(options = {}) {
         return {
           user,
           workspace: formatWorkspace(state, workspace, "owner"),
+          authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
           tokenKind: sessionTokens.accessToken.kind,
           refreshToken: sessionTokens.refreshToken.token
@@ -757,6 +762,7 @@ export function createBurstFlareService(options = {}) {
         return {
           user,
           workspace: formatWorkspace(state, workspace, membership.role),
+          authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
           tokenKind: sessionTokens.accessToken.kind,
           refreshToken: sessionTokens.refreshToken.token
@@ -825,6 +831,7 @@ export function createBurstFlareService(options = {}) {
         return {
           user,
           workspace: formatWorkspace(state, workspace, membership.role),
+          authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
           tokenKind: sessionTokens.accessToken.kind,
           refreshToken: sessionTokens.refreshToken.token
@@ -854,6 +861,7 @@ export function createBurstFlareService(options = {}) {
         return {
           user: auth.user,
           workspace: formatWorkspace(state, workspace, membership.role),
+          authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
           tokenKind: sessionTokens.accessToken.kind,
           refreshToken: sessionTokens.refreshToken.token
@@ -947,6 +955,7 @@ export function createBurstFlareService(options = {}) {
         return {
           user,
           workspace: formatWorkspace(state, workspace, membership.role),
+          authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
           tokenKind: sessionTokens.accessToken.kind,
           refreshToken: sessionTokens.refreshToken.token
@@ -984,6 +993,7 @@ export function createBurstFlareService(options = {}) {
         return {
           user,
           workspace: formatWorkspace(state, workspace, membership.role),
+          authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
           tokenKind: sessionTokens.accessToken.kind,
           refreshToken: sessionTokens.refreshToken.token
@@ -1051,6 +1061,81 @@ export function createBurstFlareService(options = {}) {
         });
         return {
           ok: true,
+          revokedTokens
+        };
+      });
+    },
+
+    async listAuthSessions(token) {
+      return store.transact((state) => {
+        const auth = requireAuth(state, token, clock);
+        const groups = new Map();
+        for (const record of state.authTokens) {
+          if (record.userId !== auth.user.id || record.kind === "runtime" || record.revokedAt) {
+            continue;
+          }
+          const groupId = record.sessionGroupId || record.id;
+          const current = (auth.auth.sessionGroupId || auth.auth.id) === groupId;
+          const existing = groups.get(groupId) || {
+            id: groupId,
+            workspaceId: record.workspaceId,
+            createdAt: record.createdAt,
+            expiresAt: record.expiresAt,
+            current,
+            tokenKinds: new Set(),
+            tokenCount: 0
+          };
+          existing.workspaceId = record.workspaceId;
+          existing.current = existing.current || current;
+          if (new Date(record.createdAt).getTime() < new Date(existing.createdAt).getTime()) {
+            existing.createdAt = record.createdAt;
+          }
+          if (new Date(record.expiresAt).getTime() > new Date(existing.expiresAt).getTime()) {
+            existing.expiresAt = record.expiresAt;
+          }
+          existing.tokenKinds.add(record.kind);
+          existing.tokenCount += 1;
+          groups.set(groupId, existing);
+        }
+        return {
+          sessions: Array.from(groups.values())
+            .map((entry) => ({
+              ...entry,
+              tokenKinds: Array.from(entry.tokenKinds).sort()
+            }))
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        };
+      });
+    },
+
+    async revokeAuthSession(token, authSessionId) {
+      return store.transact((state) => {
+        const auth = requireAuth(state, token, clock);
+        ensure(authSessionId, "Auth session id is required");
+        let revokedTokens = 0;
+        for (const record of state.authTokens) {
+          if (record.userId !== auth.user.id || record.kind === "runtime" || record.revokedAt) {
+            continue;
+          }
+          if (record.sessionGroupId === authSessionId || record.id === authSessionId) {
+            record.revokedAt = nowIso(clock);
+            revokedTokens += 1;
+          }
+        }
+        ensure(revokedTokens > 0, "Auth session not found", 404);
+        writeAudit(state, clock, {
+          action: "auth.session_revoked",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "auth_session",
+          targetId: authSessionId,
+          details: {
+            revokedTokens
+          }
+        });
+        return {
+          ok: true,
+          authSessionId,
           revokedTokens
         };
       });

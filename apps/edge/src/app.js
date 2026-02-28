@@ -681,6 +681,28 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "GET",
+      pattern: "/api/auth/sessions",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.listAuthSessions(token));
+      })
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/auth/sessions/:authSessionId",
+      handler: withErrorHandling(async (request, { authSessionId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.revokeAuthSession(token, authSessionId));
+      })
+    },
+    {
       method: "POST",
       pattern: "/api/auth/recovery-codes/generate",
       handler: withErrorHandling(async (request) => {

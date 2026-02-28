@@ -96,6 +96,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       configPath
     });
     assert.equal(code, 0);
+    const registeredOutput = JSON.parse(stdout.data.trim());
+    const initialAuthSessionId = registeredOutput.authSessionId;
 
     stdout.data = "";
 
@@ -578,6 +580,45 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       configPath
     });
     assert.equal(code, 0);
+    const loginOutput = JSON.parse(stdout.data.trim());
+    assert.ok(loginOutput.authSessionId);
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "sessions", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const sessionsOutput = JSON.parse(stdout.data.trim());
+    assert.ok(sessionsOutput.sessions.some((entry) => entry.id === initialAuthSessionId));
+    assert.ok(sessionsOutput.sessions.some((entry) => entry.current));
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "revoke-session", initialAuthSessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const revokedSession = JSON.parse(stdout.data.trim());
+    assert.equal(revokedSession.ok, true);
+
+    stdout.data = "";
+
+    code = await runCli(["auth", "sessions", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const afterRevokeSessions = JSON.parse(stdout.data.trim());
+    assert.equal(afterRevokeSessions.sessions.some((entry) => entry.id === initialAuthSessionId), false);
 
     stdout.data = "";
 

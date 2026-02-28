@@ -111,6 +111,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
     code: ownerRecovery.recoveryCodes[0]
   });
   assert.ok(recoveredOwner.refreshToken);
+  assert.ok(recoveredOwner.authSessionId);
   await assert.rejects(
     () =>
       service.recoverWithCode({
@@ -346,26 +347,41 @@ test("service covers invites, queued builds, releases, session events, usage, an
   await assert.rejects(() => service.authenticate(switched.token), /Unauthorized/);
   await assert.rejects(() => service.authenticate(teammate.token), /Unauthorized/);
 
-  const usage = await service.getUsage(owner.token);
+  const ownerSecondLogin = await service.login({
+    email: "owner@example.com",
+    kind: "browser"
+  });
+  const authSessions = await service.listAuthSessions(ownerSecondLogin.token);
+  assert.ok(authSessions.sessions.length >= 3);
+  assert.ok(authSessions.sessions.some((entry) => entry.id === owner.authSessionId));
+  const revokeSession = await service.revokeAuthSession(ownerSecondLogin.token, owner.authSessionId);
+  assert.equal(revokeSession.ok, true);
+  const afterRevoke = await service.listAuthSessions(ownerSecondLogin.token);
+  assert.equal(afterRevoke.sessions.some((entry) => entry.id === owner.authSessionId), false);
+  await assert.rejects(() => service.authenticate(owner.token), /Unauthorized/);
+  await assert.rejects(() => service.refreshSession(owner.refreshToken), /Unauthorized/);
+  assert.ok((await service.authenticate(ownerSecondLogin.token)).user.id);
+
+  const usage = await service.getUsage(ownerSecondLogin.token);
   assert.deepEqual(usage.usage, {
     runtimeMinutes: 3,
     snapshots: 2,
     templateBuilds: 3
   });
 
-  const refreshed = await service.refreshSession(owner.refreshToken);
+  const refreshed = await service.refreshSession(ownerSecondLogin.refreshToken);
   assert.ok(refreshed.token);
   assert.ok(refreshed.refreshToken);
-  await assert.rejects(() => service.refreshSession(owner.refreshToken), /Unauthorized/);
+  await assert.rejects(() => service.refreshSession(ownerSecondLogin.refreshToken), /Unauthorized/);
   const logout = await service.logout(refreshed.token, refreshed.refreshToken);
   assert.equal(logout.ok, true);
   await assert.rejects(() => service.authenticate(refreshed.token), /Unauthorized/);
 
-  const enqueued = await service.enqueueReconcile(owner.token);
+  const enqueued = await service.enqueueReconcile(ownerSecondLogin.token);
   assert.equal(enqueued.queued, true);
   assert.equal(reconcileJobs, 1);
 
-  const report = await service.getAdminReport(owner.token);
+  const report = await service.getAdminReport(ownerSecondLogin.token);
   assert.equal(report.report.members, 2);
   assert.equal(report.report.releases, 1);
   assert.equal(report.report.buildsDeadLettered, 1);
@@ -373,12 +389,12 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(report.report.sessionsSleeping, 0);
   assert.equal(report.report.activeUploadGrants, 0);
 
-  const exported = await service.exportWorkspace(owner.token);
+  const exported = await service.exportWorkspace(ownerSecondLogin.token);
   assert.equal(exported.export.workspace.id, owner.workspace.id);
   assert.equal(exported.export.members.length, 2);
   assert.equal(exported.export.templates.length >= 1, true);
   assert.equal(exported.export.audit.length >= 1, true);
 
-  const audit = await service.getAudit(owner.token);
+  const audit = await service.getAudit(ownerSecondLogin.token);
   assert.ok(audit.audit.length >= 10);
 });

@@ -414,3 +414,19 @@ This file records what has already been implemented in the repository and what h
 - Added a browser input field so the web app can send a Turnstile token when the secret is configured.
 - Added mocked enforcement coverage in the Worker test suite.
 - Verified the live Worker currently reports `turnstileEnabled: false` and remains backward-compatible until a `TURNSTILE_SECRET` is configured
+
+## 37. Auth Session Listing And Targeted Revoke
+
+- Added auth-session grouping so related access and refresh tokens are tracked as a single revocable session.
+- Added authenticated session listing in the auth service.
+- Added authenticated targeted session revoke in the auth service.
+- Added `GET /api/auth/sessions`.
+- Added `DELETE /api/auth/sessions/:authSessionId`.
+- Added CLI support for:
+  - `burstflare auth sessions`
+  - `burstflare auth revoke-session <authSessionId>`
+- Added test coverage across the service, Worker, and CLI suites.
+- Verified the live Worker can:
+  - list multiple active auth sessions for the same user
+  - revoke a non-current auth session by `authSessionId`
+  - reject the revoked session token while keeping the current session active
