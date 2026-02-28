@@ -108,9 +108,10 @@ This file lists the remaining work required to close the gap between the current
   - manifest validation and upload size limits
   - template archive and restore controls
   - archived templates block new session creation
+  - template deletion with bundle and build-log cleanup
 - Remaining:
   - direct-to-R2 presigned upload URLs if we want to bypass the Worker relay path
-  - admin-grade template management UX
+  - deeper admin-grade template management UX beyond the current CRUD and lifecycle controls
 
 ### PR 08: Async Build Pipeline With Queues And Workflows
 

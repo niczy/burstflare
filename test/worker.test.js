@@ -239,6 +239,39 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(restoredTemplate.response.status, 200);
 
+  const disposableTemplate = await requestJson(app, "/api/templates", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({ name: "trash-dev", description: "Disposable template" })
+  });
+  assert.equal(disposableTemplate.response.status, 200);
+  const disposableTemplateId = disposableTemplate.data.template.id;
+
+  const disposableVersion = await requestJson(app, `/api/templates/${disposableTemplateId}/versions`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      version: "0.1.0",
+      manifest: { image: "registry.cloudflare.com/test/trash-dev:0.1.0" }
+    })
+  });
+  assert.equal(disposableVersion.response.status, 200);
+
+  const deletedTemplate = await requestJson(app, `/api/templates/${disposableTemplateId}`, {
+    method: "DELETE",
+    headers: ownerHeaders
+  });
+  assert.equal(deletedTemplate.response.status, 200);
+  assert.equal(deletedTemplate.data.deletedVersions, 1);
+
+  const templateList = await requestJson(app, "/api/templates", {
+    headers: ownerHeaders
+  });
+  assert.equal(
+    templateList.data.templates.some((entry) => entry.id === disposableTemplateId),
+    false
+  );
+
   const restoredSession = await requestJson(app, "/api/sessions", {
     method: "POST",
     headers: switchedHeaders,
@@ -246,6 +279,12 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(restoredSession.response.status, 200);
   const sessionId = restoredSession.data.session.id;
+
+  const deleteBlocked = await requestJson(app, `/api/templates/${templateId}`, {
+    method: "DELETE",
+    headers: ownerHeaders
+  });
+  assert.equal(deleteBlocked.response.status, 409);
 
   const started = await requestJson(app, `/api/sessions/${sessionId}/start`, {
     method: "POST",

@@ -276,3 +276,17 @@ This file records what has already been implemented in the repository and what h
   - mint a snapshot upload grant
   - upload snapshot content through the grant URL
   - read both artifacts back successfully afterward
+
+## 27. Template Deletion And Artifact Cleanup
+
+- Added template deletion in the service layer.
+- Blocked template deletion while a template still has non-deleted sessions.
+- Added cleanup of stored template bundles when a template is deleted.
+- Added cleanup of stored build logs when a template is deleted.
+- Added an authenticated template deletion API route.
+- Added CLI support for `template delete <templateId>`.
+- Added a web UI delete control for templates.
+- Verified the live Worker can:
+  - return `409` when deleting a template that still has an active session
+  - delete a disposable template successfully
+  - remove the deleted template from the template list

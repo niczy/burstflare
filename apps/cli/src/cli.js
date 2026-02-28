@@ -137,6 +137,7 @@ function helpText() {
     "burstflare template promote <templateId> <versionId>",
     "burstflare template archive <templateId>",
     "burstflare template restore <templateId>",
+    "burstflare template delete <templateId>",
     "burstflare template list",
     "burstflare build list",
     "burstflare build log <buildId>",
@@ -609,6 +610,19 @@ export async function runCli(argv, dependencies = {}) {
         const data = await requestJsonAuthed(
           `${baseUrl}/api/templates`,
           {
+            headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "delete") {
+        const templateId = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/templates/${templateId}`,
+          {
+            method: "DELETE",
             headers: headers(undefined, false)
           }
         );

@@ -138,6 +138,14 @@ function createObjectStore(options) {
       };
     },
 
+    async deleteTemplateVersionBundle({ templateVersion }) {
+      if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
+        return null;
+      }
+      await options.TEMPLATE_BUCKET.delete(templateVersion.bundleKey);
+      return { key: templateVersion.bundleKey };
+    },
+
     async putBuildLog({ templateVersion, log }) {
       if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
         return null;
@@ -161,6 +169,14 @@ function createObjectStore(options) {
         contentType: object.httpMetadata?.contentType || "text/plain; charset=utf-8",
         bytes: object.size ?? 0
       };
+    },
+
+    async deleteBuildLog({ templateVersion }) {
+      if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
+        return null;
+      }
+      await options.BUILD_BUCKET.delete(templateVersion.buildLogKey);
+      return { key: templateVersion.buildLogKey };
     },
 
     async putSnapshot({ snapshot, body, contentType }) {
@@ -767,6 +783,17 @@ export function createApp(options = {}) {
           return unauthorized();
         }
         return toJson(await service.restoreTemplate(token, templateId));
+      })
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/templates/:templateId",
+      handler: withErrorHandling(async (request, { templateId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.deleteTemplate(token, templateId));
       })
     },
     {

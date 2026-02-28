@@ -254,6 +254,30 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["template", "create", "trash-dev", "--description", "Disposable template", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const disposableTemplate = JSON.parse(stdout.data.trim());
+    const disposableTemplateId = disposableTemplate.template.id;
+
+    stdout.data = "";
+
+    code = await runCli(["template", "delete", disposableTemplateId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const deletedTemplate = JSON.parse(stdout.data.trim());
+    assert.equal(deletedTemplate.ok, true);
+
+    stdout.data = "";
+
     code = await runCli(["up", "my-shell", "--template", templateId, "--url", "http://local"], {
       fetchImpl,
       stdout,

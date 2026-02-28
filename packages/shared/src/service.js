@@ -1061,6 +1061,70 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async deleteTemplate(token, templateId) {
+      return store.transact(async (state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
+        ensure(
+          !state.sessions.some((entry) => entry.templateId === auth.template.id && entry.state !== "deleted"),
+          "Template still has active sessions",
+          409
+        );
+
+        const templateVersions = state.templateVersions.filter((entry) => entry.templateId === auth.template.id);
+        const templateVersionIds = new Set(templateVersions.map((entry) => entry.id));
+
+        for (const templateVersion of templateVersions) {
+          if (objects?.deleteTemplateVersionBundle) {
+            await objects.deleteTemplateVersionBundle({
+              workspace: auth.workspace,
+              template: auth.template,
+              templateVersion
+            });
+          }
+          if (objects?.deleteBuildLog) {
+            await objects.deleteBuildLog({
+              workspace: auth.workspace,
+              template: auth.template,
+              templateVersion
+            });
+          }
+        }
+
+        const deletedBuilds = state.templateBuilds.filter((entry) => templateVersionIds.has(entry.templateVersionId)).length;
+        const deletedReleases = state.bindingReleases.filter((entry) => entry.templateId === auth.template.id).length;
+
+        state.templates = state.templates.filter((entry) => entry.id !== auth.template.id);
+        state.templateVersions = state.templateVersions.filter((entry) => !templateVersionIds.has(entry.id));
+        state.templateBuilds = state.templateBuilds.filter((entry) => !templateVersionIds.has(entry.templateVersionId));
+        state.bindingReleases = state.bindingReleases.filter((entry) => entry.templateId !== auth.template.id);
+        state.uploadGrants = getUploadGrants(state).filter(
+          (entry) => entry.templateId !== auth.template.id && !templateVersionIds.has(entry.templateVersionId)
+        );
+
+        writeAudit(state, clock, {
+          action: "template.deleted",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "template",
+          targetId: auth.template.id,
+          details: {
+            deletedVersions: templateVersions.length,
+            deletedBuilds,
+            deletedReleases
+          }
+        });
+
+        return {
+          ok: true,
+          templateId: auth.template.id,
+          deletedVersions: templateVersions.length,
+          deletedBuilds,
+          deletedReleases
+        };
+      });
+    },
+
     async listTemplates(token) {
       return store.transact((state) => {
         const auth = requireAuth(state, token, clock);

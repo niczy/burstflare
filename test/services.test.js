@@ -27,6 +27,9 @@ function createObjectStore() {
         bytes: entry.body.byteLength
       };
     },
+    async deleteTemplateVersionBundle({ templateVersion }) {
+      bundles.delete(templateVersion.id);
+    },
     async putBuildLog({ templateVersion, log }) {
       logs.set(templateVersion.id, log);
     },
@@ -40,6 +43,9 @@ function createObjectStore() {
         contentType: "text/plain; charset=utf-8",
         bytes: new TextEncoder().encode(text).byteLength
       };
+    },
+    async deleteBuildLog({ templateVersion }) {
+      logs.delete(templateVersion.id);
     },
     async putSnapshot({ snapshot, body, contentType }) {
       snapshots.set(snapshot.id, {
@@ -64,6 +70,9 @@ function createObjectStore() {
     readBundleText(templateVersionId) {
       const entry = bundles.get(templateVersionId);
       return entry ? decoder.decode(entry.body) : null;
+    },
+    readBuildLogText(templateVersionId) {
+      return logs.get(templateVersionId) || null;
     }
   };
 }
@@ -195,6 +204,30 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const restoredTemplate = await service.restoreTemplate(owner.token, template.template.id);
   assert.equal(restoredTemplate.template.archivedAt, null);
 
+  const disposableTemplate = await service.createTemplate(owner.token, {
+    name: "trash-dev",
+    description: "Disposable runtime"
+  });
+  const disposableVersion = await service.addTemplateVersion(owner.token, disposableTemplate.template.id, {
+    version: "0.1.0",
+    manifest: { image: "registry.cloudflare.com/test/trash-dev:0.1.0" }
+  });
+  await service.uploadTemplateVersionBundle(owner.token, disposableTemplate.template.id, disposableVersion.templateVersion.id, {
+    body: "trash bundle",
+    contentType: "text/plain"
+  });
+  await service.processTemplateBuildById(disposableVersion.build.id);
+  const deletedTemplate = await service.deleteTemplate(owner.token, disposableTemplate.template.id);
+  assert.equal(deletedTemplate.ok, true);
+  assert.equal(deletedTemplate.deletedVersions, 1);
+  assert.equal(objects.readBundleText(disposableVersion.templateVersion.id), null);
+  assert.equal(objects.readBuildLogText(disposableVersion.templateVersion.id), null);
+  const templateList = await service.listTemplates(owner.token);
+  assert.equal(
+    templateList.templates.some((entry) => entry.id === disposableTemplate.template.id),
+    false
+  );
+
   const session = await service.createSession(switched.token, {
     name: "demo",
     templateId: template.template.id
@@ -252,7 +285,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.deepEqual(usage.usage, {
     runtimeMinutes: 2,
     snapshots: 2,
-    templateBuilds: 2
+    templateBuilds: 3
   });
 
   const refreshed = await service.refreshSession(owner.refreshToken);
