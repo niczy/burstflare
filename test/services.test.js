@@ -524,12 +524,24 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(report.report.sessionsTotal, 0);
   assert.equal(report.report.sessionsSleeping, 0);
   assert.equal(report.report.activeUploadGrants, 0);
+  assert.equal(report.report.limits.maxRunningSessions, 20);
+
+  const secret = await service.setWorkspaceSecret(ownerSecondLogin.token, "api_token", "secret-value");
+  assert.equal(secret.secret.name, "API_TOKEN");
+  const secrets = await service.listWorkspaceSecrets(ownerSecondLogin.token);
+  assert.deepEqual(secrets.secrets.map((entry) => entry.name), ["API_TOKEN"]);
 
   const exported = await service.exportWorkspace(ownerSecondLogin.token);
   assert.equal(exported.export.workspace.id, owner.workspace.id);
   assert.equal(exported.export.members.length, 2);
   assert.equal(exported.export.templates.length >= 1, true);
+  assert.equal(exported.export.artifacts.templateBundles.length >= 1, true);
+  assert.equal(exported.export.security.runtimeSecrets.length, 1);
+  assert.equal(exported.export.security.runtimeSecrets[0].name, "API_TOKEN");
   assert.equal(exported.export.audit.length >= 1, true);
+
+  const deletedSecret = await service.deleteWorkspaceSecret(ownerSecondLogin.token, "api_token");
+  assert.equal(deletedSecret.ok, true);
 
   const audit = await service.getAudit(ownerSecondLogin.token);
   assert.ok(audit.audit.length >= 10);

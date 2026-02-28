@@ -240,17 +240,16 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 17: Security Hardening And Audit Completeness
 
-- Status: partially complete
+- Status: complete
 - Done:
   - audit logging exists for many core actions
   - rate limiting on key auth and upload routes
   - authenticated workspace export path for backup/export use
-- Remaining:
-  - abuse controls
-  - full audit coverage
-  - runtime secret handling
-  - fuller backup/export procedures beyond the current workspace JSON export
-  - focused security validation of proxy and tenant isolation paths
+  - audit logging now covers sensitive read paths including usage, audit, admin report, reconcile preview, and export access
+  - runtime secret management now exists across the service layer, API, and `flare` CLI with metadata-only responses
+  - workspace export now includes artifact inventory plus redacted runtime secret metadata for backup/security review
+  - runtime attach, preview, editor, terminal, and SSH routes now have explicit per-route rate limits
+  - focused security validation now covers runtime route authorization, runtime attach throttling, and export redaction in Worker tests
 
 ### PR 18: Beta Readiness, Docs, And Production Rollout
 
@@ -266,8 +265,8 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Finish PR 17 next. The largest remaining gap is now security hardening.
-2. After that, tighten the earlier mostly-complete product surfaces in PR 04, PR 05, PR 06, and PR 07.
+1. Tighten the earlier mostly-complete product surfaces in PR 04, PR 06, and PR 07.
+2. Treat the optional PR 02 repository-style data-access cleanup as a scale-oriented follow-up, not a blocker for the current beta baseline.
 3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
 
 ## 4. CI And Test Work Still Needed

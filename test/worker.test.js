@@ -1252,6 +1252,124 @@ test("worker exposes quota overrides and richer usage data", async () => {
   assert.equal(usage.data.usage.storage.templateBundlesBytes, 2);
 });
 
+test("worker secures runtime routes and redacts workspace secrets", async () => {
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket(),
+    SNAPSHOT_BUCKET: createBucket()
+  });
+
+  const owner = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "security-owner@example.com", name: "Security Owner" })
+  });
+  const attacker = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "security-attacker@example.com", name: "Security Attacker" })
+  });
+  const ownerHeaders = {
+    authorization: `Bearer ${owner.data.token}`
+  };
+  const attackerHeaders = {
+    authorization: `Bearer ${attacker.data.token}`
+  };
+
+  const createdSecret = await requestJson(app, "/api/workspaces/current/secrets", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "api_token",
+      value: "secret-value"
+    })
+  });
+  assert.equal(createdSecret.response.status, 200);
+  assert.equal(createdSecret.data.secret.name, "API_TOKEN");
+
+  const listedSecrets = await requestJson(app, "/api/workspaces/current/secrets", {
+    headers: ownerHeaders
+  });
+  assert.equal(listedSecrets.response.status, 200);
+  assert.deepEqual(listedSecrets.data.secrets.map((entry) => entry.name), ["API_TOKEN"]);
+  assert.equal("value" in listedSecrets.data.secrets[0], false);
+
+  const template = await requestJson(app, "/api/templates", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "security-template",
+      description: "security test"
+    })
+  });
+  assert.equal(template.response.status, 200);
+
+  const version = await requestJson(app, `/api/templates/${template.data.template.id}/versions`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      version: "1.0.0",
+      manifest: {
+        image: "registry.cloudflare.com/example/security-template:1.0.0"
+      }
+    })
+  });
+  assert.equal(version.response.status, 200);
+
+  const processed = await requestJson(app, "/api/template-builds/process", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(processed.response.status, 200);
+
+  const promoted = await requestJson(app, `/api/templates/${template.data.template.id}/promote`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      versionId: version.data.templateVersion.id
+    })
+  });
+  assert.equal(promoted.response.status, 200);
+
+  const session = await requestJson(app, "/api/sessions", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      name: "security-session",
+      templateId: template.data.template.id
+    })
+  });
+  assert.equal(session.response.status, 200);
+
+  const started = await requestJson(app, `/api/sessions/${session.data.session.id}/start`, {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(started.response.status, 200);
+
+  const attackerPreview = await requestJson(app, `/runtime/sessions/${session.data.session.id}/preview`, {
+    headers: attackerHeaders
+  });
+  assert.equal(attackerPreview.response.status, 404);
+
+  let rateLimited = null;
+  for (let attempt = 0; attempt < 13; attempt += 1) {
+    const response = await requestJson(app, `/api/sessions/${session.data.session.id}/ssh-token`, {
+      method: "POST",
+      headers: ownerHeaders
+    });
+    rateLimited = response;
+  }
+  assert.equal(rateLimited.response.status, 429);
+  assert.equal(rateLimited.response.headers.get("x-burstflare-rate-limit-limit"), "12");
+
+  const exported = await requestJson(app, "/api/admin/export", {
+    headers: ownerHeaders
+  });
+  assert.equal(exported.response.status, 200);
+  assert.equal(exported.data.export.security.runtimeSecrets[0].name, "API_TOKEN");
+  assert.equal("value" in exported.data.export.security.runtimeSecrets[0], false);
+  assert.equal(exported.data.export.artifacts.buildArtifacts.length, 1);
+});
+
 test("runtime-aware reconcile stops running sessions and persists runtime state", async () => {
   const service = createWorkerService();
   const owner = await service.registerUser({

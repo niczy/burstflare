@@ -1302,3 +1302,41 @@ This file records what has already been implemented in the repository and what h
   - `POST /api/workspaces/current/quota-overrides` updates effective limits
   - `GET /api/usage` returns the override-aware limits and storage rollups
   - clearing the overrides restores the default plan limits
+
+## 83. Security Hardening And Runtime Secret Controls
+
+- Added workspace runtime secret management across the service layer, API, and `flare` CLI:
+  - `GET /api/workspaces/current/secrets`
+  - `POST /api/workspaces/current/secrets`
+  - `DELETE /api/workspaces/current/secrets/:name`
+  - `flare workspace secrets`
+  - `flare workspace set-secret <NAME> --value <VALUE>`
+  - `flare workspace delete-secret <NAME>`
+- Runtime secret responses are now metadata-only and never return raw secret values after write.
+- Runtime bootstrap now passes secret metadata and secret values into the session container so the container can materialize `/run/burstflare/secrets.env` at boot.
+- Added explicit rate limiting on runtime-sensitive routes:
+  - SSH token minting
+  - preview
+  - editor read/write
+  - browser terminal
+  - SSH upgrade
+- Expanded audit coverage for:
+  - usage views
+  - audit-log reads
+  - admin report reads
+  - reconcile preview reads
+  - admin exports
+  - runtime secret create/list/delete
+- Workspace exports now include:
+  - artifact inventory for template bundles, build artifacts, and snapshots
+  - redacted runtime secret metadata under `export.security.runtimeSecrets`
+- Verified locally with updated service, Worker, CLI, and container-runtime tests covering:
+  - redacted secret metadata
+  - container bootstrap secret projection
+  - runtime route authorization and rate limits
+  - export redaction
+- Verified live on the public Cloudflare deployment that:
+  - runtime secret create/list/delete works end to end
+  - secret list responses expose only metadata
+  - admin export includes redacted runtime secret metadata and build artifact inventory
+  - repeated `POST /api/sessions/:sessionId/ssh-token` requests now return `429` with `x-burstflare-rate-limit-limit: 12` after the configured threshold

@@ -93,12 +93,17 @@ test("session container bootstrap and lifecycle hooks persist runtime metadata f
     state: "running",
     lastRestoredSnapshotId: "snap_boot",
     persistedPaths: ["/workspace/project"],
+    runtimeSecrets: {
+      API_TOKEN: "super-secret"
+    },
     runtimeVersion: 3
   });
   assert.equal(bootstrapped.ok, true);
   assert.equal(bootstrapped.bootstrap.sessionId, "ses_bootstrap");
   assert.deepEqual(runtimeState.persistedPaths, ["/workspace/project"]);
+  assert.deepEqual(runtimeState.secretNames, ["API_TOKEN"]);
   assert.match(runtimeState.files.get("/workspace/.burstflare/session.json"), /Runtime Template/);
+  assert.match(runtimeState.files.get("/run/burstflare/secrets.env"), /API_TOKEN=super-secret/);
 
   const lifecycle = recordLifecycleHook({
     sessionId: "ses_bootstrap",

@@ -11,6 +11,8 @@ const MAX_BUILD_ATTEMPTS = 3;
 const STUCK_BUILD_TTL_MS = 1000 * 60 * 5;
 const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const MAX_RUNTIME_SECRETS = 32;
+const MAX_RUNTIME_SECRET_VALUE_BYTES = 4096;
 const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
 
 const PLANS = {
@@ -94,6 +96,45 @@ function getEffectiveLimits(workspace) {
     ...getPlan(workspace?.plan),
     ...getWorkspaceQuotaOverrides(workspace)
   };
+}
+
+function normalizeSecretName(name) {
+  const value = String(name || "").trim().toUpperCase();
+  ensure(value, "Secret name is required");
+  ensure(/^[A-Z][A-Z0-9_]{0,63}$/.test(value), "Secret name must match ^[A-Z][A-Z0-9_]{0,63}$");
+  return value;
+}
+
+function normalizeSecretValue(value) {
+  ensure(typeof value === "string", "Secret value is required");
+  ensure(value.length > 0, "Secret value is required");
+  const bytes = new TextEncoder().encode(value).byteLength;
+  ensure(bytes <= MAX_RUNTIME_SECRET_VALUE_BYTES, "Secret value exceeds size limit", 413);
+  return value;
+}
+
+function getWorkspaceRuntimeSecrets(workspace) {
+  if (!Array.isArray(workspace.runtimeSecrets)) {
+    workspace.runtimeSecrets = [];
+  }
+  return workspace.runtimeSecrets;
+}
+
+function listRuntimeSecretMetadata(workspace) {
+  return getWorkspaceRuntimeSecrets(workspace).map((entry) => ({
+    name: entry.name,
+    valueBytes: new TextEncoder().encode(String(entry.value || "")).byteLength,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt
+  }));
+}
+
+function getRuntimeSecretMap(workspace) {
+  const runtimeSecrets = {};
+  for (const entry of getWorkspaceRuntimeSecrets(workspace)) {
+    runtimeSecrets[entry.name] = entry.value;
+  }
+  return runtimeSecrets;
 }
 
 function toUint8Array(value) {
@@ -2442,6 +2483,84 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async listWorkspaceSecrets(token) {
+      return transact(WORKSPACE_SCOPE, (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        writeAudit(state, clock, {
+          action: "workspace.secrets_viewed",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id
+        });
+        return {
+          secrets: listRuntimeSecretMetadata(auth.workspace)
+        };
+      });
+    },
+
+    async setWorkspaceSecret(token, name, value) {
+      return transact(WORKSPACE_SCOPE, (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const normalizedName = normalizeSecretName(name);
+        const normalizedValue = normalizeSecretValue(value);
+        const secrets = getWorkspaceRuntimeSecrets(auth.workspace);
+        const existing = secrets.find((entry) => entry.name === normalizedName) || null;
+        if (!existing) {
+          ensure(secrets.length < MAX_RUNTIME_SECRETS, "Runtime secret limit reached", 403);
+        }
+        const timestamp = nowIso(clock);
+        if (existing) {
+          existing.value = normalizedValue;
+          existing.updatedAt = timestamp;
+        } else {
+          secrets.push({
+            name: normalizedName,
+            value: normalizedValue,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          });
+        }
+        writeAudit(state, clock, {
+          action: existing ? "workspace.secret_rotated" : "workspace.secret_created",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace_secret",
+          targetId: normalizedName,
+          details: {
+            valueBytes: new TextEncoder().encode(normalizedValue).byteLength
+          }
+        });
+        return {
+          secret: listRuntimeSecretMetadata(auth.workspace).find((entry) => entry.name === normalizedName),
+          secrets: listRuntimeSecretMetadata(auth.workspace)
+        };
+      });
+    },
+
+    async deleteWorkspaceSecret(token, name) {
+      return transact(WORKSPACE_SCOPE, (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const normalizedName = normalizeSecretName(name);
+        const secrets = getWorkspaceRuntimeSecrets(auth.workspace);
+        const existing = secrets.find((entry) => entry.name === normalizedName) || null;
+        ensure(existing, "Secret not found", 404);
+        auth.workspace.runtimeSecrets = secrets.filter((entry) => entry.name !== normalizedName);
+        writeAudit(state, clock, {
+          action: "workspace.secret_deleted",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace_secret",
+          targetId: normalizedName
+        });
+        return {
+          ok: true,
+          secretName: normalizedName,
+          secrets: listRuntimeSecretMetadata(auth.workspace)
+        };
+      });
+    },
+
     async updateWorkspaceSettings(token, { name }) {
       return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
@@ -3751,6 +3870,13 @@ export function createBurstFlareService(options = {}) {
     async getUsage(token) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
+        writeAudit(state, clock, {
+          action: "usage.viewed",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id
+        });
         return {
           usage: summarizeUsage(state, auth.workspace.id),
           limits: getEffectiveLimits(auth.workspace),
@@ -3763,6 +3889,14 @@ export function createBurstFlareService(options = {}) {
     async getAudit(token, { limit = 50 } = {}) {
       return transact(ADMIN_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
+        writeAudit(state, clock, {
+          action: "audit.viewed",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id,
+          details: { limit }
+        });
         const items = state.auditLogs
           .filter((entry) => entry.workspaceId === auth.workspace.id)
           .slice(-limit)
@@ -3774,6 +3908,13 @@ export function createBurstFlareService(options = {}) {
     async getAdminReport(token) {
       return transact(ADMIN_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
+        writeAudit(state, clock, {
+          action: "admin.report_viewed",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id
+        });
         const reportAt = nowMs(clock);
         const workspaceBuilds = getWorkspaceBuildRecords(state, auth.workspace.id);
         const reconcileCandidates = getReconcileCandidates(state, auth.workspace.id, reportAt);
@@ -3820,6 +3961,13 @@ export function createBurstFlareService(options = {}) {
     async previewReconcile(token) {
       return transact(ADMIN_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
+        writeAudit(state, clock, {
+          action: "admin.reconcile_previewed",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "workspace",
+          targetId: auth.workspace.id
+        });
         const candidates = getReconcileCandidates(state, auth.workspace.id);
         return {
           preview: summarizeReconcileCandidates(candidates)
@@ -3902,6 +4050,49 @@ export function createBurstFlareService(options = {}) {
         const sessionIds = new Set(
           state.sessions.filter((entry) => entry.workspaceId === workspaceId).map((entry) => entry.id)
         );
+        const artifacts = {
+          templateBundles: state.templateVersions
+            .filter((entry) => templateIds.has(entry.templateId) && entry.bundleUploadedAt)
+            .map((entry) => ({
+              templateVersionId: entry.id,
+              bundleKey: entry.bundleKey,
+              contentType: entry.bundleContentType,
+              bytes: entry.bundleBytes,
+              uploadedAt: entry.bundleUploadedAt
+            })),
+          buildArtifacts: state.templateBuilds
+            .filter((entry) => templateVersionIds.has(entry.templateVersionId) && entry.artifactBuiltAt)
+            .map((entry) => ({
+              buildId: entry.id,
+              artifactKey: entry.artifactKey,
+              imageReference: entry.artifactImageReference,
+              imageDigest: entry.artifactImageDigest,
+              bytes: entry.artifactBytes,
+              builtAt: entry.artifactBuiltAt
+            })),
+          snapshots: state.snapshots
+            .filter((entry) => sessionIds.has(entry.sessionId))
+            .map((entry) => ({
+              snapshotId: entry.id,
+              sessionId: entry.sessionId,
+              objectKey: entry.objectKey,
+              contentType: entry.contentType,
+              bytes: entry.bytes,
+              uploadedAt: entry.uploadedAt
+            }))
+        };
+        writeAudit(state, clock, {
+          action: "admin.exported",
+          actorUserId: auth.user.id,
+          workspaceId,
+          targetType: "workspace",
+          targetId: workspaceId,
+          details: {
+            templates: templateIds.size,
+            templateVersions: templateVersionIds.size,
+            sessions: sessionIds.size
+          }
+        });
 
         return {
           export: {
@@ -3918,9 +4109,26 @@ export function createBurstFlareService(options = {}) {
               .filter((entry) => entry.workspaceId === workspaceId)
               .map((entry) => formatSession(state, entry)),
             snapshots: state.snapshots.filter((entry) => sessionIds.has(entry.sessionId)),
+            artifacts,
+            security: {
+              runtimeSecrets: listRuntimeSecretMetadata(auth.workspace)
+            },
             usage: state.usageEvents.filter((entry) => entry.workspaceId === workspaceId),
             audit: state.auditLogs.filter((entry) => entry.workspaceId === workspaceId)
           }
+        };
+      });
+    },
+
+    async getSystemRuntimeSecrets(sessionId) {
+      return transact(SESSION_SCOPE, (state) => {
+        const session = state.sessions.find((entry) => entry.id === sessionId);
+        ensure(session, "Session not found", 404);
+        const workspace = state.workspaces.find((entry) => entry.id === session.workspaceId);
+        ensure(workspace, "Workspace not found", 404);
+        return {
+          runtimeSecrets: getRuntimeSecretMap(workspace),
+          secretNames: listRuntimeSecretMetadata(workspace).map((entry) => entry.name)
         };
       });
     },

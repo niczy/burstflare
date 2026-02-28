@@ -756,10 +756,15 @@ function createContainerControlRequest(pathname, payload) {
   });
 }
 
-async function applyRuntimeBootstrapToContainer(container, session) {
+async function applyRuntimeBootstrapToContainer(container, session, runtimeSecrets = null) {
   if (!container || !session) {
     return null;
   }
+
+  const secretPayload = runtimeSecrets || {
+    runtimeSecrets: {},
+    secretNames: []
+  };
 
   const payload = {
     sessionId: session.id,
@@ -770,6 +775,11 @@ async function applyRuntimeBootstrapToContainer(container, session) {
     previewUrl: session.previewUrl || null,
     lastRestoredSnapshotId: session.lastRestoredSnapshotId || null,
     persistedPaths: Array.isArray(session.persistedPaths) ? session.persistedPaths : [],
+    runtimeSecretNames: Array.isArray(secretPayload.secretNames) ? secretPayload.secretNames : [],
+    runtimeSecrets:
+      secretPayload.runtimeSecrets && typeof secretPayload.runtimeSecrets === "object"
+        ? secretPayload.runtimeSecrets
+        : {},
     runtimeVersion: Number.isInteger(session.runtimeVersion) ? session.runtimeVersion : 0
   };
 
@@ -986,7 +996,8 @@ export function createApp(options = {}) {
       !result.stale
     ) {
       const container = getSessionContainer(result.session.id);
-      await applyRuntimeBootstrapToContainer(container, result.session);
+      const runtimeSecrets = await service.getSystemRuntimeSecrets(result.session.id);
+      await applyRuntimeBootstrapToContainer(container, result.session, runtimeSecrets);
       if (result.session.lastRestoredSnapshotId) {
         const runtimeRestore = await applyRuntimeSnapshotHydration(token, result.session);
         if (runtimeRestore) {
@@ -1764,6 +1775,40 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "GET",
+      pattern: "/api/workspaces/current/secrets",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.listWorkspaceSecrets(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/workspaces/current/secrets",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.setWorkspaceSecret(token, body.name, body.value));
+      })
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/workspaces/current/secrets/:name",
+      handler: withErrorHandling(async (request, { name }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.deleteWorkspaceSecret(token, name));
+      })
+    },
+    {
       method: "PATCH",
       pattern: "/api/workspaces/current/settings",
       handler: withErrorHandling(async (request) => {
@@ -2252,15 +2297,22 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/sessions/:sessionId/ssh-token",
-      handler: withErrorHandling(async (request, { sessionId }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const result = await service.issueRuntimeToken(token, sessionId);
-        result.sshCommand = rewriteSshCommand(request, result.sshCommand);
-        return toJson(result);
-      })
+      handler: withRateLimit(
+        {
+          scope: "runtime-attach",
+          limit: 12,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { sessionId }) => {
+          const token = requireToken(request, service);
+          if (!token) {
+            return unauthorized();
+          }
+          const result = await service.issueRuntimeToken(token, sessionId);
+          result.sshCommand = rewriteSshCommand(request, result.sshCommand);
+          return toJson(result);
+        })
+      )
     },
     {
       method: "GET",
@@ -2397,145 +2449,185 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/runtime/sessions/:sessionId/preview",
-      handler: withErrorHandling(async (request, { sessionId }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const detail = await service.getSession(token, sessionId);
-        const container = await startSessionContainer(sessionId);
-        if (!container) {
-          return new Response("Session container runtime is not bound in this deployment.", {
-            status: 503,
-            headers: { "content-type": "text/plain; charset=utf-8" }
-          });
-        }
-        await applyRuntimeBootstrapToContainer(container, detail.session);
-        if (detail.session.lastRestoredSnapshotId) {
-          await applyRuntimeSnapshotHydration(token, detail.session);
-        }
-        return container.fetch(createPreviewRequest(request, sessionId));
-      })
+      handler: withRateLimit(
+        {
+          scope: "runtime-preview",
+          limit: 30,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { sessionId }) => {
+          const token = requireToken(request, service);
+          if (!token) {
+            return unauthorized();
+          }
+          const detail = await service.getSession(token, sessionId);
+          const container = await startSessionContainer(sessionId);
+          if (!container) {
+            return new Response("Session container runtime is not bound in this deployment.", {
+              status: 503,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
+          const runtimeSecrets = await service.getSystemRuntimeSecrets(detail.session.id);
+          await applyRuntimeBootstrapToContainer(container, detail.session, runtimeSecrets);
+          if (detail.session.lastRestoredSnapshotId) {
+            await applyRuntimeSnapshotHydration(token, detail.session);
+          }
+          return container.fetch(createPreviewRequest(request, sessionId));
+        })
+      )
     },
     {
       method: "GET",
       pattern: "/runtime/sessions/:sessionId/editor",
-      handler: withErrorHandling(async (request, { sessionId }) => {
-        const auth = await readEditorRequestAuth(request, service);
-        if (!auth?.token) {
-          return unauthorized();
-        }
-        const detail = await service.getSession(auth.token, sessionId);
-        const container = await startSessionContainer(sessionId);
-        if (!container) {
-          return new Response("Session container runtime is not bound in this deployment.", {
-            status: 503,
-            headers: { "content-type": "text/plain; charset=utf-8" }
-          });
-        }
-        await applyRuntimeBootstrapToContainer(container, detail.session);
-        if (detail.session.lastRestoredSnapshotId) {
-          await applyRuntimeSnapshotHydration(auth.token, detail.session);
-        }
-        return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
-      })
+      handler: withRateLimit(
+        {
+          scope: "runtime-editor",
+          limit: 60,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { sessionId }) => {
+          const auth = await readEditorRequestAuth(request, service);
+          if (!auth?.token) {
+            return unauthorized();
+          }
+          const detail = await service.getSession(auth.token, sessionId);
+          const container = await startSessionContainer(sessionId);
+          if (!container) {
+            return new Response("Session container runtime is not bound in this deployment.", {
+              status: 503,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
+          const runtimeSecrets = await service.getSystemRuntimeSecrets(detail.session.id);
+          await applyRuntimeBootstrapToContainer(container, detail.session, runtimeSecrets);
+          if (detail.session.lastRestoredSnapshotId) {
+            await applyRuntimeSnapshotHydration(auth.token, detail.session);
+          }
+          return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
+        })
+      )
     },
     {
       method: "POST",
       pattern: "/runtime/sessions/:sessionId/editor",
-      handler: withErrorHandling(async (request, { sessionId }) => {
-        const auth = await readEditorRequestAuth(request, service);
-        if (!auth?.token) {
-          return unauthorized();
-        }
-        const detail = await service.getSession(auth.token, sessionId);
-        const container = await startSessionContainer(sessionId);
-        if (!container) {
-          return new Response("Session container runtime is not bound in this deployment.", {
-            status: 503,
-            headers: { "content-type": "text/plain; charset=utf-8" }
-          });
-        }
-        await applyRuntimeBootstrapToContainer(container, detail.session);
-        if (detail.session.lastRestoredSnapshotId) {
-          await applyRuntimeSnapshotHydration(auth.token, detail.session);
-        }
-        return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
-      })
+      handler: withRateLimit(
+        {
+          scope: "runtime-editor",
+          limit: 60,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { sessionId }) => {
+          const auth = await readEditorRequestAuth(request, service);
+          if (!auth?.token) {
+            return unauthorized();
+          }
+          const detail = await service.getSession(auth.token, sessionId);
+          const container = await startSessionContainer(sessionId);
+          if (!container) {
+            return new Response("Session container runtime is not bound in this deployment.", {
+              status: 503,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
+          const runtimeSecrets = await service.getSystemRuntimeSecrets(detail.session.id);
+          await applyRuntimeBootstrapToContainer(container, detail.session, runtimeSecrets);
+          if (detail.session.lastRestoredSnapshotId) {
+            await applyRuntimeSnapshotHydration(auth.token, detail.session);
+          }
+          return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
+        })
+      )
     },
     {
       method: "GET",
       pattern: "/runtime/sessions/:sessionId/terminal",
-      handler: withErrorHandling(async (request, { sessionId }) => {
-        const url = new URL(request.url);
-        const token = url.searchParams.get("token");
-        if (!token) {
-          return unauthorized("Runtime token missing");
-        }
-        const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
-        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-          return new Response("WebSocket upgrade required for terminal attach.", {
-            status: 426,
-            headers: { "content-type": "text/plain; charset=utf-8" }
-          });
-        }
-        const container = await startSessionContainer(sessionId);
-        if (container && typeof container.fetch === "function") {
-          await applyRuntimeBootstrapToContainer(container, runtimeAccess.session);
-          if (runtimeAccess.session?.lastRestoredSnapshotId) {
-            await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
+      handler: withRateLimit(
+        {
+          scope: "runtime-terminal",
+          limit: 20,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { sessionId }) => {
+          const url = new URL(request.url);
+          const token = url.searchParams.get("token");
+          if (!token) {
+            return unauthorized("Runtime token missing");
           }
-          return container.fetch(createRuntimeTerminalRequest(request, sessionId));
-        }
-        const bridge = createRuntimeSshBridge(sessionId);
-        if (!bridge?.client) {
-          return new Response("Runtime WebSocket support is unavailable in this deployment.", {
-            status: 501,
-            headers: { "content-type": "text/plain; charset=utf-8" }
+          const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
+          if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+            return new Response("WebSocket upgrade required for terminal attach.", {
+              status: 426,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
+          const container = await startSessionContainer(sessionId);
+          if (container && typeof container.fetch === "function") {
+            const runtimeSecrets = await service.getSystemRuntimeSecrets(runtimeAccess.session.id);
+            await applyRuntimeBootstrapToContainer(container, runtimeAccess.session, runtimeSecrets);
+            if (runtimeAccess.session?.lastRestoredSnapshotId) {
+              await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
+            }
+            return container.fetch(createRuntimeTerminalRequest(request, sessionId));
+          }
+          const bridge = createRuntimeSshBridge(sessionId);
+          if (!bridge?.client) {
+            return new Response("Runtime WebSocket support is unavailable in this deployment.", {
+              status: 501,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
+          return new Response(null, {
+            status: 101,
+            webSocket: bridge.client
           });
-        }
-        return new Response(null, {
-          status: 101,
-          webSocket: bridge.client
-        });
-      })
+        })
+      )
     },
     {
       method: "GET",
       pattern: "/runtime/sessions/:sessionId/ssh",
-      handler: withErrorHandling(async (request, { sessionId }) => {
-        const url = new URL(request.url);
-        const token = url.searchParams.get("token");
-        if (!token) {
-          return unauthorized("Runtime token missing");
-        }
-        const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
-        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-          return new Response("WebSocket upgrade required for SSH attach.", {
-            status: 426,
-            headers: { "content-type": "text/plain; charset=utf-8" }
-          });
-        }
-        const container = await startSessionContainer(sessionId);
-        if (container && typeof container.fetch === "function") {
-          await applyRuntimeBootstrapToContainer(container, runtimeAccess.session);
-          if (runtimeAccess.session?.lastRestoredSnapshotId) {
-            await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
+      handler: withRateLimit(
+        {
+          scope: "runtime-ssh",
+          limit: 12,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { sessionId }) => {
+          const url = new URL(request.url);
+          const token = url.searchParams.get("token");
+          if (!token) {
+            return unauthorized("Runtime token missing");
           }
-          return container.fetch(createRuntimeSshRequest(request, sessionId));
-        }
-        const bridge = createRuntimeSshBridge(sessionId);
-        if (!bridge?.client) {
-          return new Response("Runtime WebSocket support is unavailable in this deployment.", {
-            status: 501,
-            headers: { "content-type": "text/plain; charset=utf-8" }
+          const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
+          if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+            return new Response("WebSocket upgrade required for SSH attach.", {
+              status: 426,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
+          const container = await startSessionContainer(sessionId);
+          if (container && typeof container.fetch === "function") {
+            const runtimeSecrets = await service.getSystemRuntimeSecrets(runtimeAccess.session.id);
+            await applyRuntimeBootstrapToContainer(container, runtimeAccess.session, runtimeSecrets);
+            if (runtimeAccess.session?.lastRestoredSnapshotId) {
+              await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
+            }
+            return container.fetch(createRuntimeSshRequest(request, sessionId));
+          }
+          const bridge = createRuntimeSshBridge(sessionId);
+          if (!bridge?.client) {
+            return new Response("Runtime WebSocket support is unavailable in this deployment.", {
+              status: 501,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
+          return new Response(null, {
+            status: 101,
+            webSocket: bridge.client
           });
-        }
-        return new Response(null, {
-          status: 101,
-          webSocket: bridge.client
-        });
-      })
+        })
+      )
     }
   ];
 

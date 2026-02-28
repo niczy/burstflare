@@ -126,6 +126,31 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["workspace", "set-secret", "api_token", "--value", "super-secret", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const secretOutput = JSON.parse(stdout.data.trim());
+    assert.equal(secretOutput.secret.name, "API_TOKEN");
+
+    stdout.data = "";
+
+    code = await runCli(["workspace", "secrets", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const secretsOutput = JSON.parse(stdout.data.trim());
+    assert.deepEqual(secretsOutput.secrets.map((entry) => entry.name), ["API_TOKEN"]);
+    assert.equal("value" in secretsOutput.secrets[0], false);
+
+    stdout.data = "";
+
     code = await runCli(["auth", "device-start", "--email", "cli@example.com", "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -593,6 +618,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const exported = JSON.parse(await readFile(exportPath, "utf8"));
     assert.equal(exported.export.workspace.id, refreshedConfig.workspaceId);
     assert.equal(exported.export.members.length, 1);
+    assert.equal(exported.export.security.runtimeSecrets[0].name, "API_TOKEN");
+    assert.equal(exported.export.artifacts.templateBundles.length >= 1, true);
 
     stdout.data = "";
 
@@ -747,6 +774,18 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const recoveredConfig = JSON.parse(await readFile(configPath, "utf8"));
     assert.notEqual(recoveredConfig.token, "");
     assert.notEqual(recoveredConfig.refreshToken, "");
+
+    stdout.data = "";
+
+    code = await runCli(["workspace", "delete-secret", "api_token", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const deletedSecret = JSON.parse(stdout.data.trim());
+    assert.equal(deletedSecret.ok, true);
 
     stdout.data = "";
 

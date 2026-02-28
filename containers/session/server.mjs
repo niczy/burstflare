@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -18,6 +18,7 @@ const runtimeState = {
   restoredBytes: 0,
   restoredContentType: null,
   persistedPaths: [],
+  secretNames: [],
   bootstrap: null,
   lastLifecycle: null,
   files: new Map()
@@ -200,6 +201,7 @@ function resetRuntimeState() {
   runtimeState.restoredBytes = 0;
   runtimeState.restoredContentType = null;
   runtimeState.persistedPaths = [];
+  runtimeState.secretNames = [];
   runtimeState.bootstrap = null;
   runtimeState.lastLifecycle = null;
   runtimeState.files.clear();
@@ -207,6 +209,12 @@ function resetRuntimeState() {
 
 function applyRuntimeBootstrap(payload) {
   const persistedPaths = getEditorScope(payload?.persistedPaths || runtimeState.persistedPaths);
+  const runtimeSecrets =
+    payload?.runtimeSecrets && typeof payload.runtimeSecrets === "object" && !Array.isArray(payload.runtimeSecrets)
+      ? payload.runtimeSecrets
+      : {};
+  const runtimeSecretNames = Object.keys(runtimeSecrets).sort();
+  const secretsEnv = runtimeSecretNames.map((name) => `${name}=${String(runtimeSecrets[name] ?? "")}`).join("\n");
   const bootstrap = {
     sessionId: String(payload?.sessionId || "unknown"),
     workspaceId: payload?.workspaceId || null,
@@ -216,12 +224,23 @@ function applyRuntimeBootstrap(payload) {
     previewUrl: payload?.previewUrl || null,
     lastRestoredSnapshotId: payload?.lastRestoredSnapshotId || null,
     persistedPaths,
+    runtimeSecretNames,
     runtimeVersion: Number.isInteger(payload?.runtimeVersion) ? payload.runtimeVersion : 0,
     bootstrappedAt: new Date().toISOString()
   };
   runtimeState.persistedPaths = persistedPaths;
+  runtimeState.secretNames = runtimeSecretNames;
   runtimeState.bootstrap = bootstrap;
   runtimeState.files.set("/workspace/.burstflare/session.json", JSON.stringify(bootstrap, null, 2));
+  if (runtimeSecretNames.length > 0) {
+    try {
+      mkdirSync("/run/burstflare", { recursive: true });
+      writeFileSync("/run/burstflare/secrets.env", `${secretsEnv}\n`, "utf8");
+    } catch (_error) {}
+    runtimeState.files.set("/run/burstflare/secrets.env", `${secretsEnv}\n`);
+  } else {
+    runtimeState.files.delete("/run/burstflare/secrets.env");
+  }
   return {
     ok: true,
     bootstrap
@@ -700,7 +719,8 @@ function runShellCommand(state, command) {
       "USER=dev",
       `HOME=${state.home}`,
       `PWD=${state.cwd}`,
-      `LAST_RESTORED_SNAPSHOT=${runtimeState.restoredSnapshotId || ""}`
+      `LAST_RESTORED_SNAPSHOT=${runtimeState.restoredSnapshotId || ""}`,
+      `BURSTFLARE_RUNTIME_SECRET_COUNT=${runtimeState.secretNames.length}`
     ].join("\n");
   }
 

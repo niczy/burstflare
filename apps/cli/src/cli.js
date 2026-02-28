@@ -165,6 +165,9 @@ function helpText() {
     "workspace set-role <userId> --role viewer",
     "workspace plan <free|pro|enterprise>",
     "workspace quota-overrides [--max-running-sessions 5] [--max-storage-bytes 1048576] [--clear]",
+    "workspace secrets",
+    "workspace set-secret <NAME> --value super-secret",
+    "workspace delete-secret <NAME>",
     "template create <name> [--description ...]",
     "template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
     "template promote <templateId> <versionId>",
@@ -664,6 +667,47 @@ export async function runCli(argv, dependencies = {}) {
             method: "POST",
             headers: headers(undefined),
             body: JSON.stringify(payload)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "secrets") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/secrets`,
+          {
+            headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "set-secret") {
+        const name = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/secrets`,
+          {
+            method: "POST",
+            headers: headers(undefined),
+            body: JSON.stringify({
+              name,
+              value: options.value
+            })
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "delete-secret") {
+        const name = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/secrets/${encodeURIComponent(name)}`,
+          {
+            method: "DELETE",
+            headers: headers(undefined, false)
           }
         );
         print(stdout, JSON.stringify(data, null, 2));
