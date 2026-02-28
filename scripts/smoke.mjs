@@ -86,7 +86,7 @@ async function waitForBuildReady(baseUrl, headers, buildId) {
 
 async function main() {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
-  await waitForHealthy(baseUrl);
+  const health = await waitForHealthy(baseUrl);
 
   const email = `smoke-${Date.now()}@example.com`;
   const register = await requestJson(baseUrl, "/api/auth/register", {
@@ -137,6 +137,12 @@ async function main() {
   });
 
   const buildResult = await waitForBuildReady(baseUrl, authHeaders, version.build.id);
+  const buildArtifact = await requestJson(baseUrl, `/api/template-builds/${version.build.id}/artifact`, {
+    headers: authHeaders
+  });
+  if (!buildArtifact.imageReference || !buildArtifact.imageDigest) {
+    throw new Error("Build artifact did not include OCI-style image metadata");
+  }
 
   const promoted = await requestJson(baseUrl, `/api/templates/${template.template.id}/promote`, {
     method: "POST",
@@ -145,6 +151,9 @@ async function main() {
       versionId: version.templateVersion.id
     })
   });
+  if (promoted.release?.binding?.imageReference !== buildArtifact.imageReference) {
+    throw new Error("Release binding imageReference did not match the build artifact");
+  }
 
   const session = await requestJson(baseUrl, "/api/sessions", {
     method: "POST",
@@ -164,6 +173,44 @@ async function main() {
   }
   if (started.runtime && started.runtime.status !== "running") {
     throw new Error(`Runtime did not start correctly (status=${started.runtime.status})`);
+  }
+  const sshToken = await requestJson(baseUrl, `/api/sessions/${session.session.id}/ssh-token`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  if (!String(sshToken.sshCommand || "").includes("ssh -p 2222 dev@127.0.0.1")) {
+    throw new Error("SSH command did not include the native SSH tunnel attach");
+  }
+
+  let previewChecked = false;
+  let editorChecked = false;
+  if (health.runtime?.containersEnabled) {
+    const previewResponse = await fetch(`${baseUrl}/runtime/sessions/${session.session.id}/preview`, {
+      headers: authHeaders
+    });
+    if (!previewResponse.ok) {
+      throw new Error(`Preview route failed (${previewResponse.status})`);
+    }
+    const previewHtml = await previewResponse.text();
+    if (!previewHtml.includes(session.session.id)) {
+      throw new Error("Preview HTML did not contain the session id");
+    }
+    previewChecked = true;
+
+    const editorResponse = await fetch(
+      `${baseUrl}/runtime/sessions/${session.session.id}/editor?path=${encodeURIComponent("/workspace/notes.txt")}`,
+      {
+        headers: authHeaders
+      }
+    );
+    if (!editorResponse.ok) {
+      throw new Error(`Editor route failed (${editorResponse.status})`);
+    }
+    const editorHtml = await editorResponse.text();
+    if (!editorHtml.includes("Workspace Editor")) {
+      throw new Error("Editor HTML did not render");
+    }
+    editorChecked = true;
   }
 
   const listed = await requestJson(baseUrl, "/api/sessions", {
@@ -187,6 +234,9 @@ async function main() {
   if (stopped.runtime && stopped.runtime.status !== "sleeping") {
     throw new Error(`Runtime did not stop correctly (status=${stopped.runtime.status})`);
   }
+  if (health.runtime?.containersEnabled && stopped.runtime?.lastLifecyclePhase !== "sleep") {
+    throw new Error("Runtime stop did not record the lifecycle phase");
+  }
 
   const restarted = await requestJson(baseUrl, `/api/sessions/${session.session.id}/restart`, {
     method: "POST",
@@ -208,6 +258,9 @@ async function main() {
   if (detail.session.runtime && detail.session.runtime.status !== "running") {
     throw new Error(`Session detail runtime did not report running (status=${detail.session.runtime.status})`);
   }
+  if (health.runtime?.containersEnabled && !detail.session.runtime?.lastBootstrapAt) {
+    throw new Error("Session detail runtime did not expose bootstrap analytics");
+  }
 
   const snapshot = await requestJson(baseUrl, `/api/sessions/${session.session.id}/snapshots`, {
     method: "POST",
@@ -228,9 +281,13 @@ async function main() {
         email,
         authSessions: authSessions.sessions.length,
         buildStatus: buildResult.build.status,
+        buildImageReference: buildArtifact.imageReference,
         processedBuilds: buildResult.processed,
         activeVersionId: promoted.activeVersion.id,
         sessionState: started.session.state,
+        sshCommand: sshToken.sshCommand,
+        previewChecked,
+        editorChecked,
         stoppedState: stopped.session.state,
         restartedState: restarted.session.state,
         detailState: detail.session.state,

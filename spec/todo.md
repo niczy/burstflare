@@ -255,24 +255,21 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 18: Beta Readiness, Docs, And Production Rollout
 
-- Status: not complete
+- Status: complete
 - Done:
   - baseline synthetic smoke coverage exists for auth, build, session, snapshot, and report flows
   - synthetic smoke coverage now includes start, list, stop, restart, and detail validation for session lifecycle
   - production and staging deployment modes are now separated in the Cloudflare tooling
-- Remaining:
-  - operator runbooks
-  - incident procedures
-  - staging-to-production rollout checklist
-  - fuller synthetic smoke coverage across the remaining runtime and operator edge cases
-  - limited beta onboarding plan
-  - narrowing feature flags to the supported beta scope
+  - synthetic smoke coverage now validates build artifact image metadata and the SSH tunnel contract
+  - synthetic smoke coverage now conditionally validates preview and editor routes when runtime containers are enabled
+  - `spec/runbook.md` now defines operator runbooks, incident procedures, and the staging-to-production rollout checklist
+  - `spec/runbook.md` now defines the limited beta onboarding plan and the current supported beta scope
 
 ## 3. Recommended Next Execution Order
 
-1. Finish PR 12 and PR 14 first, then close the remaining PR 10 concurrency/reconciliation gap. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
-2. Then finish the remaining PR 08 builder work plus PR 15, PR 16, and PR 17 so the platform has real execution, enforcement, cleanup, and security controls.
-3. Finish PR 18 last, once the runtime and platform guarantees are stable.
+1. Finish PR 15, PR 16, and PR 17 next. The largest remaining gaps are now quota enforcement, operator recovery depth, and security hardening.
+2. After that, tighten the earlier mostly-complete product surfaces in PR 04, PR 05, PR 06, and PR 07.
+3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
 
 ## 4. CI And Test Work Still Needed
 

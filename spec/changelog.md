@@ -1223,3 +1223,21 @@ This file records what has already been implemented in the repository and what h
   - starting a public session records `lastBootstrapAt` and `lastBootstrapState = running`
   - preview now exposes the bootstrap file path in the runtime-rendered container HTML
   - stopping a public session records and persists `lastLifecyclePhase = sleep` and `lastLifecycleReason = session_stop`
+
+## 79. Beta Runbook And Expanded Smoke Coverage
+
+- Added `spec/runbook.md` as the current beta operations guide.
+- The runbook now includes:
+  - supported beta scope
+  - daily operator checks
+  - auth, build, runtime, and storage incident procedures
+  - staging-to-production rollout checklist
+  - limited beta onboarding guidance
+  - recovery defaults
+- Expanded `scripts/smoke.mjs` so the synthetic flow now also verifies:
+  - build artifact OCI-style image metadata
+  - release binding image metadata parity
+  - SSH tunnel command shape
+  - runtime lifecycle analytics when containers are enabled
+  - preview and editor route availability when containers are enabled
+- Verified the updated smoke flow locally against the dev server.
