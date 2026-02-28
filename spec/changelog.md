@@ -1,0 +1,120 @@
+# BurstFlare Implementation Changelog
+
+Status as of February 28, 2026.
+
+This file records what has already been implemented in the repository and what has been verified in the live Cloudflare environment.
+
+## 1. Product Spec Baseline
+
+- Wrote the product overview in `spec/overview.md`.
+- Wrote the Cloudflare-native architecture in `spec/architecture.md`.
+- Wrote the staged PR execution plan in `spec/plan.md`.
+
+## 2. Monorepo And Tooling Scaffold
+
+- Created the top-level project structure for `apps/edge`, `apps/web`, `apps/cli`, `packages/shared`, `infra`, `scripts`, and `test`.
+- Added root `package.json` scripts for development, build, test, CI, and Cloudflare ops.
+- Added a baseline GitHub Actions CI workflow for lint, build, and tests.
+- Added Wrangler configuration and generated-config support for deploys.
+
+## 3. Shared Domain And Local Control Plane
+
+- Implemented the shared service layer for:
+  - accounts and tokens
+  - workspace membership and role changes
+  - device authorization flow
+  - templates and template versions
+  - template builds and release records
+  - sessions and lifecycle transitions
+  - usage events, quotas, and audit logs
+- Added a local file-backed and in-memory data path so the app can run outside Cloudflare.
+
+## 4. Web App And CLI Baseline
+
+- Implemented the web UI served by the Worker.
+- Implemented the `burstflare` CLI with auth and session-oriented commands.
+- Added device-flow support between the web app and CLI.
+- Added basic dashboard and management surfaces for templates, builds, sessions, and preview access.
+
+## 5. Initial Data Model And Migrations
+
+- Added the first D1 migration set in `infra/migrations/0001_init.sql`.
+- Added a follow-up migration in `infra/migrations/0002_cloudflare_state.sql`.
+- Added migration tooling and automation scripts to apply migrations against Cloudflare D1.
+
+## 6. Expanded Control-Plane Workflows
+
+- Added workspace invite creation and acceptance.
+- Added workspace switching and role updates.
+- Added workspace plan updates.
+- Added queued template-build records, build processing, and build retry flows.
+- Added template promotion with release tracking.
+- Expanded session lifecycle tracking across `created`, `starting`, `running`, `stopping`, `sleeping`, and `deleted`.
+- Added runtime-token checks tied to a specific session.
+
+## 7. Worker Refactor For Real Cloudflare Bindings
+
+- Split the edge router into a shared app layer and a Worker entry layer.
+- Added separate store implementations for:
+  - Node-only local state
+  - memory-backed tests
+  - Cloudflare-compatible persistence
+- Removed Node-only dependencies from the Worker runtime path so the app can deploy cleanly on Cloudflare.
+
+## 8. Cloudflare Provisioning Automation
+
+- Added scripts to verify Cloudflare credentials and configuration.
+- Added scripts to provision required resources from local automation.
+- Added scripts to generate deployable Wrangler config from local environment state.
+- Added scripts to run D1 migrations and verify deployment readiness.
+
+## 9. Real Cloudflare Resources Provisioned
+
+- Provisioned the primary D1 database.
+- Provisioned KV namespaces for auth/session-style state and cache use.
+- Provisioned R2 buckets for templates, snapshots, and build logs.
+- Provisioned queues for build processing and reconciliation work.
+
+## 10. Live Worker Deployment
+
+- Deployed the Worker to Cloudflare at `burstflare.nicholas-zhaoyu.workers.dev`.
+- Verified the live `/api/health` endpoint remotely.
+- Verified live registration against the deployed Worker.
+
+## 11. Container Runtime Wiring
+
+- Added the Cloudflare Containers dependency.
+- Added the session container image in `containers/session/Dockerfile`.
+- Added the container HTTP service in `containers/session/server.mjs`.
+- Added conditional Wrangler generation for:
+  - Durable Object bindings
+  - Durable Object migrations
+  - container bindings
+- Added container-aware session start and preview proxy logic in the Worker.
+
+## 12. Live Container Deploy And Smoke Validation
+
+- Built and deployed the session container image through Wrangler.
+- Confirmed the live Worker is deployed with container bindings enabled.
+- Verified the live `/api/health` response reports `containersEnabled: true`.
+- Ran an end-to-end smoke flow against the public Worker:
+  - register a user
+  - create a template
+  - add a template version
+  - process the build
+  - promote the version
+  - create a session
+  - start the session
+  - fetch the preview route
+- Confirmed the preview response comes from the running container path.
+
+## 13. Current State
+
+- The project is now a working, deployable Cloudflare-backed control plane with:
+  - web UI
+  - CLI
+  - live Worker deployment
+  - provisioned D1, KV, R2, and Queue resources
+  - a container-backed preview path
+- The system is not yet at the full production-beta scope described in `spec/plan.md`.
+- The remaining work is tracked in `spec/todo.md`.
