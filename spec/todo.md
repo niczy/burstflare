@@ -104,9 +104,9 @@ This file lists the remaining work required to close the gap between the current
   - authenticated bundle upload endpoint
   - authenticated bundle download endpoint
   - R2-backed template-bundle storage
+  - manifest validation and upload size limits
 - Remaining:
   - signed R2 upload URLs
-  - manifest validation and size-limit enforcement
   - admin-grade template management UX
 
 ### PR 08: Async Build Pipeline With Queues And Workflows

@@ -122,11 +122,27 @@ test("service covers invites, queued builds, releases, session events, usage, an
   });
   assert.equal(version.build.status, "queued");
   assert.deepEqual(queuedBuilds, [version.build.id]);
+  await assert.rejects(
+    () =>
+      service.addTemplateVersion(owner.token, template.template.id, {
+        version: "invalid",
+        manifest: { image: "registry.cloudflare.com/test/node-dev:invalid", features: ["invalid-feature"] }
+      }),
+    /Unsupported manifest feature/
+  );
   const uploaded = await service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
     body: "console.log('bundle');",
     contentType: "application/javascript"
   });
   assert.equal(uploaded.bundle.bytes, 22);
+  await assert.rejects(
+    () =>
+      service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
+        body: "x".repeat(300_000),
+        contentType: "application/octet-stream"
+      }),
+    /Bundle exceeds size limit/
+  );
   assert.equal(objects.readBundleText(version.templateVersion.id), "console.log('bundle');");
   const bundle = await service.getTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id);
   assert.equal(new TextDecoder().decode(bundle.body), "console.log('bundle');");

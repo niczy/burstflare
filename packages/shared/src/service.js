@@ -6,6 +6,9 @@ const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const REFRESH_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const RUNTIME_TOKEN_TTL_MS = 1000 * 60 * 15;
 const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
+const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
+const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
 
 const PLANS = {
   free: {
@@ -85,6 +88,26 @@ function canManageWorkspace(role) {
 
 function canWrite(role) {
   return role === "owner" || role === "admin" || role === "member";
+}
+
+function validateTemplateManifest(manifest) {
+  ensure(manifest && typeof manifest === "object" && !Array.isArray(manifest), "Manifest must be an object");
+  ensure(typeof manifest.image === "string" && manifest.image.trim(), "Manifest image is required");
+
+  if (manifest.features !== undefined) {
+    ensure(Array.isArray(manifest.features), "Manifest features must be an array");
+    for (const feature of manifest.features) {
+      ensure(ALLOWED_TEMPLATE_FEATURES.has(feature), `Unsupported manifest feature: ${feature}`);
+    }
+  }
+
+  if (manifest.persistedPaths !== undefined) {
+    ensure(Array.isArray(manifest.persistedPaths), "Manifest persistedPaths must be an array");
+    ensure(manifest.persistedPaths.length <= 8, "Manifest persistedPaths exceeds limit");
+    for (const entry of manifest.persistedPaths) {
+      ensure(typeof entry === "string" && entry.startsWith("/"), "Persisted paths must be absolute");
+    }
+  }
 }
 
 function findUserByEmail(state, email) {
@@ -909,6 +932,7 @@ export function createBurstFlareService(options = {}) {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
         ensure(version, "Version is required");
+        validateTemplateManifest(manifest);
         ensure(
           !state.templateVersions.some((entry) => entry.templateId === templateId && entry.version === version),
           "Version already exists"
@@ -969,6 +993,7 @@ export function createBurstFlareService(options = {}) {
 
         const bundleBody = toUint8Array(body);
         ensure(bundleBody.byteLength > 0, "Bundle body is required");
+        ensure(bundleBody.byteLength <= MAX_TEMPLATE_BUNDLE_BYTES, "Bundle exceeds size limit", 413);
 
         templateVersion.bundleKey =
           templateVersion.bundleKey ||
@@ -1437,6 +1462,7 @@ export function createBurstFlareService(options = {}) {
 
         const snapshotBody = toUint8Array(body);
         ensure(snapshotBody.byteLength > 0, "Snapshot body is required");
+        ensure(snapshotBody.byteLength <= MAX_SNAPSHOT_BYTES, "Snapshot exceeds size limit", 413);
 
         snapshot.uploadedAt = nowIso(clock);
         snapshot.contentType = contentType;

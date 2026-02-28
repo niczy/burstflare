@@ -136,6 +136,19 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(version.data.build.status, "queued");
   assert.deepEqual(queuedBuilds, [{ type: "build", buildId: version.data.build.id }]);
 
+  const invalidVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      version: "invalid",
+      manifest: {
+        image: "registry.cloudflare.com/test/python-dev:invalid",
+        features: ["invalid-feature"]
+      }
+    })
+  });
+  assert.equal(invalidVersion.response.status, 400);
+
   const bundleBody = "print('hello from bundle')";
   const bundleUpload = await requestJson(app, `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`, {
     method: "PUT",
@@ -147,6 +160,20 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(bundleUpload.response.status, 200);
   assert.equal(bundleUpload.data.bundle.contentType, "text/x-python");
+
+  const oversizedBundle = await requestJson(
+    app,
+    `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`,
+    {
+      method: "PUT",
+      headers: {
+        ...ownerHeaders,
+        "content-type": "application/octet-stream"
+      },
+      body: "x".repeat(300_000)
+    }
+  );
+  assert.equal(oversizedBundle.response.status, 413);
 
   const downloadedBundle = await app.fetch(
     new Request(`http://example.test/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`, {

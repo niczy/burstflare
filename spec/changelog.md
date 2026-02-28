@@ -232,3 +232,15 @@ This file records what has already been implemented in the repository and what h
   - delete a session
   - enqueue reconcile
   - return `404` for both the purged session record and its snapshot artifact after cleanup
+
+## 24. Manifest Validation And Upload Limits
+
+- Added template-manifest validation for:
+  - required image field
+  - supported feature names
+  - persisted-path structure and count
+- Added template-bundle size limits.
+- Added snapshot-content size limits.
+- Verified the live Worker returns:
+  - `400` for invalid manifest features
+  - `413` for oversized template-bundle uploads
