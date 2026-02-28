@@ -2654,6 +2654,7 @@ export function createBurstFlareService(options = {}) {
           runtimeStatus: null,
           runtimeState: null,
           runtimeUpdatedAt: null,
+          persistedPaths: [...(activeVersion.manifest?.persistedPaths || [])],
           sleepTtlSeconds: activeVersion.manifest?.sleepTtlSeconds || null,
           previewUrl: null
         };

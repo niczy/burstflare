@@ -1382,7 +1382,8 @@ test("worker replays restored snapshots into the container runtime on session st
   const version = await service.addTemplateVersion(owner.token, template.template.id, {
     version: "1.0.0",
     manifest: {
-      image: "registry.cloudflare.com/example/runtime-restore:1.0.0"
+      image: "registry.cloudflare.com/example/runtime-restore:1.0.0",
+      persistedPaths: ["/workspace/project"]
     }
   });
   await service.processTemplateBuildById(version.build.id);
@@ -1434,11 +1435,26 @@ test("worker replays restored snapshots into the container runtime on session st
   assert.equal(started.data.runtimeRestore.snapshotId, snapshot.data.snapshot.id);
   assert.equal(appliedRestores.length, 1);
   assert.equal(appliedRestores[0].snapshotId, snapshot.data.snapshot.id);
+  assert.deepEqual(appliedRestores[0].persistedPaths, ["/workspace/project"]);
   assert.equal(Buffer.from(appliedRestores[0].contentBase64, "base64").toString("utf8"), payloadText);
 });
 
 test("worker auto-captures snapshot content from a running container", async () => {
-  const autosavePayload = "container autosave payload";
+  const autosavePayload = JSON.stringify(
+    {
+      format: "burstflare.snapshot.v2",
+      persistedPaths: ["/workspace/project"],
+      files: [
+        {
+          path: "/workspace/project/notes.txt",
+          content: "container autosave payload"
+        }
+      ]
+    },
+    null,
+    2
+  );
+  const exportRequests = [];
   let runtime = {
     desiredState: "stopped",
     status: "idle",
@@ -1469,9 +1485,10 @@ test("worker auto-captures snapshot content from a running container", async () 
         async fetch(request) {
           const url = new URL(request.url);
           if (url.pathname === "/snapshot/export") {
+            exportRequests.push(JSON.parse(await request.text()));
             return new Response(autosavePayload, {
               headers: {
-                "content-type": "text/plain; charset=utf-8"
+                "content-type": "application/vnd.burstflare.snapshot+json; charset=utf-8"
               }
             });
           }
@@ -1492,7 +1509,8 @@ test("worker auto-captures snapshot content from a running container", async () 
   const version = await service.addTemplateVersion(owner.token, template.template.id, {
     version: "1.0.0",
     manifest: {
-      image: "registry.cloudflare.com/example/runtime-autosave:1.0.0"
+      image: "registry.cloudflare.com/example/runtime-autosave:1.0.0",
+      persistedPaths: ["/workspace/project"]
     }
   });
   await service.processTemplateBuildById(version.build.id);
@@ -1524,6 +1542,8 @@ test("worker auto-captures snapshot content from a running container", async () 
   assert.equal(snapshot.response.status, 200);
   assert.equal(snapshot.data.snapshot.bytes, autosavePayload.length);
   assert.equal(snapshot.data.runtimeCapture.bytes, autosavePayload.length);
+  assert.equal(exportRequests.length, 1);
+  assert.deepEqual(exportRequests[0].persistedPaths, ["/workspace/project"]);
 
   const content = await app.fetch(
     new Request(`http://example.test/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content`, {
@@ -1531,7 +1551,10 @@ test("worker auto-captures snapshot content from a running container", async () 
     })
   );
   assert.equal(content.status, 200);
-  assert.equal(await content.text(), autosavePayload);
+  const parsed = JSON.parse(await content.text());
+  assert.equal(parsed.format, "burstflare.snapshot.v2");
+  assert.deepEqual(parsed.persistedPaths, ["/workspace/project"]);
+  assert.equal(parsed.files[0].path, "/workspace/project/notes.txt");
 });
 
 test("preview route rehydrates the restored snapshot before proxying", async () => {

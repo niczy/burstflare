@@ -11,7 +11,6 @@ This file lists the remaining work required to close the gap between the current
 - Finish the remaining distributed locking and reconciliation work around the Durable Object-backed session state machine.
 - Replace the current container-backed shell bridge with a standards-compliant `sshd`-backed SSH proxy.
 - Replace the current lightweight browser terminal with a richer container-native terminal/editor surface (`ttyd`, `code-server`, or equivalent).
-- Implement real container-side snapshot upload, restore, and persisted-path behavior for running containers.
 
 ## 2. PR Plan Status
 
@@ -203,7 +202,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 14: Workspace Snapshots, Persisted Paths, And Restore
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - snapshot create/list metadata
   - snapshot content upload and download routes
@@ -218,8 +217,7 @@ This file lists the remaining work required to close the gap between the current
   - running-session snapshot restore now applies into the live container runtime
   - session start/restart now replay the last restored snapshot into the container runtime
   - snapshot creation on running sessions now auto-captures runtime state into snapshot storage
-- Remaining:
-  - broader persisted-path-aware snapshot capture/restore instead of the current runtime-level snapshot payload
+  - persisted-path-aware runtime snapshot capture and restore now use a structured snapshot envelope and filter restored files to the template's allowed persisted paths
 
 ### PR 15: Usage Metering, Quotas, And Plan Enforcement
 

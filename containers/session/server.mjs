@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const port = Number(process.env.PORT || 8080);
 const textEncoder = new TextEncoder();
@@ -11,6 +12,7 @@ const runtimeState = {
   restoredAt: null,
   restoredBytes: 0,
   restoredContentType: null,
+  persistedPaths: [],
   files: new Map()
 };
 
@@ -27,22 +29,139 @@ function readRequestBody(req) {
   });
 }
 
+function normalizePersistedPaths(persistedPaths = []) {
+  const values = Array.isArray(persistedPaths) ? persistedPaths : [];
+  const normalized = [];
+  for (const entry of values) {
+    const value = String(entry || "").trim();
+    if (!value) {
+      continue;
+    }
+    const full = value.startsWith("/") ? value : `/${value}`;
+    const safe = path.posix.normalize(full);
+    if (!safe.startsWith("/")) {
+      continue;
+    }
+    if (!normalized.includes(safe)) {
+      normalized.push(safe);
+    }
+  }
+  return normalized;
+}
+
+function isWithinPersistedPaths(filePath, persistedPaths) {
+  if (!filePath || !Array.isArray(persistedPaths) || persistedPaths.length === 0) {
+    return false;
+  }
+  return persistedPaths.some((basePath) => filePath === basePath || filePath.startsWith(`${basePath}/`));
+}
+
+function normalizeRuntimeFilePath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const full = raw.startsWith("/") ? raw : `/${raw}`;
+  const normalized = path.posix.normalize(full);
+  if (!normalized.startsWith("/")) {
+    return null;
+  }
+  return normalized;
+}
+
+function parseSnapshotEnvelope(raw, contentType, persistedPaths) {
+  const normalizedPaths = normalizePersistedPaths(persistedPaths);
+  const isJsonLike =
+    String(contentType || "").includes("json") ||
+    String(contentType || "").includes("burstflare.snapshot+json");
+  if (!isJsonLike) {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.toString("utf8"));
+  } catch (_error) {
+    return null;
+  }
+
+  if (!parsed || parsed.format !== "burstflare.snapshot.v2" || !Array.isArray(parsed.files)) {
+    return null;
+  }
+
+  const files = [];
+  for (const entry of parsed.files) {
+    const filePath = normalizeRuntimeFilePath(entry?.path);
+    if (!filePath || !isWithinPersistedPaths(filePath, normalizedPaths)) {
+      continue;
+    }
+    const content = typeof entry?.content === "string" ? entry.content : "";
+    files.push({
+      path: filePath,
+      content
+    });
+  }
+
+  return {
+    persistedPaths: normalizedPaths,
+    files
+  };
+}
+
+function createSnapshotEnvelope(sessionId = "unknown", persistedPaths = []) {
+  const normalizedPaths = normalizePersistedPaths(persistedPaths);
+  const files = Array.from(runtimeState.files.entries())
+    .filter(([filePath]) => isWithinPersistedPaths(filePath, normalizedPaths))
+    .map(([filePath, content]) => ({
+      path: filePath,
+      content
+    }));
+
+  return {
+    format: "burstflare.snapshot.v2",
+    sessionId,
+    exportedAt: new Date().toISOString(),
+    restoredSnapshotId: runtimeState.restoredSnapshotId,
+    restoredAt: runtimeState.restoredAt,
+    persistedPaths: normalizedPaths,
+    files
+  };
+}
+
+function resetPersistedFiles(persistedPaths) {
+  for (const filePath of Array.from(runtimeState.files.keys())) {
+    if (isWithinPersistedPaths(filePath, persistedPaths)) {
+      runtimeState.files.delete(filePath);
+    }
+  }
+}
+
 function applySnapshotRestore(payload) {
   const sessionId = String(payload.sessionId || "unknown");
   const snapshotId = String(payload.snapshotId || "unknown");
   const label = String(payload.label || snapshotId);
   const contentType = String(payload.contentType || "application/octet-stream");
   const raw = fromBase64(payload.contentBase64);
-  const text = raw.toString("utf8");
   const snapshotPath = `/workspace/.burstflare/snapshots/${snapshotId}.snapshot`;
   const aliasPath = "/workspace/.burstflare/last.snapshot";
+  const persistedPaths = normalizePersistedPaths(payload.persistedPaths);
+  const envelope = parseSnapshotEnvelope(raw, contentType, persistedPaths);
+
+  runtimeState.persistedPaths = persistedPaths;
+  resetPersistedFiles(persistedPaths);
 
   runtimeState.restoredSnapshotId = snapshotId;
   runtimeState.restoredAt = new Date().toISOString();
   runtimeState.restoredBytes = raw.byteLength;
   runtimeState.restoredContentType = contentType;
-  runtimeState.files.set(snapshotPath, text);
-  runtimeState.files.set(aliasPath, text);
+  if (envelope) {
+    for (const file of envelope.files) {
+      runtimeState.files.set(file.path, file.content);
+    }
+  }
+  const snapshotBody = envelope ? JSON.stringify(createSnapshotEnvelope(sessionId, persistedPaths), null, 2) : raw.toString("utf8");
+  runtimeState.files.set(snapshotPath, snapshotBody);
+  runtimeState.files.set(aliasPath, snapshotBody);
 
   return {
     ok: true,
@@ -53,35 +172,28 @@ function applySnapshotRestore(payload) {
     aliasPath,
     restoredAt: runtimeState.restoredAt,
     bytes: raw.byteLength,
-    contentType
+    contentType,
+    persistedPaths,
+    restoredPaths: envelope ? envelope.files.map((entry) => entry.path) : []
   };
 }
 
-function exportSnapshotPayload(sessionId = "unknown") {
-  const aliasPath = "/workspace/.burstflare/last.snapshot";
-  const current = runtimeState.files.get(aliasPath);
-  if (current !== undefined) {
-    return {
-      body: Buffer.from(current, "utf8"),
-      contentType: runtimeState.restoredContentType || "text/plain; charset=utf-8"
-    };
-  }
-
-  const fallback = JSON.stringify(
-    {
-      sessionId,
-      exportedAt: new Date().toISOString(),
-      restoredSnapshotId: runtimeState.restoredSnapshotId,
-      restoredAt: runtimeState.restoredAt,
-      cwd: "/workspace"
-    },
-    null,
-    2
-  );
+function exportSnapshotPayload(sessionId = "unknown", persistedPaths = []) {
+  const envelope = createSnapshotEnvelope(sessionId, persistedPaths);
+  const fallback = JSON.stringify(envelope, null, 2);
   return {
     body: Buffer.from(fallback, "utf8"),
-    contentType: "application/json; charset=utf-8"
+    contentType: "application/vnd.burstflare.snapshot+json; charset=utf-8"
   };
+}
+
+function resetRuntimeState() {
+  runtimeState.restoredSnapshotId = null;
+  runtimeState.restoredAt = null;
+  runtimeState.restoredBytes = 0;
+  runtimeState.restoredContentType = null;
+  runtimeState.persistedPaths = [];
+  runtimeState.files.clear();
 }
 
 function renderHtml(req) {
@@ -160,6 +272,7 @@ function renderHtml(req) {
           node: process.version,
           restoredSnapshotId: runtimeState.restoredSnapshotId,
           restoredAt: runtimeState.restoredAt,
+          persistedPaths: runtimeState.persistedPaths,
           restoredFiles: Array.from(runtimeState.files.keys())
         },
         null,
@@ -452,10 +565,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === "/snapshot/export" && req.method === "POST") {
+    const body = await readRequestBody(req);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    const exported = exportSnapshotPayload(
+      payload.sessionId || url.searchParams.get("sessionId") || "unknown",
+      payload.persistedPaths || []
+    );
+    res.writeHead(200, { "content-type": exported.contentType });
+    res.end(exported.body);
+    return;
+  }
+
   if (url.pathname === "/snapshot/export" && req.method === "GET") {
-    const payload = exportSnapshotPayload(url.searchParams.get("sessionId") || "unknown");
-    res.writeHead(200, { "content-type": payload.contentType });
-    res.end(payload.body);
+    const exported = exportSnapshotPayload(url.searchParams.get("sessionId") || "unknown", []);
+    res.writeHead(200, { "content-type": exported.contentType });
+    res.end(exported.body);
     return;
   }
 
@@ -473,6 +598,19 @@ server.on("upgrade", (req, socket) => {
   attachShell(req, socket);
 });
 
-server.listen(port, "0.0.0.0", () => {
-  process.stdout.write(`BurstFlare session container listening on ${port}\n`);
-});
+const isMain = process.argv[1] ? pathToFileURL(process.argv[1]).href === import.meta.url : false;
+
+if (isMain) {
+  server.listen(port, "0.0.0.0", () => {
+    process.stdout.write(`BurstFlare session container listening on ${port}\n`);
+  });
+}
+
+export {
+  applySnapshotRestore,
+  createSnapshotEnvelope,
+  exportSnapshotPayload,
+  normalizePersistedPaths,
+  resetRuntimeState,
+  runtimeState
+};

@@ -894,18 +894,19 @@ export function createApp(options = {}) {
     return new Request(url.toString(), request);
   }
 
-  function createSnapshotRestoreRequest(sessionId, snapshotId, snapshot, content) {
+  function createSnapshotRestoreRequest(session, snapshotId, snapshot, content) {
     const url = new URL("http://runtime.internal/snapshot/restore");
-    url.searchParams.set("sessionId", sessionId);
+    url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
       method: "POST",
       headers: {
         "content-type": "application/json; charset=utf-8"
       },
       body: JSON.stringify({
-        sessionId,
+        sessionId: session.id,
         snapshotId,
         label: snapshot?.label || snapshotId,
+        persistedPaths: Array.isArray(session?.persistedPaths) ? session.persistedPaths : [],
         contentType: content.contentType,
         bytes: content.bytes,
         contentBase64: toBase64(content.body)
@@ -913,20 +914,27 @@ export function createApp(options = {}) {
     });
   }
 
-  function createSnapshotExportRequest(sessionId) {
+  function createSnapshotExportRequest(session) {
     const url = new URL("http://runtime.internal/snapshot/export");
-    url.searchParams.set("sessionId", sessionId);
+    url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
-      method: "GET"
+      method: "POST",
+      headers: {
+        "content-type": "application/json; charset=utf-8"
+      },
+      body: JSON.stringify({
+        sessionId: session.id,
+        persistedPaths: Array.isArray(session?.persistedPaths) ? session.persistedPaths : []
+      })
     });
   }
 
-  async function applySnapshotContentToRuntime(sessionId, snapshotId, snapshot, content) {
-    const container = getSessionContainer(sessionId);
+  async function applySnapshotContentToRuntime(session, snapshotId, snapshot, content) {
+    const container = getSessionContainer(session.id);
     if (!container || typeof container.fetch !== "function") {
       return null;
     }
-    const response = await container.fetch(createSnapshotRestoreRequest(sessionId, snapshotId, snapshot, content));
+    const response = await container.fetch(createSnapshotRestoreRequest(session, snapshotId, snapshot, content));
     if (!response.ok) {
       const message = await response.text().catch(() => "Snapshot restore failed");
       const error = new Error(message || "Snapshot restore failed");
@@ -941,9 +949,9 @@ export function createApp(options = {}) {
     };
   }
 
-  async function applySnapshotToRuntime(token, sessionId, snapshotId, snapshot) {
-    const content = await service.getSnapshotContent(token, sessionId, snapshotId);
-    return applySnapshotContentToRuntime(sessionId, snapshotId, snapshot, content);
+  async function applySnapshotToRuntime(token, session, snapshotId, snapshot) {
+    const content = await service.getSnapshotContent(token, session.id, snapshotId);
+    return applySnapshotContentToRuntime(session, snapshotId, snapshot, content);
   }
 
   async function applyRuntimeSnapshotHydration(token, session, { runtimeToken = false } = {}) {
@@ -954,7 +962,7 @@ export function createApp(options = {}) {
       ? await service.getRuntimeSnapshotContent(token, session.id, session.lastRestoredSnapshotId)
       : await service.getSnapshotContent(token, session.id, session.lastRestoredSnapshotId);
     return applySnapshotContentToRuntime(
-      session.id,
+      session,
       session.lastRestoredSnapshotId,
       {
         id: session.lastRestoredSnapshotId,
@@ -964,12 +972,12 @@ export function createApp(options = {}) {
     );
   }
 
-  async function captureSnapshotFromRuntime(sessionId) {
-    const container = getSessionContainer(sessionId);
+  async function captureSnapshotFromRuntime(session) {
+    const container = getSessionContainer(session.id);
     if (!container || typeof container.fetch !== "function") {
       return null;
     }
-    const response = await container.fetch(createSnapshotExportRequest(sessionId));
+    const response = await container.fetch(createSnapshotExportRequest(session));
     if (!response.ok) {
       const message = await response.text().catch(() => "Snapshot export failed");
       const error = new Error(message || "Snapshot export failed");
@@ -1954,7 +1962,7 @@ export function createApp(options = {}) {
         const result = await service.createSnapshot(token, sessionId, body);
         const detail = await service.getSession(token, sessionId);
         if (hasContainerBinding() && detail.session.state === "running") {
-          const runtimeCapture = await captureSnapshotFromRuntime(sessionId);
+          const runtimeCapture = await captureSnapshotFromRuntime(detail.session);
           if (runtimeCapture) {
             const uploaded = await service.uploadSnapshotContent(token, sessionId, result.snapshot.id, runtimeCapture);
             result.snapshot = uploaded.snapshot;
@@ -2030,7 +2038,7 @@ export function createApp(options = {}) {
         }
         const result = await service.restoreSnapshot(token, sessionId, snapshotId);
         if (hasContainerBinding() && result.session.state === "running") {
-          const runtimeRestore = await applySnapshotToRuntime(token, sessionId, snapshotId, result.snapshot);
+          const runtimeRestore = await applySnapshotToRuntime(token, result.session, snapshotId, result.snapshot);
           if (runtimeRestore) {
             result.runtimeRestore = runtimeRestore;
           }

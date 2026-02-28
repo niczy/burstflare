@@ -1097,3 +1097,27 @@ This file records what has already been implemented in the repository and what h
   - `POST /api/auth/register` without a Turnstile token now returns `400` with `Turnstile token is required`
   - `POST /api/auth/register` with a bogus token now returns `400` with `invalid-input-response`
 - This closes the remaining PR 03 gap; Turnstile is now active in the production deployment rather than only wired in code.
+
+## 73. Persisted-Path-Aware Runtime Snapshots
+
+- Session records now persist the active template version's `persistedPaths` when the session is created.
+- The session container now restores structured snapshot envelopes (`burstflare.snapshot.v2`) instead of treating every snapshot as an opaque runtime blob.
+- Runtime snapshot restore now:
+  - accepts `persistedPaths` from the Worker
+  - filters restored files to only paths allowed by the session's persisted-path policy
+  - drops files outside the allowed persisted paths
+- Runtime snapshot export now emits a structured JSON envelope with:
+  - `format = burstflare.snapshot.v2`
+  - `persistedPaths`
+  - `files`
+- Running-session autosave now captures that structured envelope from the container, so stored snapshots preserve the persisted-path policy and file list.
+- Added direct container-runtime test coverage for persisted-path filtering.
+- Added Worker test coverage proving:
+  - restore hydration forwards `persistedPaths`
+  - autosave forwards the session's `persistedPaths`
+  - autosaved snapshot content preserves the structured envelope
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - restoring a snapshot containing both allowed and disallowed file paths only rehydrates the allowed persisted file
+  - preview HTML shows the allowed restored file path
+  - preview HTML does not show the blocked file path
+  - autosaved runtime snapshot content preserves both the `persistedPaths` list and the restored persisted file entry
