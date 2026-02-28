@@ -99,6 +99,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /api\/auth\/sessions/);
   assert.match(appScript, /api\/workspaces\/current\/settings/);
   assert.match(appScript, /new WebSocket/);
+  assert.match(appScript, /startAutoRefresh/);
+  assert.match(appScript, /setInterval/);
   assert.match(appScript, /terminalSendButton/);
   assert.match(appScript, /parsePersistedPaths/);
   assert.match(appScript, /refreshSnapshots/);

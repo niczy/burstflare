@@ -574,3 +574,17 @@ This file records what has already been implemented in the repository and what h
 - Verified the live Worker now returns:
   - `buildsBuilding` and `buildsStuck` in `/api/admin/report`
   - `recoveredStuckBuilds` in `/api/admin/reconcile`
+
+## 47. Live Dashboard Auto-Refresh
+
+- Added background polling in the browser shell while an authenticated session is active.
+- The web app now starts a 15-second refresh loop after successful dashboard hydration.
+- Added safeguards to:
+  - avoid overlapping refreshes
+  - stop polling on auth expiration
+  - stop polling on logout and logout-all
+- Added Worker test coverage for the served polling hooks in the browser bundle.
+- Verified the live `app.js` bundle now includes:
+  - `startAutoRefresh`
+  - `stopAutoRefresh`
+  - a `setInterval`-driven 15-second refresh loop

@@ -381,7 +381,9 @@ const state = {
   csrfToken: localStorage.getItem("burstflare_csrf") || "",
   me: null,
   terminalSocket: null,
-  terminalSessionId: ""
+  terminalSessionId: "",
+  refreshTimer: null,
+  refreshPending: false
 };
 
 localStorage.removeItem("burstflare_token");
@@ -430,6 +432,30 @@ function setAuth(refreshToken = state.refreshToken, csrfToken = state.csrfToken)
   } else {
     localStorage.removeItem("burstflare_csrf");
   }
+}
+
+function stopAutoRefresh() {
+  if (state.refreshTimer) {
+    clearInterval(state.refreshTimer);
+    state.refreshTimer = null;
+  }
+}
+
+function startAutoRefresh() {
+  if (state.refreshTimer || (!state.refreshToken && !state.csrfToken)) {
+    return;
+  }
+  state.refreshTimer = setInterval(() => {
+    if (state.refreshPending) {
+      return;
+    }
+    state.refreshPending = true;
+    refresh().catch((error) => {
+      console.error(error);
+    }).finally(() => {
+      state.refreshPending = false;
+    });
+  }, 15000);
 }
 
 function closeTerminal(message = "Not connected") {
@@ -500,6 +526,7 @@ async function refreshAuth() {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    stopAutoRefresh();
     setAuth("", "");
     throw new Error(data.error || "Authentication expired");
   }
@@ -746,6 +773,7 @@ async function refresh() {
     return;
   }
   state.me = await api('/api/auth/me');
+  startAutoRefresh();
   renderIdentity();
   renderMembers(await api('/api/workspaces/current/members'));
   const authSessions = await api('/api/auth/sessions');
@@ -819,6 +847,7 @@ byId("logoutButton").addEventListener("click", async () => {
   } catch (error) {
     console.error(error);
   } finally {
+    stopAutoRefresh();
     setAuth("", "");
     state.me = null;
     renderIdentity();
@@ -837,6 +866,7 @@ byId("logoutAllButton").addEventListener("click", async () => {
   } catch (error) {
     console.error(error);
   } finally {
+    stopAutoRefresh();
     setAuth("", "");
     state.me = null;
     renderIdentity();
@@ -1001,6 +1031,7 @@ byId("reportButton").addEventListener("click", () => perform(async () => {}));
 if (state.refreshToken || state.csrfToken) {
   refresh().catch((error) => {
     console.error(error);
+    stopAutoRefresh();
     setAuth("", "");
     state.me = null;
     renderIdentity();

@@ -180,9 +180,9 @@ This file lists the remaining work required to close the gap between the current
   - browser preview route
   - basic web controls for sessions
   - browser terminal panel wired to the SSH WebSocket bridge
+  - automatic live dashboard refresh while the browser session is active
 - Remaining:
   - richer container-native terminal/editor integration
-  - richer live status updates
   - shared parity with CLI session controls
 
 ### PR 14: Workspace Snapshots, Persisted Paths, And Restore
