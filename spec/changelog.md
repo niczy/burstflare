@@ -1340,3 +1340,27 @@ This file records what has already been implemented in the repository and what h
   - secret list responses expose only metadata
   - admin export includes redacted runtime secret metadata and build artifact inventory
   - repeated `POST /api/sessions/:sessionId/ssh-token` requests now return `429` with `x-burstflare-rate-limit-limit: 12` after the configured threshold
+
+## 84. CLI Ergonomics And Alias Coverage
+
+- The `flare` CLI now supports noun-first aliases for the main control-plane surfaces:
+  - `workspace` defaults to the current workspace summary
+  - `workspaces`
+  - `templates`
+  - `builds`
+  - `releases`
+  - `sessions`
+  - `session up|status|events|start|stop|restart|delete|preview|editor|ssh`
+- `flare` list-style commands now support local filtering for faster operator use:
+  - session lists by `--status` and `--template`
+  - build lists by `--status`
+  - template lists by `--active` or `--archived`
+  - release lists by `--template`
+- Updated CLI help output so the new alias and filtering forms are documented in the shipped command list.
+- Added focused CLI coverage for the alias surface and list filters, including:
+  - workspace current summary
+  - template archive filtering
+  - build status filtering
+  - release filtering by template
+  - session lifecycle via noun-first commands
+- Verified locally with `npm run ci`, including the new CLI alias/filter test coverage.

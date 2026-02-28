@@ -820,8 +820,224 @@ test("cli help uses flare branding", async () => {
 
   assert.equal(code, 0);
   assert.match(stdout.data, /^flare auth register/m);
+  assert.match(stdout.data, /^flare session \[list\]/m);
   assert.doesNotMatch(stdout.data, /burstflare auth register/);
   assert.equal(stderr.data, "");
+});
+
+test("cli supports noun-first aliases and local list filters", async () => {
+  const app = createApp({
+    TEMPLATE_BUCKET: createBucket(),
+    BUILD_BUCKET: createBucket()
+  });
+  const fetchImpl = createFetch(app);
+  const stdout = capture();
+  const stderr = capture();
+  const configPath = path.join(os.tmpdir(), `flare-cli-aliases-${Date.now()}.json`);
+  const bundlePath = path.join(os.tmpdir(), `flare-alias-bundle-${Date.now()}.txt`);
+
+  try {
+    await writeFile(bundlePath, "alias bundle payload");
+
+    let code = await runCli(["auth", "register", "--email", "alias-cli@example.com", "--name", "Alias CLI", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const registered = JSON.parse(stdout.data.trim());
+    const workspaceId = registered.workspace.id;
+    stdout.data = "";
+
+    code = await runCli(["workspace", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const currentWorkspace = JSON.parse(stdout.data.trim());
+    assert.equal(currentWorkspace.workspace.id, workspaceId);
+    stdout.data = "";
+
+    code = await runCli(["template", "create", "alias-active", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const activeTemplate = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(
+      ["template", "upload", activeTemplate.template.id, "--version", "1.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
+    assert.equal(code, 0);
+    const uploadedVersion = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["builds", "--status", "queued", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const queuedBuilds = JSON.parse(stdout.data.trim());
+    assert.equal(queuedBuilds.count, 1);
+    assert.equal(queuedBuilds.filtered, false);
+    stdout.data = "";
+
+    code = await runCli(["build", "process", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["build", "--status", "succeeded", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const succeededBuilds = JSON.parse(stdout.data.trim());
+    assert.equal(succeededBuilds.count, 1);
+    stdout.data = "";
+
+    code = await runCli(["template", "promote", activeTemplate.template.id, uploadedVersion.templateVersion.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["template", "create", "alias-archived", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const archivedTemplate = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["template", "archive", archivedTemplate.template.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    stdout.data = "";
+
+    code = await runCli(["templates", "--active", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const activeTemplates = JSON.parse(stdout.data.trim());
+    assert.deepEqual(activeTemplates.templates.map((entry) => entry.id), [activeTemplate.template.id]);
+    stdout.data = "";
+
+    code = await runCli(["template", "--archived", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const archivedTemplates = JSON.parse(stdout.data.trim());
+    assert.deepEqual(archivedTemplates.templates.map((entry) => entry.id), [archivedTemplate.template.id]);
+    stdout.data = "";
+
+    code = await runCli(["releases", "--template", activeTemplate.template.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const releases = JSON.parse(stdout.data.trim());
+    assert.equal(releases.count, 1);
+    assert.equal(releases.releases[0].templateId, activeTemplate.template.id);
+    stdout.data = "";
+
+    code = await runCli(["session", "up", "alias-session", "--template", activeTemplate.template.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const createdSession = JSON.parse(stdout.data.trim());
+    const sessionId = createdSession.session.id;
+    stdout.data = "";
+
+    code = await runCli(["session", "status", sessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const sessionStatus = JSON.parse(stdout.data.trim());
+    assert.equal(sessionStatus.session.id, sessionId);
+    const runningStatus =
+      sessionStatus.session.runtime?.status || sessionStatus.session.runtimeStatus || sessionStatus.session.status || "running";
+    stdout.data = "";
+
+    code = await runCli(["sessions", "--status", runningStatus, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const runningSessions = JSON.parse(stdout.data.trim());
+    assert.deepEqual(runningSessions.sessions.map((entry) => entry.id), [sessionId]);
+    stdout.data = "";
+
+    code = await runCli(["session", "stop", sessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const stoppedSession = JSON.parse(stdout.data.trim());
+    const stoppedStatus =
+      stoppedSession.session.runtime?.status || stoppedSession.session.runtimeStatus || stoppedSession.session.status || "sleeping";
+    stdout.data = "";
+
+    code = await runCli(["list", "--status", stoppedStatus, "--template", activeTemplate.template.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const sleepingSessions = JSON.parse(stdout.data.trim());
+    assert.deepEqual(sleepingSessions.sessions.map((entry) => entry.id), [sessionId]);
+  } finally {
+    await rm(configPath, { force: true });
+    await rm(bundlePath, { force: true });
+  }
 });
 
 test("cli exposes targeted operator reconcile commands", async () => {

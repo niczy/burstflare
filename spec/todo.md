@@ -78,15 +78,16 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 06: CLI Skeleton And Device Authorization
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - CLI package
   - device-style auth flow
   - auth/session-oriented commands
   - refresh and logout commands
   - automatic token refresh for authenticated CLI requests
-- Remaining:
-  - broader CLI coverage and command ergonomics
+  - noun-first command aliases now exist for workspace, template, build, release, and session workflows
+  - local CLI filters now exist for session, build, template, and release list commands
+  - broader CLI coverage now includes alias and filter flows in the CLI test suite
 
 ### PR 07: Template Catalog CRUD And R2 Storage
 
@@ -265,7 +266,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Tighten the earlier mostly-complete product surfaces in PR 04, PR 06, and PR 07.
+1. Tighten the earlier mostly-complete product surfaces in PR 04 and PR 07.
 2. Treat the optional PR 02 repository-style data-access cleanup as a scale-oriented follow-up, not a blocker for the current beta baseline.
 3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
 

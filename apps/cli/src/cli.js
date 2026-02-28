@@ -119,6 +119,24 @@ function parseIntegerOption(value) {
   return parsed;
 }
 
+function filterCollection(data, key, predicate) {
+  const items = Array.isArray(data?.[key]) ? data[key] : [];
+  const filtered = items.filter(predicate);
+  return {
+    ...data,
+    [key]: filtered,
+    count: filtered.length,
+    filtered: filtered.length !== items.length
+  };
+}
+
+function selectCurrentWorkspace(workspaces, workspaceId) {
+  if (!Array.isArray(workspaces) || workspaces.length === 0) {
+    return null;
+  }
+  return workspaces.find((entry) => entry.id === workspaceId) || workspaces[0];
+}
+
 async function saveAuthConfig(configPath, config, baseUrl, payload) {
   await writeConfig(configPath, {
     ...config,
@@ -157,6 +175,8 @@ function helpText() {
     "auth device-exchange --code device_xxx",
     "auth switch-workspace <workspaceId>",
     "auth whoami",
+    "workspace [current]",
+    "workspaces",
     "workspace list",
     "workspace members",
     "workspace rename <name>",
@@ -168,6 +188,8 @@ function helpText() {
     "workspace secrets",
     "workspace set-secret <NAME> --value super-secret",
     "workspace delete-secret <NAME>",
+    "template [list] [--active|--archived]",
+    "templates",
     "template create <name> [--description ...]",
     "template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
     "template promote <templateId> <versionId>",
@@ -175,16 +197,29 @@ function helpText() {
     "template archive <templateId>",
     "template restore <templateId>",
     "template delete <templateId>",
-    "template list",
-    "build list",
+    "build [list] [--status queued|building|succeeded|failed|dead_lettered]",
+    "builds",
     "build log <buildId>",
     "build artifact <buildId>",
     "build process",
     "build retry <buildId>",
     "build retry-dead-lettered",
-    "release list",
+    "release [list] [--template <templateId>]",
+    "releases",
+    "session [list] [--status running|sleeping|deleted] [--template <templateId>]",
+    "sessions",
+    "session up <name> --template <templateId>",
+    "session status <sessionId>",
+    "session events <sessionId>",
+    "session start <sessionId>",
+    "session stop <sessionId>",
+    "session restart <sessionId>",
+    "session delete <sessionId>",
+    "session preview <sessionId>",
+    "session editor <sessionId>",
+    "session ssh <sessionId>",
     "up <name> --template <templateId>",
-    "list",
+    "list [--status running|sleeping|deleted] [--template <templateId>]",
     "status <sessionId>",
     "events <sessionId>",
     "start <sessionId>",
@@ -225,7 +260,58 @@ export async function runCli(argv, dependencies = {}) {
   let token = getToken(options, config);
   let refreshToken = getRefreshToken(options, config);
   let authConfig = config;
-  const [command = "help", subcommand, ...rest] = positionals;
+  let [command = "help", subcommand, ...rest] = positionals;
+
+  if (command === "workspaces") {
+    command = "workspace";
+    subcommand = subcommand || "list";
+  }
+  if (command === "templates") {
+    command = "template";
+    subcommand = subcommand || "list";
+  }
+  if (command === "builds") {
+    command = "build";
+    subcommand = subcommand || "list";
+  }
+  if (command === "releases") {
+    command = "release";
+    subcommand = subcommand || "list";
+  }
+  if (command === "sessions") {
+    command = "session";
+    subcommand = subcommand || "list";
+  }
+  if (command === "workspace" && !subcommand) {
+    subcommand = "current";
+  }
+  if (command === "template" && !subcommand) {
+    subcommand = "list";
+  }
+  if (command === "build" && !subcommand) {
+    subcommand = "list";
+  }
+  if (command === "release" && !subcommand) {
+    subcommand = "list";
+  }
+  if (command === "session" && !subcommand) {
+    subcommand = "list";
+  }
+  if (command === "session") {
+    if (subcommand === "up") {
+      command = "up";
+      [subcommand, ...rest] = rest;
+    } else if (subcommand === "list") {
+      command = "list";
+      [subcommand, ...rest] = rest;
+    } else if (subcommand === "status" || subcommand === "events" || subcommand === "start" || subcommand === "restart" || subcommand === "delete" || subcommand === "preview" || subcommand === "editor" || subcommand === "ssh") {
+      command = subcommand;
+      [subcommand, ...rest] = rest;
+    } else if (subcommand === "stop" || subcommand === "down") {
+      command = "down";
+      [subcommand, ...rest] = rest;
+    }
+  }
 
   async function rotateAuthTokens() {
     if (!refreshToken) {
@@ -559,6 +645,26 @@ export async function runCli(argv, dependencies = {}) {
     }
 
     if (command === "workspace") {
+      if (subcommand === "current") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces`,
+          {
+            headers: headers(undefined, false)
+          }
+        );
+        print(
+          stdout,
+          JSON.stringify(
+            {
+              workspace: selectCurrentWorkspace(data.workspaces, authConfig.workspaceId || config.workspaceId)
+            },
+            null,
+            2
+          )
+        );
+        return 0;
+      }
+
       if (subcommand === "list") {
         const data = await requestJsonAuthed(
           `${baseUrl}/api/workspaces`,
@@ -844,7 +950,13 @@ export async function runCli(argv, dependencies = {}) {
             headers: headers(undefined, false)
           }
         );
-        print(stdout, JSON.stringify(data, null, 2));
+        let result = data;
+        if (options.archived) {
+          result = filterCollection(data, "templates", (entry) => Boolean(entry.archivedAt));
+        } else if (options.active) {
+          result = filterCollection(data, "templates", (entry) => !entry.archivedAt);
+        }
+        print(stdout, JSON.stringify(result, null, 2));
         return 0;
       }
 
@@ -870,7 +982,8 @@ export async function runCli(argv, dependencies = {}) {
             headers: headers(undefined, false)
           }
         );
-        print(stdout, JSON.stringify(data, null, 2));
+        const result = options.status ? filterCollection(data, "builds", (entry) => entry.status === options.status) : data;
+        print(stdout, JSON.stringify(result, null, 2));
         return 0;
       }
 
@@ -943,7 +1056,8 @@ export async function runCli(argv, dependencies = {}) {
           headers: headers(undefined, false)
         }
       );
-      print(stdout, JSON.stringify(data, null, 2));
+      const result = options.template ? filterCollection(data, "releases", (entry) => entry.templateId === options.template) : data;
+      print(stdout, JSON.stringify(result, null, 2));
       return 0;
     }
 
@@ -976,7 +1090,22 @@ export async function runCli(argv, dependencies = {}) {
           headers: headers(undefined, false)
         }
       );
-      print(stdout, JSON.stringify(data, null, 2));
+      let result = data;
+      if (options.status) {
+        result = filterCollection(
+          result,
+          "sessions",
+          (entry) =>
+            entry.state === options.status ||
+            entry.status === options.status ||
+            entry.runtimeStatus === options.status ||
+            entry.runtime?.status === options.status
+        );
+      }
+      if (options.template) {
+        result = filterCollection(result, "sessions", (entry) => entry.templateId === options.template);
+      }
+      print(stdout, JSON.stringify(result, null, 2));
       return 0;
     }
 
