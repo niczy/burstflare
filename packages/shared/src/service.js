@@ -130,6 +130,24 @@ function getRecoveryCodes(user) {
   return user.recoveryCodes;
 }
 
+function getPasskeys(user) {
+  if (!Array.isArray(user.passkeys)) {
+    user.passkeys = [];
+  }
+  return user.passkeys;
+}
+
+function toPasskeySummary(passkey) {
+  return {
+    id: passkey.id,
+    label: passkey.label || passkey.id,
+    algorithm: passkey.algorithm,
+    createdAt: passkey.createdAt,
+    lastUsedAt: passkey.lastUsedAt || null,
+    transports: Array.isArray(passkey.transports) ? [...passkey.transports] : []
+  };
+}
+
 function createRecoveryCode() {
   const raw = globalThis.crypto.randomUUID().replace(/-/g, "").toUpperCase();
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
@@ -137,6 +155,18 @@ function createRecoveryCode() {
 
 function findUserById(state, userId) {
   return state.users.find((user) => user.id === userId) || null;
+}
+
+function formatUser(user) {
+  if (!user) {
+    return null;
+  }
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    createdAt: user.createdAt
+  };
 }
 
 function getUserWorkspace(state, userId) {
@@ -736,7 +766,7 @@ export function createBurstFlareService(options = {}) {
         });
 
         return {
-          user,
+          user: formatUser(user),
           workspace: formatWorkspace(state, workspace, "owner"),
           authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
@@ -774,7 +804,7 @@ export function createBurstFlareService(options = {}) {
         });
 
         return {
-          user,
+          user: formatUser(user),
           workspace: formatWorkspace(state, workspace, membership.role),
           authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
@@ -843,12 +873,188 @@ export function createBurstFlareService(options = {}) {
         });
 
         return {
-          user,
+          user: formatUser(user),
           workspace: formatWorkspace(state, workspace, membership.role),
           authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
           tokenKind: sessionTokens.accessToken.kind,
           refreshToken: sessionTokens.refreshToken.token
+        };
+      });
+    },
+
+    async beginPasskeyRegistration(token) {
+      return transact(AUTH_SCOPE, (state) => {
+        const auth = requireAuth(state, token, clock);
+        return {
+          user: formatUser(auth.user),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          passkeys: getPasskeys(auth.user).map(toPasskeySummary)
+        };
+      });
+    },
+
+    async registerPasskey(
+      token,
+      { credentialId, label = "", publicKey, publicKeyAlgorithm, transports = [] }
+    ) {
+      return transact(AUTH_SCOPE, (state) => {
+        const auth = requireAuth(state, token, clock);
+        ensure(credentialId, "Passkey credential id is required");
+        ensure(publicKey, "Passkey public key is required");
+        ensure(Number.isInteger(publicKeyAlgorithm), "Passkey algorithm is required");
+        const existingOwner = state.users.find((user) => getPasskeys(user).some((passkey) => passkey.id === credentialId));
+        if (existingOwner && existingOwner.id !== auth.user.id) {
+          const error = new Error("Passkey credential already registered");
+          error.status = 409;
+          throw error;
+        }
+
+        const passkeys = getPasskeys(auth.user);
+        const existing = passkeys.find((entry) => entry.id === credentialId) || null;
+        if (existing) {
+          existing.label = label || existing.label || credentialId;
+          existing.publicKey = publicKey;
+          existing.algorithm = publicKeyAlgorithm;
+          existing.transports = Array.isArray(transports) ? [...new Set(transports.filter(Boolean))] : [];
+        } else {
+          passkeys.push({
+            id: credentialId,
+            label: label || auth.user.name || auth.user.email,
+            publicKey,
+            algorithm: publicKeyAlgorithm,
+            transports: Array.isArray(transports) ? [...new Set(transports.filter(Boolean))] : [],
+            createdAt: nowIso(clock),
+            lastUsedAt: null,
+            signCount: 0
+          });
+        }
+
+        writeAudit(state, clock, {
+          action: existing ? "auth.passkey_updated" : "auth.passkey_registered",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "passkey",
+          targetId: credentialId
+        });
+
+        return {
+          passkeys: passkeys.map(toPasskeySummary)
+        };
+      });
+    },
+
+    async listPasskeys(token) {
+      return transact(AUTH_SCOPE, (state) => {
+        const auth = requireAuth(state, token, clock);
+        return {
+          passkeys: getPasskeys(auth.user).map(toPasskeySummary)
+        };
+      });
+    },
+
+    async deletePasskey(token, credentialId) {
+      return transact(AUTH_SCOPE, (state) => {
+        const auth = requireAuth(state, token, clock);
+        const passkeys = getPasskeys(auth.user);
+        const index = passkeys.findIndex((entry) => entry.id === credentialId);
+        ensure(index >= 0, "Passkey not found", 404);
+        passkeys.splice(index, 1);
+        writeAudit(state, clock, {
+          action: "auth.passkey_deleted",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "passkey",
+          targetId: credentialId
+        });
+        return {
+          ok: true,
+          credentialId,
+          passkeys: passkeys.map(toPasskeySummary)
+        };
+      });
+    },
+
+    async beginPasskeyLogin({ email, workspaceId = null }) {
+      return transact(AUTH_SCOPE, (state) => {
+        ensure(email, "Email is required");
+        const user = findUserByEmail(state, email);
+        ensure(user, "User not found", 404);
+        const workspace = workspaceId
+          ? state.workspaces.find((entry) => entry.id === workspaceId)
+          : getUserWorkspace(state, user.id);
+        ensure(workspace, "Workspace not found", 404);
+        const membership = getMembership(state, user.id, workspace.id);
+        ensure(membership, "Unauthorized workspace", 403);
+        const passkeys = getPasskeys(user);
+        ensure(passkeys.length > 0, "No passkeys registered", 404);
+        return {
+          user: formatUser(user),
+          workspace: formatWorkspace(state, workspace, membership.role),
+          passkeys: passkeys.map(toPasskeySummary)
+        };
+      });
+    },
+
+    async getPasskeyAssertion({ userId, workspaceId, credentialId }) {
+      return transact(AUTH_SCOPE, (state) => {
+        const user = findUserById(state, userId);
+        ensure(user, "User not found", 404);
+        const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
+        ensure(workspace, "Workspace not found", 404);
+        const membership = getMembership(state, user.id, workspace.id);
+        ensure(membership, "Unauthorized workspace", 403);
+        const passkey = getPasskeys(user).find((entry) => entry.id === credentialId);
+        ensure(passkey, "Passkey not found", 404);
+        return {
+          user: formatUser(user),
+          workspace: formatWorkspace(state, workspace, membership.role),
+          passkey: {
+            ...toPasskeySummary(passkey),
+            publicKey: passkey.publicKey
+          }
+        };
+      });
+    },
+
+    async completePasskeyLogin({ userId, workspaceId, credentialId, signCount = null }) {
+      return transact(AUTH_SCOPE, (state) => {
+        const user = findUserById(state, userId);
+        ensure(user, "User not found", 404);
+        const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
+        ensure(workspace, "Workspace not found", 404);
+        const membership = getMembership(state, user.id, workspace.id);
+        ensure(membership, "Unauthorized workspace", 403);
+        const passkey = getPasskeys(user).find((entry) => entry.id === credentialId);
+        ensure(passkey, "Passkey not found", 404);
+
+        passkey.lastUsedAt = nowIso(clock);
+        if (Number.isInteger(signCount) && signCount >= 0) {
+          passkey.signCount = signCount;
+        }
+
+        const sessionTokens = issueSessionTokens(state, clock, {
+          userId: user.id,
+          workspaceId: workspace.id,
+          accessKind: "browser"
+        });
+
+        writeAudit(state, clock, {
+          action: "auth.passkey_login",
+          actorUserId: user.id,
+          workspaceId: workspace.id,
+          targetType: "passkey",
+          targetId: credentialId
+        });
+
+        return {
+          user: formatUser(user),
+          workspace: formatWorkspace(state, workspace, membership.role),
+          authSessionId: sessionTokens.accessToken.sessionGroupId,
+          token: sessionTokens.accessToken.token,
+          tokenKind: sessionTokens.accessToken.kind,
+          refreshToken: sessionTokens.refreshToken.token,
+          passkeys: getPasskeys(user).map(toPasskeySummary)
         };
       });
     },
@@ -873,7 +1079,7 @@ export function createBurstFlareService(options = {}) {
           targetId: workspace.id
         });
         return {
-          user: auth.user,
+          user: formatUser(auth.user),
           workspace: formatWorkspace(state, workspace, membership.role),
           authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
@@ -967,7 +1173,7 @@ export function createBurstFlareService(options = {}) {
         });
 
         return {
-          user,
+          user: formatUser(user),
           workspace: formatWorkspace(state, workspace, membership.role),
           authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
@@ -1005,7 +1211,7 @@ export function createBurstFlareService(options = {}) {
         });
 
         return {
-          user,
+          user: formatUser(user),
           workspace: formatWorkspace(state, workspace, membership.role),
           authSessionId: sessionTokens.accessToken.sessionGroupId,
           token: sessionTokens.accessToken.token,
@@ -1158,19 +1364,25 @@ export function createBurstFlareService(options = {}) {
     async authenticate(token) {
       return transact(AUTH_DEVICE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
-        const pendingDeviceCodes = state.deviceCodes.filter(
+        const pendingDevices = state.deviceCodes.filter(
           (entry) =>
             entry.workspaceId === auth.workspace.id &&
             entry.status === "pending" &&
             new Date(entry.expiresAt).getTime() > nowMs(clock)
-        ).length;
+        );
         return {
-          user: auth.user,
+          user: formatUser(auth.user),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           membership: auth.membership,
           usage: summarizeUsage(state, auth.workspace.id),
           limits: getPlan(auth.workspace.plan),
-          pendingDeviceCodes
+          pendingDeviceCodes: pendingDevices.length,
+          pendingDevices: pendingDevices.map((entry) => ({
+            id: entry.id,
+            code: entry.code,
+            expiresAt: entry.expiresAt
+          })),
+          passkeys: getPasskeys(auth.user).map(toPasskeySummary)
         };
       });
     },
@@ -1196,7 +1408,7 @@ export function createBurstFlareService(options = {}) {
           .filter((entry) => entry.workspaceId === auth.workspace.id)
           .map((entry) => ({
             ...entry,
-            user: findUserById(state, entry.userId)
+            user: formatUser(findUserById(state, entry.userId))
           }));
         const invites = state.workspaceInvites.filter(
           (entry) =>

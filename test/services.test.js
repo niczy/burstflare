@@ -121,10 +121,51 @@ test("service covers invites, queued builds, releases, session events, usage, an
       }),
     /Recovery code invalid/
   );
+  const passkeyRegistration = await service.beginPasskeyRegistration(owner.token);
+  assert.equal(passkeyRegistration.passkeys.length, 0);
+  const registeredPasskey = await service.registerPasskey(owner.token, {
+    credentialId: "credential-owner-1",
+    label: "Owner Laptop",
+    publicKey: "spki-owner-key",
+    publicKeyAlgorithm: -7,
+    transports: ["internal", "hybrid"]
+  });
+  assert.equal(registeredPasskey.passkeys.length, 1);
+  const listedPasskeys = await service.listPasskeys(owner.token);
+  assert.equal(listedPasskeys.passkeys[0].label, "Owner Laptop");
+  const passkeyLoginStart = await service.beginPasskeyLogin({
+    email: "owner@example.com"
+  });
+  assert.equal(passkeyLoginStart.passkeys.length, 1);
+  const passkeyAssertion = await service.getPasskeyAssertion({
+    userId: owner.user.id,
+    workspaceId: owner.workspace.id,
+    credentialId: "credential-owner-1"
+  });
+  assert.equal(passkeyAssertion.passkey.publicKey, "spki-owner-key");
+  const passkeyLogin = await service.completePasskeyLogin({
+    userId: owner.user.id,
+    workspaceId: owner.workspace.id,
+    credentialId: "credential-owner-1",
+    signCount: 7
+  });
+  assert.ok(passkeyLogin.refreshToken);
+  const postLoginPasskeys = await service.listPasskeys(passkeyLogin.token);
+  assert.equal(postLoginPasskeys.passkeys[0].lastUsedAt !== null, true);
   const teammate = await service.registerUser({
     email: "teammate@example.com",
     name: "Teammate User"
   });
+  await assert.rejects(
+    () =>
+      service.registerPasskey(teammate.token, {
+        credentialId: "credential-owner-1",
+        label: "Duplicate",
+        publicKey: "spki-duplicate",
+        publicKeyAlgorithm: -7
+      }),
+    /already registered/
+  );
 
   const invite = await service.createWorkspaceInvite(owner.token, {
     email: "teammate@example.com",

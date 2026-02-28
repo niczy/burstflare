@@ -13,6 +13,8 @@ import {
 } from "../../../packages/shared/src/utils.js";
 
 const CSRF_COOKIE = "burstflare_csrf";
+const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
+const localWebAuthnChallenges = new Map();
 
 function tokenFromRequest(request, sessionCookieName) {
   const authHeader = request.headers.get("authorization");
@@ -370,6 +372,230 @@ function createRateLimiter(options) {
   };
 }
 
+function toBytes(value) {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (typeof value === "string") {
+    return new TextEncoder().encode(value);
+  }
+  return new Uint8Array();
+}
+
+function toBase64Url(value) {
+  const bytes = toBytes(value);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(value) {
+  const input = String(value || "");
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function createChallenge() {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+  return toBase64Url(bytes);
+}
+
+function concatBytes(...parts) {
+  const arrays = parts.map((value) => toBytes(value));
+  const total = arrays.reduce((sum, entry) => sum + entry.byteLength, 0);
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const entry of arrays) {
+    combined.set(entry, offset);
+    offset += entry.byteLength;
+  }
+  return combined;
+}
+
+function readUint32(value, offset) {
+  const bytes = toBytes(value);
+  if (bytes.byteLength < offset + 4) {
+    return null;
+  }
+  return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+}
+
+function createWebAuthnChallengeStore(options) {
+  const storage = options.AUTH_KV || options.CACHE_KV || null;
+
+  function keyOf(id) {
+    return `webauthn:challenge:${id}`;
+  }
+
+  function pruneLocal() {
+    const now = Date.now();
+    for (const [key, value] of localWebAuthnChallenges.entries()) {
+      if (!value || value.expiresAt <= now) {
+        localWebAuthnChallenges.delete(key);
+      }
+    }
+  }
+
+  return {
+    async create(payload, ttlSeconds = WEBAUTHN_CHALLENGE_TTL_SECONDS) {
+      const id = `wac_${globalThis.crypto.randomUUID()}`;
+      const record = {
+        ...payload,
+        id,
+        expiresAt: Date.now() + ttlSeconds * 1000
+      };
+      if (storage) {
+        await storage.put(keyOf(id), JSON.stringify(record), {
+          expirationTtl: ttlSeconds
+        });
+      } else {
+        pruneLocal();
+        localWebAuthnChallenges.set(keyOf(id), record);
+      }
+      return record;
+    },
+
+    async consume(id) {
+      if (!id) {
+        return null;
+      }
+      const key = keyOf(id);
+      let record = null;
+      if (storage) {
+        record = (await storage.get(key, "json")) || null;
+        if (typeof storage.delete === "function") {
+          await storage.delete(key);
+        }
+      } else {
+        pruneLocal();
+        record = localWebAuthnChallenges.get(key) || null;
+        localWebAuthnChallenges.delete(key);
+      }
+      if (!record || record.expiresAt <= Date.now()) {
+        return null;
+      }
+      return record;
+    }
+  };
+}
+
+function getRequestOrigin(request) {
+  return new URL(request.url).origin;
+}
+
+function getRequestRpId(request) {
+  return new URL(request.url).hostname;
+}
+
+function parseClientData(clientDataValue) {
+  const clientDataJSON = fromBase64Url(clientDataValue);
+  const parsed = JSON.parse(new TextDecoder().decode(clientDataJSON));
+  return {
+    clientDataJSON,
+    parsed
+  };
+}
+
+function verifyClientData(clientDataValue, expected) {
+  const { clientDataJSON, parsed } = parseClientData(clientDataValue);
+  if (parsed.type !== expected.type) {
+    const error = new Error("Passkey client data type mismatch");
+    error.status = 401;
+    throw error;
+  }
+  if (parsed.challenge !== expected.challenge) {
+    const error = new Error("Passkey challenge mismatch");
+    error.status = 401;
+    throw error;
+  }
+  if (parsed.origin !== expected.origin) {
+    const error = new Error("Passkey origin mismatch");
+    error.status = 401;
+    throw error;
+  }
+  return {
+    clientDataJSON,
+    parsed
+  };
+}
+
+function importPasskeyKey(publicKey, algorithm) {
+  const spki = fromBase64Url(publicKey);
+  if (algorithm === -7) {
+    return globalThis.crypto.subtle.importKey(
+      "spki",
+      spki,
+      {
+        name: "ECDSA",
+        namedCurve: "P-256"
+      },
+      false,
+      ["verify"]
+    );
+  }
+  if (algorithm === -257) {
+    return globalThis.crypto.subtle.importKey(
+      "spki",
+      spki,
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256"
+      },
+      false,
+      ["verify"]
+    );
+  }
+  const error = new Error("Unsupported passkey algorithm");
+  error.status = 400;
+  throw error;
+}
+
+async function verifyPasskeyAssertion(assertion, expected, passkey) {
+  const { clientDataJSON } = verifyClientData(assertion.response?.clientDataJSON, {
+    challenge: expected.challenge,
+    origin: expected.origin,
+    type: "webauthn.get"
+  });
+
+  const authenticatorData = fromBase64Url(assertion.response?.authenticatorData);
+  const signature = fromBase64Url(assertion.response?.signature);
+  const clientDataHash = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", clientDataJSON));
+  const verificationData = concatBytes(authenticatorData, clientDataHash);
+  const key = await importPasskeyKey(passkey.publicKey, passkey.algorithm);
+  const verifyOptions =
+    passkey.algorithm === -7
+      ? {
+          name: "ECDSA",
+          hash: "SHA-256"
+        }
+      : {
+          name: "RSASSA-PKCS1-v1_5"
+        };
+  const valid = await globalThis.crypto.subtle.verify(verifyOptions, key, signature, verificationData);
+  if (!valid) {
+    const error = new Error("Passkey assertion invalid");
+    error.status = 401;
+    throw error;
+  }
+  return {
+    signCount: readUint32(authenticatorData, 33)
+  };
+}
+
 function requestIdentity(request) {
   const cfIp = request.headers.get("cf-connecting-ip");
   if (cfIp) {
@@ -410,6 +636,7 @@ export function createApp(options = {}) {
   const service = createWorkerService(options);
   const rateLimiter = createRateLimiter(options);
   const turnstile = createTurnstileVerifier(options);
+  const webAuthnChallenges = createWebAuthnChallengeStore(options);
 
   function hasContainerBinding() {
     return Boolean(options.containersEnabled);
@@ -595,6 +822,119 @@ export function createApp(options = {}) {
     await turnstile.verify(body.turnstileToken || request.headers.get("cf-turnstile-response"), requestIdentity(request));
   }
 
+  async function beginPasskeyRegistration(request, token) {
+    const registration = await service.beginPasskeyRegistration(token);
+    const challenge = createChallenge();
+    const challengeRecord = await webAuthnChallenges.create({
+      kind: "passkey-register",
+      userId: registration.user.id,
+      workspaceId: registration.workspace.id,
+      challenge,
+      origin: getRequestOrigin(request),
+      rpId: getRequestRpId(request)
+    });
+    return {
+      challengeId: challengeRecord.id,
+      publicKey: {
+        challenge,
+        rpId: challengeRecord.rpId,
+        user: {
+          id: toBase64Url(registration.user.id),
+          name: registration.user.email,
+          displayName: registration.user.name
+        },
+        timeoutMs: 60_000,
+        excludeCredentialIds: registration.passkeys.map((entry) => entry.id),
+        pubKeyCredParams: [
+          { type: "public-key", alg: -7 },
+          { type: "public-key", alg: -257 }
+        ]
+      },
+      passkeys: registration.passkeys
+    };
+  }
+
+  async function finishPasskeyRegistration(request, token, body) {
+    const challenge = await webAuthnChallenges.consume(body.challengeId);
+    if (!challenge || challenge.kind !== "passkey-register") {
+      const error = new Error("Passkey registration challenge not found");
+      error.status = 400;
+      throw error;
+    }
+    const auth = await service.authenticate(token);
+    if (auth.user.id !== challenge.userId || auth.workspace.id !== challenge.workspaceId) {
+      const error = new Error("Passkey registration challenge does not match the current session");
+      error.status = 403;
+      throw error;
+    }
+    verifyClientData(body.credential?.response?.clientDataJSON, {
+      challenge: challenge.challenge,
+      origin: challenge.origin,
+      type: "webauthn.create"
+    });
+    return service.registerPasskey(token, {
+      credentialId: body.credential?.id,
+      label: body.label,
+      publicKey: body.credential?.response?.publicKey,
+      publicKeyAlgorithm: Number(body.credential?.response?.publicKeyAlgorithm),
+      transports: body.credential?.response?.transports || []
+    });
+  }
+
+  async function beginPasskeyLogin(request, body) {
+    await verifyTurnstile(request, body);
+    const login = await service.beginPasskeyLogin(body);
+    const challenge = createChallenge();
+    const challengeRecord = await webAuthnChallenges.create({
+      kind: "passkey-login",
+      userId: login.user.id,
+      workspaceId: login.workspace.id,
+      challenge,
+      origin: getRequestOrigin(request),
+      rpId: getRequestRpId(request),
+      credentialIds: login.passkeys.map((entry) => entry.id)
+    });
+    return {
+      challengeId: challengeRecord.id,
+      publicKey: {
+        challenge,
+        rpId: challengeRecord.rpId,
+        timeoutMs: 60_000,
+        userVerification: "preferred",
+        allowCredentialIds: login.passkeys.map((entry) => entry.id)
+      }
+    };
+  }
+
+  async function finishPasskeyLogin(body) {
+    const challenge = await webAuthnChallenges.consume(body.challengeId);
+    if (!challenge || challenge.kind !== "passkey-login") {
+      const error = new Error("Passkey login challenge not found");
+      error.status = 400;
+      throw error;
+    }
+    if (!challenge.credentialIds.includes(body.credential?.id)) {
+      const error = new Error("Passkey credential is not allowed for this challenge");
+      error.status = 401;
+      throw error;
+    }
+    const assertion = await service.getPasskeyAssertion({
+      userId: challenge.userId,
+      workspaceId: challenge.workspaceId,
+      credentialId: body.credential?.id
+    });
+    const verified = await verifyPasskeyAssertion(body.credential, {
+      challenge: challenge.challenge,
+      origin: challenge.origin
+    }, assertion.passkey);
+    return service.completePasskeyLogin({
+      userId: challenge.userId,
+      workspaceId: challenge.workspaceId,
+      credentialId: body.credential?.id,
+      signCount: verified.signCount
+    });
+  }
+
   const routes = [
     {
       method: "GET",
@@ -717,6 +1057,44 @@ export function createApp(options = {}) {
     },
     {
       method: "POST",
+      pattern: "/api/auth/passkeys/login/start",
+      handler: withRateLimit(
+        {
+          scope: "auth-passkey-login-start",
+          limit: 8,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          return toJson(await beginPasskeyLogin(request, body));
+        })
+      )
+    },
+    {
+      method: "POST",
+      pattern: "/api/auth/passkeys/login/finish",
+      handler: withRateLimit(
+        {
+          scope: "auth-passkey-login-finish",
+          limit: 12,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          const result = await finishPasskeyLogin(body);
+          const csrfToken = createCsrfToken();
+          return toJsonWithCookies(
+            {
+              ...result,
+              csrfToken
+            },
+            authCookies(service, result.token, csrfToken)
+          );
+        })
+      )
+    },
+    {
+      method: "POST",
       pattern: "/api/auth/refresh",
       handler: withRateLimit(
         {
@@ -826,6 +1204,51 @@ export function createApp(options = {}) {
         }
         const body = await parseJson(await request.text());
         return toJson(await service.generateRecoveryCodes(token, body));
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/api/auth/passkeys",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.listPasskeys(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/auth/passkeys/register/start",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await beginPasskeyRegistration(request, token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/auth/passkeys/register/finish",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await finishPasskeyRegistration(request, token, body));
+      })
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/auth/passkeys/:credentialId",
+      handler: withErrorHandling(async (request, { credentialId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.deletePasskey(token, credentialId));
       })
     },
     {

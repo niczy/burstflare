@@ -220,6 +220,7 @@ export const html = `<!doctype html>
           <div class="row">
             <button id="registerButton">Register</button>
             <button class="secondary" id="loginButton">Login</button>
+            <button class="secondary" id="passkeyLoginButton">Passkey Login</button>
             <button class="secondary" id="recoverButton">Recover</button>
             <button class="secondary" id="logoutButton">Logout</button>
           </div>
@@ -229,10 +230,12 @@ export const html = `<!doctype html>
           </div>
           <div class="row">
             <button class="secondary" id="recoveryCodesButton">New Recovery Codes</button>
+            <button class="secondary" id="passkeyRegisterButton">Register Passkey</button>
           </div>
           <div class="muted" id="identity">Not signed in</div>
           <div class="muted" id="lastRefresh">Last refresh: never</div>
           <pre id="recoveryCodes">No recovery codes generated.</pre>
+          <div class="list" id="passkeys"></div>
           <div class="error" id="errors"></div>
         </div>
       </section>
@@ -287,6 +290,7 @@ export const html = `<!doctype html>
             <button class="secondary" id="logoutAllButton">Logout All Sessions</button>
           </div>
           <div class="muted" id="deviceStatus">Pending device approvals: 0</div>
+          <div class="list" id="pendingDevices"></div>
           <div class="list" id="authSessions"></div>
         </div>
 
@@ -449,6 +453,99 @@ function setRecoveryCodes(codes = []) {
   byId("recoveryCodes").textContent = Array.isArray(codes) && codes.length
     ? codes.join("\\n")
     : "No recovery codes generated.";
+}
+
+function renderPasskeys(passkeys = []) {
+  const items = passkeys.map((passkey) => {
+    const action = '<button class="secondary" data-passkey-delete="' + passkey.id + '">Delete</button>';
+    return '<div class="item"><strong>' + (passkey.label || passkey.id) + '</strong><br><span class="muted">' + passkey.id +
+      '</span><br><span class="muted">alg ' + passkey.algorithm + '</span><br><span class="muted">created ' +
+      passkey.createdAt + (passkey.lastUsedAt ? ' / used ' + passkey.lastUsedAt : '') +
+      '</span><div class="row" style="margin-top:8px">' + action + '</div></div>';
+  });
+  byId("passkeys").innerHTML = items.length ? items.join("") : '<div class="item muted">No passkeys registered.</div>';
+
+  document.querySelectorAll("[data-passkey-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!window.confirm('Delete this passkey?')) {
+        return;
+      }
+      await perform(async () => api('/api/auth/passkeys/' + button.dataset.passkeyDelete, { method: 'DELETE' }));
+    });
+  });
+}
+
+function renderPendingDevices(devices = []) {
+  const items = devices.map((device) => {
+    return '<div class="item"><strong>' + device.code + '</strong><br><span class="muted">expires ' + device.expiresAt +
+      '</span><div class="row" style="margin-top:8px"><button class="secondary" data-device-approve="' + device.code +
+      '">Approve</button></div></div>';
+  });
+  byId("pendingDevices").innerHTML = items.length ? items.join("") : '<div class="item muted">No pending device approvals.</div>';
+
+  document.querySelectorAll("[data-device-approve]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => {
+        await api('/api/cli/device/approve', {
+          method: 'POST',
+          body: JSON.stringify({ deviceCode: button.dataset.deviceApprove })
+        });
+      });
+    });
+  });
+}
+
+function isPasskeySupported() {
+  return typeof window.PublicKeyCredential === 'function' && navigator.credentials && typeof navigator.credentials.create === 'function';
+}
+
+function bytesToBase64Url(value) {
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value || new ArrayBuffer(0));
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlToBytes(value) {
+  const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4 || 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function serializeAttestationCredential(credential) {
+  const response = credential.response;
+  return {
+    id: credential.id,
+    type: credential.type,
+    response: {
+      clientDataJSON: bytesToBase64Url(response.clientDataJSON),
+      publicKey: bytesToBase64Url(response.getPublicKey ? response.getPublicKey() : new Uint8Array()),
+      publicKeyAlgorithm: response.getPublicKeyAlgorithm ? response.getPublicKeyAlgorithm() : null,
+      authenticatorData: bytesToBase64Url(response.getAuthenticatorData ? response.getAuthenticatorData() : new Uint8Array()),
+      transports: response.getTransports ? response.getTransports() : []
+    }
+  };
+}
+
+function serializeAssertionCredential(credential) {
+  const response = credential.response;
+  return {
+    id: credential.id,
+    type: credential.type,
+    response: {
+      clientDataJSON: bytesToBase64Url(response.clientDataJSON),
+      authenticatorData: bytesToBase64Url(response.authenticatorData),
+      signature: bytesToBase64Url(response.signature),
+      userHandle: response.userHandle ? bytesToBase64Url(response.userHandle) : null
+    }
+  };
 }
 
 function resetTurnstile() {
@@ -660,6 +757,90 @@ async function requestRaw(path, options = {}, allowRetry = true) {
   return response;
 }
 
+async function registerPasskey() {
+  if (!isPasskeySupported()) {
+    throw new Error("Passkeys are not supported in this browser");
+  }
+  const start = await api('/api/auth/passkeys/register/start', {
+    method: 'POST'
+  });
+  const credential = await navigator.credentials.create({
+    publicKey: {
+      challenge: base64UrlToBytes(start.publicKey.challenge),
+      rp: {
+        name: 'BurstFlare',
+        id: start.publicKey.rpId
+      },
+      user: {
+        id: base64UrlToBytes(start.publicKey.user.id),
+        name: start.publicKey.user.name,
+        displayName: start.publicKey.user.displayName
+      },
+      timeout: start.publicKey.timeoutMs,
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred'
+      },
+      pubKeyCredParams: start.publicKey.pubKeyCredParams,
+      excludeCredentials: (start.publicKey.excludeCredentialIds || []).map((id) => ({
+        type: 'public-key',
+        id: base64UrlToBytes(id)
+      }))
+    }
+  });
+  if (!credential) {
+    throw new Error("Passkey registration was cancelled");
+  }
+  await api('/api/auth/passkeys/register/finish', {
+    method: 'POST',
+    body: JSON.stringify({
+      challengeId: start.challengeId,
+      label: byId("name").value || byId("email").value || 'BurstFlare Passkey',
+      credential: serializeAttestationCredential(credential)
+    })
+  });
+}
+
+async function loginWithPasskey() {
+  if (!isPasskeySupported()) {
+    throw new Error("Passkeys are not supported in this browser");
+  }
+  try {
+    const start = await api('/api/auth/passkeys/login/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: byId("email").value,
+        turnstileToken: byId("turnstileToken").value
+      })
+    });
+    const credential = await navigator.credentials.get({
+      publicKey: {
+        challenge: base64UrlToBytes(start.publicKey.challenge),
+        rpId: start.publicKey.rpId,
+        timeout: start.publicKey.timeoutMs,
+        userVerification: start.publicKey.userVerification || 'preferred',
+        allowCredentials: (start.publicKey.allowCredentialIds || []).map((id) => ({
+          type: 'public-key',
+          id: base64UrlToBytes(id)
+        }))
+      }
+    });
+    if (!credential) {
+      throw new Error("Passkey login was cancelled");
+    }
+    const data = await api('/api/auth/passkeys/login/finish', {
+      method: 'POST',
+      body: JSON.stringify({
+        challengeId: start.challengeId,
+        credential: serializeAssertionCredential(credential)
+      })
+    });
+    setAuth(data.refreshToken, data.csrfToken || "");
+  } finally {
+    resetTurnstile();
+  }
+}
+
 function renderIdentity() {
   byId("identity").textContent = state.me
     ? state.me.user.email + " in " + state.me.workspace.name + " (" + state.me.membership.role + ", " + state.me.workspace.plan + ")"
@@ -667,8 +848,12 @@ function renderIdentity() {
   if (state.me) {
     byId("workspaceName").value = state.me.workspace.name;
     setDeviceStatus('Pending device approvals: ' + state.me.pendingDeviceCodes);
+    renderPasskeys(state.me.passkeys || []);
+    renderPendingDevices(state.me.pendingDevices || []);
   } else {
     setDeviceStatus('Pending device approvals: 0');
+    renderPasskeys([]);
+    renderPendingDevices([]);
   }
 }
 
@@ -826,6 +1011,7 @@ function clearPanels() {
   byId("persistedPaths").value = "";
   byId("members").textContent = "";
   byId("authSessions").textContent = "";
+  byId("pendingDevices").textContent = "";
   byId("templates").textContent = "";
   byId("builds").textContent = "";
   byId("sessions").textContent = "";
@@ -837,6 +1023,7 @@ function clearPanels() {
   byId("snapshotContentPreview").textContent = "No snapshot content loaded.";
   setLastRefresh("");
   setRecoveryCodes();
+  renderPasskeys([]);
   resetTurnstile();
   byId("usage").textContent = "";
   byId("report").textContent = "";
@@ -963,6 +1150,12 @@ byId("loginButton").addEventListener("click", async () => {
   });
 });
 
+byId("passkeyLoginButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await loginWithPasskey();
+  });
+});
+
 byId("recoverButton").addEventListener("click", async () => {
   await perform(async () => {
     try {
@@ -1009,6 +1202,12 @@ byId("recoveryCodesButton").addEventListener("click", async () => {
       body: JSON.stringify({})
     });
     setRecoveryCodes(data.recoveryCodes || []);
+  });
+});
+
+byId("passkeyRegisterButton").addEventListener("click", async () => {
+  await perform(async () => {
+    await registerPasskey();
   });
 });
 

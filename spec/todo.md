@@ -7,9 +7,7 @@ This file lists the remaining work required to close the gap between the current
 ## 1. Highest-Priority Gaps
 
 - Implement production-grade browser auth:
-  - WebAuthn / passkeys
-  - Turnstile production enablement with a configured client widget and secret
-  - broader browser-facing auth-session management UX beyond the current list/revoke APIs
+  - enable live Turnstile enforcement by configuring `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in the production deployment
 - Implement real asynchronous build execution:
   - workflow orchestration
   - real image build metadata
@@ -43,7 +41,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 03: Web Auth Foundations
 
-- Status: partially complete
+- Status: mostly complete
 - Done:
   - basic registration and token-based auth flows exist
   - refresh-token rotation
@@ -57,10 +55,12 @@ This file lists the remaining work required to close the gap between the current
   - CLI support exists for listing and revoking individual auth sessions
   - browser recovery-code generation and recovery controls now exist
   - browser Turnstile widget wiring now exists with a manual-token fallback path
+  - WebAuthn passkey registration, login, listing, and deletion now exist
+  - browser passkey controls now exist for register, login, and delete
+  - browser auth state now surfaces passkeys and actionable pending device approvals
+  - server-side passkey assertion validation now verifies challenge, origin, and signatures
 - Remaining:
-  - WebAuthn
   - Turnstile production enablement with configured `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET` in the live deployment
-  - richer browser-facing auth/device management UX beyond the current logout-all, auth-session list-revoke, device-approval, and recovery-code controls
 
 ### PR 04: Workspace And Membership Model
 
@@ -274,9 +274,9 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Finish PR 03, PR 08, PR 10, PR 12, and PR 14 first. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
+1. Finish PR 08, PR 10, PR 12, and PR 14 first. Those are the largest functional gaps between the current repo and a usable multi-tenant product.
 2. Then finish PR 15, PR 16, and PR 17 so the platform has real enforcement, cleanup, and security controls.
-3. Finish PR 18 last, once the runtime and platform guarantees are stable.
+3. Enable live Turnstile keys for PR 03 and finish PR 18 last, once the runtime and platform guarantees are stable.
 
 ## 4. CI And Test Work Still Needed
 

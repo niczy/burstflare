@@ -47,6 +47,38 @@ function createBucket() {
   };
 }
 
+function bytesToBase64Url(value) {
+  const bytes = toBytes(value);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToBytes(value) {
+  const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function concatBytes(...parts) {
+  const arrays = parts.map((value) => toBytes(value));
+  const total = arrays.reduce((sum, entry) => sum + entry.byteLength, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const entry of arrays) {
+    merged.set(entry, offset);
+    offset += entry.byteLength;
+  }
+  return merged;
+}
+
 async function requestJson(app, path, init = {}) {
   const url = path.startsWith("http://") || path.startsWith("https://") ? path : `http://example.test${path}`;
   const response = await app.fetch(
@@ -89,8 +121,12 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(rootHtml, /Approve Device Code/);
   assert.match(rootHtml, /Recovery Code/);
   assert.match(rootHtml, /New Recovery Codes/);
+  assert.match(rootHtml, /Passkey Login/);
+  assert.match(rootHtml, /Register Passkey/);
+  assert.match(rootHtml, /id="passkeys"/);
   assert.match(rootHtml, /Turnstile is not configured for this deployment/);
   assert.match(rootHtml, /deviceStatus/);
+  assert.match(rootHtml, /pendingDevices/);
   assert.match(rootHtml, /lastRefresh/);
   assert.match(rootHtml, /terminalOutput/);
   assert.match(rootHtml, /persistedPaths/);
@@ -104,9 +140,13 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(appScript, /x-burstflare-csrf/);
   assert.match(appScript, /api\/auth\/recover/);
   assert.match(appScript, /api\/auth\/recovery-codes\/generate/);
+  assert.match(appScript, /api\/auth\/passkeys\/login\/start/);
+  assert.match(appScript, /api\/auth\/passkeys\/register\/start/);
   assert.match(appScript, /turnstileWidget/);
   assert.match(appScript, /api\/auth\/sessions/);
   assert.match(appScript, /api\/cli\/device\/approve/);
+  assert.match(appScript, /navigator\.credentials\.create/);
+  assert.match(appScript, /navigator\.credentials\.get/);
   assert.match(appScript, /api\/workspaces\/current\/settings/);
   assert.match(appScript, /new WebSocket/);
   assert.match(appScript, /pendingDeviceCodes/);
@@ -185,6 +225,103 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const ownerToken = owner.data.token;
   const ownerRefreshToken = owner.data.refreshToken;
   const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
+
+  const passkeyKeyPair = await globalThis.crypto.subtle.generateKey(
+    {
+      name: "ECDSA",
+      namedCurve: "P-256"
+    },
+    true,
+    ["sign", "verify"]
+  );
+  const passkeyPublicKey = await globalThis.crypto.subtle.exportKey("spki", passkeyKeyPair.publicKey);
+
+  const passkeyRegisterStart = await requestJson(app, "/api/auth/passkeys/register/start", {
+    method: "POST",
+    headers: ownerHeaders
+  });
+  assert.equal(passkeyRegisterStart.response.status, 200);
+
+  const passkeyRegisterClientDataText = JSON.stringify({
+    type: "webauthn.create",
+    challenge: passkeyRegisterStart.data.publicKey.challenge,
+    origin: "http://example.test"
+  });
+  const passkeyRegisterFinish = await requestJson(app, "/api/auth/passkeys/register/finish", {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      challengeId: passkeyRegisterStart.data.challengeId,
+      label: "Ops Laptop",
+      credential: {
+        id: "test-passkey-1",
+        response: {
+          clientDataJSON: bytesToBase64Url(passkeyRegisterClientDataText),
+          publicKey: bytesToBase64Url(passkeyPublicKey),
+          publicKeyAlgorithm: -7,
+          transports: ["internal"],
+          authenticatorData: bytesToBase64Url(new Uint8Array(37))
+        }
+      }
+    })
+  });
+  assert.equal(passkeyRegisterFinish.response.status, 200);
+  assert.equal(passkeyRegisterFinish.data.passkeys.length, 1);
+
+  const passkeys = await requestJson(app, "/api/auth/passkeys", {
+    headers: ownerHeaders
+  });
+  assert.equal(passkeys.response.status, 200);
+  assert.equal(passkeys.data.passkeys.length, 1);
+
+  const passkeyLoginStart = await requestJson(app, "/api/auth/passkeys/login/start", {
+    method: "POST",
+    body: JSON.stringify({ email: "ops@example.com" })
+  });
+  assert.equal(passkeyLoginStart.response.status, 200);
+
+  const passkeyAuthenticatorData = new Uint8Array(37);
+  passkeyAuthenticatorData[36] = 9;
+  const passkeyLoginClientDataText = JSON.stringify({
+    type: "webauthn.get",
+    challenge: passkeyLoginStart.data.publicKey.challenge,
+    origin: "http://example.test"
+  });
+  const passkeyLoginClientData = new TextEncoder().encode(passkeyLoginClientDataText);
+  const passkeyLoginClientHash = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", passkeyLoginClientData));
+  const passkeySignature = await globalThis.crypto.subtle.sign(
+    {
+      name: "ECDSA",
+      hash: "SHA-256"
+    },
+    passkeyKeyPair.privateKey,
+    concatBytes(passkeyAuthenticatorData, passkeyLoginClientHash)
+  );
+
+  const passkeyLoginFinish = await requestJson(app, "/api/auth/passkeys/login/finish", {
+    method: "POST",
+    body: JSON.stringify({
+      challengeId: passkeyLoginStart.data.challengeId,
+      credential: {
+        id: "test-passkey-1",
+        response: {
+          clientDataJSON: bytesToBase64Url(passkeyLoginClientData),
+          authenticatorData: bytesToBase64Url(passkeyAuthenticatorData),
+          signature: bytesToBase64Url(passkeySignature)
+        }
+      }
+    })
+  });
+  assert.equal(passkeyLoginFinish.response.status, 200);
+  assert.ok(passkeyLoginFinish.data.refreshToken);
+
+  const deletedPasskey = await requestJson(app, "/api/auth/passkeys/test-passkey-1", {
+    method: "DELETE",
+    headers: ownerHeaders,
+    body: JSON.stringify({})
+  });
+  assert.equal(deletedPasskey.response.status, 200);
+  assert.equal(deletedPasskey.data.ok, true);
 
   const renamedWorkspace = await requestJson(app, "/api/workspaces/current/settings", {
     method: "PATCH",

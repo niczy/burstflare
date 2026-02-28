@@ -825,3 +825,37 @@ This file records what has already been implemented in the repository and what h
   - schema validation passes with no missing tables or indexes
   - `legacyTablePresent` is `false`
   - the public Worker still passes the end-to-end smoke flow after the breaking cutover
+
+## 61. WebAuthn Passkeys And Richer Browser Auth Controls
+
+- Added real passkey support across the control plane:
+  - passkey registration start and finish routes
+  - passkey login start and finish routes
+  - passkey list and delete routes
+- Added passkey storage on the user record, including:
+  - credential id
+  - label
+  - public key
+  - algorithm
+  - transports
+  - created / last-used metadata
+- Added server-side WebAuthn challenge management for auth flows using KV when available and local fallback storage otherwise.
+- Added server-side validation for:
+  - WebAuthn client-data challenge matching
+  - origin matching
+  - passkey assertion signature verification for supported algorithms
+- Added browser passkey controls in the web shell:
+  - `Passkey Login`
+  - `Register Passkey`
+  - passkey inventory with delete actions
+- Expanded the browser auth/device UX:
+  - `auth/me` now returns passkey summaries
+  - `auth/me` now returns pending device approvals as a list, not just a count
+  - the web shell now renders pending device approvals with one-click approve buttons
+- Sanitized user-shaped API responses so raw stored passkey material is not returned in normal auth and membership responses.
+- Verified locally through CI and in the live Cloudflare deployment that:
+  - the browser shell serves the new passkey controls
+  - the live app bundle includes the WebAuthn browser code
+  - a synthetic live passkey registration succeeds
+  - a synthetic live passkey login succeeds and issues a browser token
+  - the live deployment currently reports `turnstileEnabled: false`, so passkeys are fully verified but Turnstile enforcement is not active until real keys are configured
