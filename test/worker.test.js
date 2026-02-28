@@ -85,9 +85,35 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     method: "POST",
     body: JSON.stringify({ email: "ops@example.com", name: "Ops" })
   });
+  assert.match(owner.data.csrfToken, /^[0-9a-f-]+$/);
+  const ownerSetCookies = owner.response.headers.getSetCookie
+    ? owner.response.headers.getSetCookie()
+    : [owner.response.headers.get("set-cookie")].filter(Boolean);
+  const ownerCookieHeader = ownerSetCookies
+    .map((entry) => entry.split(";")[0])
+    .join("; ");
   const ownerToken = owner.data.token;
   const ownerRefreshToken = owner.data.refreshToken;
   const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
+
+  const csrfBlocked = await requestJson(app, "/api/templates", {
+    method: "POST",
+    headers: {
+      cookie: ownerCookieHeader
+    },
+    body: JSON.stringify({ name: "blocked-cookie", description: "blocked without csrf" })
+  });
+  assert.equal(csrfBlocked.response.status, 403);
+
+  const csrfAllowed = await requestJson(app, "/api/templates", {
+    method: "POST",
+    headers: {
+      cookie: ownerCookieHeader,
+      "x-burstflare-csrf": owner.data.csrfToken
+    },
+    body: JSON.stringify({ name: "cookie-template", description: "allowed with csrf" })
+  });
+  assert.equal(csrfAllowed.response.status, 200);
 
   const teammate = await requestJson(app, "/api/auth/register", {
     method: "POST",

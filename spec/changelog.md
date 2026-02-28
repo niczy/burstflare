@@ -337,3 +337,14 @@ This file records what has already been implemented in the repository and what h
   - at least one dead-lettered build
   - at least one sleeping session
   - zero active upload grants after used grants have been consumed
+
+## 31. Cookie CSRF Hardening
+
+- Added a dedicated browser CSRF cookie (`burstflare_csrf`) alongside the session cookie on auth success paths.
+- Added `csrfToken` to auth success payloads for browser clients.
+- Enforced a double-submit CSRF check for cookie-authenticated mutating requests.
+- Kept bearer-authenticated API calls unchanged, so CLI and token-based flows remain compatible.
+- Updated the web app to persist the CSRF token and send it on mutating requests.
+- Verified the live Worker can:
+  - reject a cookie-authenticated write without the CSRF header
+  - accept the same write when the matching CSRF header is provided

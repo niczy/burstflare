@@ -12,6 +12,8 @@ import {
   unauthorized
 } from "../../../packages/shared/src/utils.js";
 
+const CSRF_COOKIE = "burstflare_csrf";
+
 function tokenFromRequest(request, sessionCookieName) {
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
@@ -57,11 +59,51 @@ function matchRoute(method, pathname, pattern) {
 }
 
 function requireToken(request, service) {
-  const token = tokenFromRequest(request, service.sessionCookieName);
+  const authHeader = request.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice("Bearer ".length);
+  }
+  const cookieHeader = request.headers.get("cookie");
+  const token = readCookie(cookieHeader, service.sessionCookieName);
   if (!token) {
     return null;
   }
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
+    const csrfCookie = readCookie(cookieHeader, CSRF_COOKIE);
+    const csrfHeader = request.headers.get("x-burstflare-csrf");
+    if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+      const error = new Error("CSRF token mismatch");
+      error.status = 403;
+      throw error;
+    }
+  }
   return token;
+}
+
+function createCsrfToken() {
+  return globalThis.crypto.randomUUID();
+}
+
+function toJsonWithCookies(data, cookies, init = {}) {
+  const response = toJson(data, init);
+  for (const value of cookies) {
+    response.headers.append("set-cookie", value);
+  }
+  return response;
+}
+
+function authCookies(service, token, csrfToken) {
+  return [
+    cookie(service.sessionCookieName, token, { maxAge: 60 * 60 * 24 * 7 }),
+    cookie(CSRF_COOKIE, csrfToken, { maxAge: 60 * 60 * 24 * 7, httpOnly: false })
+  ];
+}
+
+function clearAuthCookies(service) {
+  return [
+    cookie(service.sessionCookieName, "", { maxAge: 0 }),
+    cookie(CSRF_COOKIE, "", { maxAge: 0, httpOnly: false })
+  ];
 }
 
 function devicePage(code) {
@@ -457,11 +499,14 @@ export function createApp(options = {}) {
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
           const result = await service.registerUser(body);
-          return toJson(result, {
-            headers: {
-              "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
-            }
-          });
+          const csrfToken = createCsrfToken();
+          return toJsonWithCookies(
+            {
+              ...result,
+              csrfToken
+            },
+            authCookies(service, result.token, csrfToken)
+          );
         })
       )
     },
@@ -477,11 +522,14 @@ export function createApp(options = {}) {
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
           const result = await service.login(body);
-          return toJson(result, {
-            headers: {
-              "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
-            }
-          });
+          const csrfToken = createCsrfToken();
+          return toJsonWithCookies(
+            {
+              ...result,
+              csrfToken
+            },
+            authCookies(service, result.token, csrfToken)
+          );
         })
       )
     },
@@ -497,11 +545,14 @@ export function createApp(options = {}) {
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
           const result = await service.refreshSession(body.refreshToken);
-          return toJson(result, {
-            headers: {
-              "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
-            }
-          });
+          const csrfToken = createCsrfToken();
+          return toJsonWithCookies(
+            {
+              ...result,
+              csrfToken
+            },
+            authCookies(service, result.token, csrfToken)
+          );
         })
       )
     },
@@ -515,11 +566,7 @@ export function createApp(options = {}) {
         }
         const body = await parseJson(await request.text());
         const result = await service.logout(token, body.refreshToken || null);
-        return toJson(result, {
-          headers: {
-            "set-cookie": cookie(service.sessionCookieName, "", { maxAge: 0 })
-          }
-        });
+        return toJsonWithCookies(result, clearAuthCookies(service));
       })
     },
     {
@@ -532,11 +579,14 @@ export function createApp(options = {}) {
         }
         const body = await parseJson(await request.text());
         const result = await service.switchWorkspace(token, body.workspaceId);
-        return toJson(result, {
-          headers: {
-            "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
-          }
-        });
+        const csrfToken = createCsrfToken();
+        return toJsonWithCookies(
+          {
+            ...result,
+            csrfToken
+          },
+          authCookies(service, result.token, csrfToken)
+        );
       })
     },
     {

@@ -321,6 +321,7 @@ export const appJs = `
 const state = {
   token: localStorage.getItem("burstflare_token") || "",
   refreshToken: localStorage.getItem("burstflare_refresh_token") || "",
+  csrfToken: localStorage.getItem("burstflare_csrf") || "",
   me: null
 };
 
@@ -332,9 +333,10 @@ function setError(message) {
   byId("errors").textContent = message || "";
 }
 
-function setAuth(token, refreshToken = state.refreshToken) {
+function setAuth(token, refreshToken = state.refreshToken, csrfToken = state.csrfToken) {
   state.token = token || "";
   state.refreshToken = refreshToken || "";
+  state.csrfToken = csrfToken || "";
   if (state.token) {
     localStorage.setItem("burstflare_token", state.token);
   } else {
@@ -344,6 +346,11 @@ function setAuth(token, refreshToken = state.refreshToken) {
     localStorage.setItem("burstflare_refresh_token", state.refreshToken);
   } else {
     localStorage.removeItem("burstflare_refresh_token");
+  }
+  if (state.csrfToken) {
+    localStorage.setItem("burstflare_csrf", state.csrfToken);
+  } else {
+    localStorage.removeItem("burstflare_csrf");
   }
 }
 
@@ -363,7 +370,7 @@ async function refreshAuth() {
     setAuth("", "");
     throw new Error(data.error || "Authentication expired");
   }
-  setAuth(data.token, data.refreshToken);
+  setAuth(data.token, data.refreshToken, data.csrfToken || "");
   return data;
 }
 
@@ -371,6 +378,9 @@ async function api(path, options = {}, allowRetry = true) {
   const headers = new Headers(options.headers || {});
   if (!headers.has("content-type") && options.body !== undefined) {
     headers.set("content-type", "application/json");
+  }
+  if (["POST", "PUT", "PATCH", "DELETE"].includes((options.method || "GET").toUpperCase()) && state.csrfToken) {
+    headers.set("x-burstflare-csrf", state.csrfToken);
   }
   if (state.token) {
     headers.set("authorization", "Bearer " + state.token);
@@ -540,7 +550,7 @@ byId("registerButton").addEventListener("click", async () => {
       method: 'POST',
       body: JSON.stringify({ email: byId("email").value, name: byId("name").value })
     });
-    setAuth(data.token, data.refreshToken);
+    setAuth(data.token, data.refreshToken, data.csrfToken || "");
   });
 });
 
@@ -550,7 +560,7 @@ byId("loginButton").addEventListener("click", async () => {
       method: 'POST',
       body: JSON.stringify({ email: byId("email").value, kind: 'browser' })
     });
-    setAuth(data.token, data.refreshToken);
+    setAuth(data.token, data.refreshToken, data.csrfToken || "");
   });
 });
 
