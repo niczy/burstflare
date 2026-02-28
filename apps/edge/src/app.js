@@ -165,6 +165,70 @@ function createObjectStore(options) {
   };
 }
 
+function createRateLimiter(options) {
+  const storage = options.AUTH_KV || options.CACHE_KV || null;
+  const local = new Map();
+
+  return {
+    async consume(scope, identity, limit, windowSeconds) {
+      const safeIdentity = identity || "anonymous";
+      const now = Date.now();
+      const windowMs = windowSeconds * 1000;
+      const key = `ratelimit:${scope}:${safeIdentity}`;
+
+      if (storage) {
+        const existing = (await storage.get(key, "json")) || null;
+        const current =
+          existing && existing.resetAt > now
+            ? existing
+            : {
+                count: 0,
+                resetAt: now + windowMs
+              };
+        current.count += 1;
+        await storage.put(key, JSON.stringify(current), {
+          expirationTtl: windowSeconds + 5
+        });
+        return {
+          ok: current.count <= limit,
+          limit,
+          remaining: Math.max(limit - current.count, 0),
+          resetAt: current.resetAt
+        };
+      }
+
+      const existing = local.get(key) || null;
+      const current =
+        existing && existing.resetAt > now
+          ? existing
+          : {
+              count: 0,
+              resetAt: now + windowMs
+            };
+      current.count += 1;
+      local.set(key, current);
+      return {
+        ok: current.count <= limit,
+        limit,
+        remaining: Math.max(limit - current.count, 0),
+        resetAt: current.resetAt
+      };
+    }
+  };
+}
+
+function requestIdentity(request) {
+  const cfIp = request.headers.get("cf-connecting-ip");
+  if (cfIp) {
+    return cfIp.trim();
+  }
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    return forwarded.split(",")[0].trim();
+  }
+  return "anonymous";
+}
+
 export function createApp(options = {}) {
   const service =
     options.service ||
@@ -172,6 +236,7 @@ export function createApp(options = {}) {
       store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore(),
       objects: createObjectStore(options)
     });
+  const rateLimiter = createRateLimiter(options);
 
   function hasContainerBinding() {
     return Boolean(options.containersEnabled);
@@ -207,6 +272,33 @@ export function createApp(options = {}) {
     const url = new URL(request.url);
     const host = url.host;
     return sshCommand.replace("ws://localhost:8787", `wss://${host}`);
+  }
+
+  function withRateLimit(config, handler) {
+    return async (request, params = {}) => {
+      const identity = config.identity ? config.identity(request, params) : requestIdentity(request);
+      const result = await rateLimiter.consume(config.scope, identity, config.limit, config.windowSeconds);
+      if (!result.ok) {
+        return toJson(
+          {
+            error: `Rate limit exceeded for ${config.scope}`
+          },
+          {
+            status: 429,
+            headers: {
+              "x-burstflare-rate-limit-limit": String(result.limit),
+              "x-burstflare-rate-limit-remaining": String(result.remaining),
+              "x-burstflare-rate-limit-reset": new Date(result.resetAt).toISOString()
+            }
+          }
+        );
+      }
+      const response = await handler(request, params);
+      response.headers.set("x-burstflare-rate-limit-limit", String(result.limit));
+      response.headers.set("x-burstflare-rate-limit-remaining", String(result.remaining));
+      response.headers.set("x-burstflare-rate-limit-reset", new Date(result.resetAt).toISOString());
+      return response;
+    };
   }
 
   const routes = [
@@ -259,28 +351,42 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/auth/register",
-      handler: withErrorHandling(async (request) => {
-        const body = await parseJson(await request.text());
-        const result = await service.registerUser(body);
-        return toJson(result, {
-          headers: {
-            "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
-          }
-        });
-      })
+      handler: withRateLimit(
+        {
+          scope: "auth-register",
+          limit: 4,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          const result = await service.registerUser(body);
+          return toJson(result, {
+            headers: {
+              "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
+            }
+          });
+        })
+      )
     },
     {
       method: "POST",
       pattern: "/api/auth/login",
-      handler: withErrorHandling(async (request) => {
-        const body = await parseJson(await request.text());
-        const result = await service.login(body);
-        return toJson(result, {
-          headers: {
-            "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
-          }
-        });
-      })
+      handler: withRateLimit(
+        {
+          scope: "auth-login",
+          limit: 8,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          const result = await service.login(body);
+          return toJson(result, {
+            headers: {
+              "set-cookie": cookie(service.sessionCookieName, result.token, { maxAge: 60 * 60 * 24 * 7 })
+            }
+          });
+        })
+      )
     },
     {
       method: "POST",
@@ -313,10 +419,17 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/cli/device/start",
-      handler: withErrorHandling(async (request) => {
-        const body = await parseJson(await request.text());
-        return toJson(await service.deviceStart(body));
-      })
+      handler: withRateLimit(
+        {
+          scope: "device-start",
+          limit: 4,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          return toJson(await service.deviceStart(body));
+        })
+      )
     },
     {
       method: "POST",
@@ -446,18 +559,26 @@ export function createApp(options = {}) {
     {
       method: "PUT",
       pattern: "/api/templates/:templateId/versions/:versionId/bundle",
-      handler: withErrorHandling(async (request, { templateId, versionId }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(
-          await service.uploadTemplateVersionBundle(token, templateId, versionId, {
-            body: await request.arrayBuffer(),
-            contentType: request.headers.get("content-type") || "application/octet-stream"
-          })
-        );
-      })
+      handler: withRateLimit(
+        {
+          scope: "template-bundle-upload",
+          limit: 8,
+          windowSeconds: 60,
+          identity: (request) => request.headers.get("authorization") || requestIdentity(request)
+        },
+        withErrorHandling(async (request, { templateId, versionId }) => {
+          const token = requireToken(request, service);
+          if (!token) {
+            return unauthorized();
+          }
+          return toJson(
+            await service.uploadTemplateVersionBundle(token, templateId, versionId, {
+              body: await request.arrayBuffer(),
+              contentType: request.headers.get("content-type") || "application/octet-stream"
+            })
+          );
+        })
+      )
     },
     {
       method: "GET",

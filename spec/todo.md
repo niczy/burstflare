@@ -218,8 +218,8 @@ This file lists the remaining work required to close the gap between the current
 - Status: partially complete
 - Done:
   - audit logging exists for many core actions
+  - rate limiting on key auth and upload routes
 - Remaining:
-  - rate limiting
   - abuse controls
   - full audit coverage
   - runtime secret handling

@@ -135,3 +135,14 @@ This file records what has already been implemented in the repository and what h
   - R2-backed template artifacts and build logs
 - The system is not yet at the full production-beta scope described in `spec/plan.md`.
 - The remaining work is tracked in `spec/todo.md`.
+
+## 15. Auth And Upload Rate Limiting
+
+- Added rate limiting for:
+  - user registration
+  - user login
+  - CLI device authorization start
+  - template-bundle upload
+- Added response headers for current rate-limit state on protected endpoints.
+- Backed rate limiting with Cloudflare KV in production and an in-memory fallback in local/test environments.
+- Verified the live Worker returns `429` after repeated device-start requests from the same client.

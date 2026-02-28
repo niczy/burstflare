@@ -206,10 +206,37 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   );
   assert.equal(runtimeValid.status, 200);
 
+  const rateHeaders = { "x-forwarded-for": "10.0.0.8" };
   const deviceStart = await requestJson(app, "/api/cli/device/start", {
     method: "POST",
+    headers: rateHeaders,
     body: JSON.stringify({ email: "ops@example.com" })
   });
+  const deviceStartTwo = await requestJson(app, "/api/cli/device/start", {
+    method: "POST",
+    headers: rateHeaders,
+    body: JSON.stringify({ email: "ops@example.com" })
+  });
+  const deviceStartThree = await requestJson(app, "/api/cli/device/start", {
+    method: "POST",
+    headers: rateHeaders,
+    body: JSON.stringify({ email: "ops@example.com" })
+  });
+  const deviceStartFour = await requestJson(app, "/api/cli/device/start", {
+    method: "POST",
+    headers: rateHeaders,
+    body: JSON.stringify({ email: "ops@example.com" })
+  });
+  assert.equal(deviceStartTwo.response.status, 200);
+  assert.equal(deviceStartThree.response.status, 200);
+  assert.equal(deviceStartFour.response.status, 200);
+  const deviceStartBlocked = await requestJson(app, "/api/cli/device/start", {
+    method: "POST",
+    headers: rateHeaders,
+    body: JSON.stringify({ email: "ops@example.com" })
+  });
+  assert.equal(deviceStartBlocked.response.status, 429);
+  assert.equal(deviceStartBlocked.response.headers.get("x-burstflare-rate-limit-limit"), "4");
   const deviceApprove = await requestJson(app, "/api/cli/device/approve", {
     method: "POST",
     headers: ownerHeaders,
