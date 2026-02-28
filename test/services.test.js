@@ -270,6 +270,8 @@ test("service covers invites, queued builds, releases, session events, usage, an
     bytes: signedBundleBody.length
   });
   assert.match(bundleGrant.uploadGrant.id, /^upg_/);
+  assert.equal(bundleGrant.uploadGrant.transport, "worker_upload_grant");
+  assert.equal(bundleGrant.uploadGrant.storage, "r2");
   const grantUploaded = await service.consumeUploadGrant(bundleGrant.uploadGrant.id, {
     body: signedBundleBody,
     contentType: "text/plain"
@@ -379,6 +381,12 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(promoted.release.binding.imageReference, parsedBuildArtifact.imageReference);
   assert.equal(promoted.release.binding.imageDigest, parsedBuildArtifact.imageDigest);
   assert.equal(promoted.release.binding.layerCount, 2);
+  const inspectedTemplate = await service.getTemplate(owner.token, template.template.id);
+  assert.equal(inspectedTemplate.template.releaseCount, 1);
+  assert.equal(inspectedTemplate.template.releases.length, 1);
+  assert.equal(inspectedTemplate.template.latestRelease.id, promoted.release.id);
+  assert.equal(inspectedTemplate.template.storageSummary.bundleBytes >= signedBundleBody.length, true);
+  assert.equal(inspectedTemplate.template.buildSummary.succeeded >= 1, true);
   const archived = await service.archiveTemplate(owner.token, template.template.id);
   assert.ok(archived.template.archivedAt);
   await assert.rejects(

@@ -1856,6 +1856,17 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "GET",
+      pattern: "/api/templates/:templateId",
+      handler: withErrorHandling(async (request, { templateId }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.getTemplate(token, templateId));
+      })
+    },
+    {
       method: "POST",
       pattern: "/api/templates/:templateId/versions",
       handler: withErrorHandling(async (request, { templateId }) => {

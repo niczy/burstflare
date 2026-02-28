@@ -95,7 +95,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 07: Template Catalog CRUD And R2 Storage
 
-- Status: mostly complete
+- Status: complete
 - Done:
   - template records
   - template version records
@@ -108,9 +108,9 @@ This file lists the remaining work required to close the gap between the current
   - template archive and restore controls
   - archived templates block new session creation
   - template deletion with bundle and build-log cleanup
-- Remaining:
-  - direct-to-R2 presigned upload URLs if we want to bypass the Worker relay path
-  - deeper admin-grade template management UX beyond the current CRUD and lifecycle controls
+  - the signed upload-grant response now explicitly declares the supported Cloudflare-native transport (`worker_upload_grant`) and target storage (`r2`)
+  - a template detail/inspect path now exists across the API, `flare` CLI, and web shell with release history, version/build summary, and storage summary
+  - the web shell now includes a template inspector panel for admin-style template review
 
 ### PR 08: Async Build Pipeline With Queues And Workflows
 
@@ -270,7 +270,7 @@ This file lists the remaining work required to close the gap between the current
 
 ## 3. Recommended Next Execution Order
 
-1. Tighten the last mostly-complete product surface in PR 07.
+1. All planned product PRs are complete.
 2. Treat the optional PR 02 repository-style data-access cleanup as a scale-oriented follow-up, not a blocker for the current beta baseline.
 3. Treat the remaining CI items below as incremental hardening work rather than blockers for the current beta baseline.
 

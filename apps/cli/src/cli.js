@@ -190,6 +190,7 @@ function helpText() {
     "workspace delete-secret <NAME>",
     "template [list] [--active|--archived]",
     "templates",
+    "template inspect <templateId>",
     "template create <name> [--description ...]",
     "template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
     "template promote <templateId> <versionId>",
@@ -822,6 +823,18 @@ export async function runCli(argv, dependencies = {}) {
     }
 
     if (command === "template") {
+      if (subcommand === "inspect") {
+        const templateId = rest[0];
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/templates/${templateId}`,
+          {
+            headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
       if (subcommand === "create") {
         const name = rest[0];
         const data = await requestJsonAuthed(

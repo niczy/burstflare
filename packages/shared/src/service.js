@@ -697,6 +697,61 @@ function formatWorkspace(state, workspace, role) {
   };
 }
 
+function getTemplateReleases(state, templateId) {
+  return state.bindingReleases
+    .filter((entry) => entry.templateId === templateId)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function summarizeTemplateBuilds(versions) {
+  const summary = {
+    queued: 0,
+    building: 0,
+    succeeded: 0,
+    failed: 0,
+    deadLettered: 0,
+    other: 0
+  };
+  for (const version of versions) {
+    const status = version.build?.status || null;
+    if (!status) {
+      continue;
+    }
+    if (status === "dead_lettered") {
+      summary.deadLettered += 1;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(summary, status)) {
+      summary[status] += 1;
+      continue;
+    }
+    summary.other += 1;
+  }
+  return summary;
+}
+
+function summarizeTemplateArtifacts(versions) {
+  return versions.reduce(
+    (summary, version) => {
+      summary.bundleBytes += version.bundleBytes || 0;
+      summary.buildArtifactBytes += version.build?.artifactBytes || 0;
+      if (version.bundleUploadedAt) {
+        summary.versionBundles += 1;
+      }
+      if (version.build?.artifactBuiltAt) {
+        summary.buildArtifacts += 1;
+      }
+      return summary;
+    },
+    {
+      bundleBytes: 0,
+      buildArtifactBytes: 0,
+      versionBundles: 0,
+      buildArtifacts: 0
+    }
+  );
+}
+
 function formatTemplate(state, template) {
   const versions = state.templateVersions
     .filter((entry) => entry.templateId === template.id)
@@ -704,11 +759,23 @@ function formatTemplate(state, template) {
       const build = state.templateBuilds.find((entry) => entry.templateVersionId === version.id) || null;
       return { ...version, build };
     });
+  const releases = getTemplateReleases(state, template.id);
   const activeVersion = versions.find((entry) => entry.id === template.activeVersionId) || null;
   return {
     ...template,
     activeVersion,
-    versions
+    versions,
+    releaseCount: releases.length,
+    latestRelease: releases.length ? releases[releases.length - 1] : null,
+    buildSummary: summarizeTemplateBuilds(versions),
+    storageSummary: summarizeTemplateArtifacts(versions)
+  };
+}
+
+function formatTemplateDetail(state, template) {
+  return {
+    ...formatTemplate(state, template),
+    releases: getTemplateReleases(state, template.id)
   };
 }
 
@@ -2960,6 +3027,15 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async getTemplate(token, templateId) {
+      return transact(TEMPLATE_SCOPE, (state) => {
+        const auth = requireTemplateAccess(state, token, templateId, clock);
+        return {
+          template: formatTemplateDetail(state, auth.template)
+        };
+      });
+    },
+
     async listTemplateBuilds(token) {
       return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
@@ -3137,6 +3213,8 @@ export function createBurstFlareService(options = {}) {
           uploadGrant: {
             id: uploadGrant.id,
             method: "PUT",
+            transport: "worker_upload_grant",
+            storage: "r2",
             expiresAt: uploadGrant.expiresAt,
             contentType: uploadGrant.contentType,
             expectedBytes: uploadGrant.expectedBytes

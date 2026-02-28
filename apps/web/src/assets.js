@@ -340,7 +340,9 @@ export const html = `<!doctype html>
             </div>
           </div>
           <button id="promoteButton">Promote Version</button>
+          <div class="muted">Inspect a template to review versions, releases, and stored artifact totals.</div>
           <div class="list" id="templates"></div>
+          <pre id="templateInspector">Select a template to inspect.</pre>
           <pre id="builds">[]</pre>
         </div>
 
@@ -926,15 +928,31 @@ function renderTemplates(templates) {
     const active = template.activeVersion ? template.activeVersion.version : "none";
     const versions = template.versions.map((entry) => entry.version + ' (' + entry.status + ')').join(", ") || "no versions";
     const status = template.archivedAt ? 'archived' : 'active';
+    const bundleBytes = template.storageSummary ? template.storageSummary.bundleBytes || 0 : 0;
     const stateAction = template.archivedAt
       ? '<button class="secondary" data-template-restore="' + template.id + '">Restore</button>'
       : '<button class="secondary" data-template-archive="' + template.id + '">Archive</button>';
+    const inspectAction = '<button class="secondary" data-template-inspect="' + template.id + '">Inspect</button>';
     const deleteAction = '<button class="secondary" data-template-delete="' + template.id + '">Delete</button>';
     return '<div class="item"><strong>' + template.name + '</strong><br><span class="muted">' + template.id +
       '</span><br><span class="muted">status: ' + status + '</span><br><span class="muted">active: ' + active +
-      '</span><br><span class="muted">versions: ' + versions + '</span><div class="row" style="margin-top:8px">' + stateAction + deleteAction + '</div></div>';
+      '</span><br><span class="muted">versions: ' + versions + '</span><br><span class="muted">releases: ' + (template.releaseCount || 0) +
+      '</span><br><span class="muted">bundle bytes: ' + bundleBytes + '</span><div class="row" style="margin-top:8px">' +
+      inspectAction + stateAction + deleteAction + '</div></div>';
   });
   byId("templates").innerHTML = items.length ? items.join("") : '<div class="item muted">No templates yet.</div>';
+  if (!items.length) {
+    renderTemplateInspector(null);
+  }
+
+  document.querySelectorAll("[data-template-inspect]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await perform(async () => {
+        const detail = await api('/api/templates/' + button.dataset.templateInspect);
+        renderTemplateInspector(detail.template);
+      });
+    });
+  });
 
   document.querySelectorAll("[data-template-archive]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -956,6 +974,53 @@ function renderTemplates(templates) {
       await perform(async () => api('/api/templates/' + button.dataset.templateDelete, { method: 'DELETE' }));
     });
   });
+}
+
+function renderTemplateInspector(template) {
+  if (!template) {
+    byId("templateInspector").textContent = "Select a template to inspect.";
+    return;
+  }
+
+  byId("versionTemplate").value = template.id;
+  byId("promoteTemplate").value = template.id;
+
+  const lines = [
+    'name: ' + template.name,
+    'id: ' + template.id,
+    'status: ' + (template.archivedAt ? 'archived' : 'active'),
+    'activeVersion: ' + (template.activeVersion ? template.activeVersion.version + ' (' + template.activeVersion.id + ')' : 'none'),
+    'versions: ' + template.versions.length,
+    'releases: ' + (template.releases ? template.releases.length : template.releaseCount || 0),
+    'bundleBytes: ' + (template.storageSummary ? template.storageSummary.bundleBytes || 0 : 0),
+    'buildArtifactBytes: ' + (template.storageSummary ? template.storageSummary.buildArtifactBytes || 0 : 0),
+    'buildSummary: queued=' + (template.buildSummary?.queued || 0) +
+      ', building=' + (template.buildSummary?.building || 0) +
+      ', succeeded=' + (template.buildSummary?.succeeded || 0) +
+      ', failed=' + (template.buildSummary?.failed || 0) +
+      ', deadLettered=' + (template.buildSummary?.deadLettered || 0)
+  ];
+
+  if (Array.isArray(template.versions) && template.versions.length) {
+    lines.push('');
+    lines.push('versions:');
+    template.versions.forEach((version) => {
+      lines.push(
+        '- ' + version.version + ' [' + version.id + '] build=' + (version.build?.status || 'none') +
+        ' bundle=' + (version.bundleBytes || 0) + ' bytes'
+      );
+    });
+  }
+
+  if (Array.isArray(template.releases) && template.releases.length) {
+    lines.push('');
+    lines.push('releases:');
+    template.releases.forEach((release) => {
+      lines.push('- ' + release.id + ' version=' + release.versionId + ' mode=' + release.mode);
+    });
+  }
+
+  byId("templateInspector").textContent = lines.join('\n');
 }
 
 function renderSessions(sessions) {

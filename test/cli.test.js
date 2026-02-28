@@ -435,6 +435,20 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    code = await runCli(["template", "inspect", templateId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const inspectedTemplate = JSON.parse(stdout.data.trim());
+    assert.equal(inspectedTemplate.template.releaseCount, 1);
+    assert.equal(inspectedTemplate.template.releases.length, 1);
+    assert.equal(inspectedTemplate.template.latestRelease.id, promoteOutput.release.id);
+
+    stdout.data = "";
+
     code = await runCli(["template", "archive", templateId, "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -820,6 +834,7 @@ test("cli help uses flare branding", async () => {
 
   assert.equal(code, 0);
   assert.match(stdout.data, /^flare auth register/m);
+  assert.match(stdout.data, /^flare template inspect <templateId>/m);
   assert.match(stdout.data, /^flare session \[list\]/m);
   assert.doesNotMatch(stdout.data, /burstflare auth register/);
   assert.equal(stderr.data, "");

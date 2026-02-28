@@ -455,6 +455,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     })
   });
   assert.equal(bundleGrant.response.status, 200);
+  assert.equal(bundleGrant.data.uploadGrant.transport, "worker_upload_grant");
+  assert.equal(bundleGrant.data.uploadGrant.storage, "r2");
   const bundleUpload = await requestJson(app, bundleGrant.data.uploadGrant.url, {
     method: "PUT",
     headers: {
@@ -598,6 +600,15 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(promoted.data.release.binding.imageReference, parsedBuildArtifact.imageReference);
   assert.equal(promoted.data.release.binding.imageDigest, parsedBuildArtifact.imageDigest);
   assert.equal(promoted.data.release.binding.layerCount, 2);
+
+  const templateDetail = await requestJson(app, `/api/templates/${templateId}`, {
+    headers: ownerHeaders
+  });
+  assert.equal(templateDetail.response.status, 200);
+  assert.equal(templateDetail.data.template.releaseCount, 1);
+  assert.equal(templateDetail.data.template.releases.length, 1);
+  assert.equal(templateDetail.data.template.latestRelease.id, promoted.data.release.id);
+  assert.equal(templateDetail.data.template.storageSummary.bundleBytes >= bundleBody.length, true);
 
   const archived = await requestJson(app, `/api/templates/${templateId}/archive`, {
     method: "POST",

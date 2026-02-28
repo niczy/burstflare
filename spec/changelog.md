@@ -1385,3 +1385,29 @@ This file records what has already been implemented in the repository and what h
 - Verified live on the public Cloudflare deployment that:
   - `POST /api/workspaces/current/invites` returns `409` for a self-invite to an existing member
   - `GET /api/audit?limit=20` now includes `workspace.invite_rejected_existing_member` with the current user email in `details.email`
+
+## 86. Template Inspect Surface And Admin Catalog Polish
+
+- Added `GET /api/templates/:templateId` so operators can fetch a single template with:
+  - version/build history
+  - release history
+  - active version metadata
+  - build-state summary
+  - bundle/build artifact storage totals
+- The `flare` CLI now supports `template inspect <templateId>`.
+- The browser shell now includes a template inspector panel and `Inspect` actions on template cards, so operators can review version, release, and storage details without leaving the dashboard.
+- The template list view now shows richer summary metadata, including:
+  - release count
+  - latest release
+  - build-state summary
+  - bundle-byte totals
+- Template bundle upload grants now explicitly identify the supported Cloudflare-native upload path:
+  - `transport: "worker_upload_grant"`
+  - `storage: "r2"`
+- Verified locally with `npm run ci`, including new service, Worker, and CLI coverage for:
+  - upload-grant transport metadata
+  - template detail inspection
+  - CLI `template inspect`
+- Verified live on the public Cloudflare deployment that:
+  - `GET /api/templates/:templateId` returns the new detail shape with `releaseCount`, `releases`, and `storageSummary`
+  - the root shell HTML now includes the `templateInspector` panel
