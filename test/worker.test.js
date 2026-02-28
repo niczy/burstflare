@@ -1251,3 +1251,217 @@ test("worker exposes workflow-backed build dispatch", async () => {
   assert.equal(processed.build.status, "succeeded");
   assert.equal(processed.build.workflowStatus, "succeeded");
 });
+
+test("worker replays restored snapshots into the container runtime on session start", async () => {
+  const appliedRestores = [];
+  let runtime = {
+    desiredState: "stopped",
+    status: "idle",
+    runtimeState: "stopped",
+    bootCount: 0
+  };
+
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer() {
+      return {
+        async startRuntime({ sessionId }) {
+          runtime = {
+            ...runtime,
+            sessionId,
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy",
+            bootCount: runtime.bootCount + 1
+          };
+          return runtime;
+        },
+        async getRuntimeState() {
+          return runtime;
+        },
+        async fetch(request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/snapshot/restore") {
+            const payload = JSON.parse(await request.text());
+            appliedRestores.push(payload);
+            return new Response(
+              JSON.stringify({
+                appliedPath: `/workspace/.burstflare/snapshots/${payload.snapshotId}.snapshot`
+              }),
+              {
+                headers: {
+                  "content-type": "application/json; charset=utf-8"
+                }
+              }
+            );
+          }
+          return new Response("ok");
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "runtime-restore@example.com",
+    name: "Runtime Restore"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "runtime-restore",
+    description: "Runtime restore template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/runtime-restore:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const created = await service.createSession(owner.token, {
+    name: "runtime-restore-session",
+    templateId: template.template.id
+  });
+  const sessionId = created.session.id;
+  const authHeaders = {
+    authorization: `Bearer ${owner.token}`
+  };
+
+  const snapshot = await requestJson(app, `/api/sessions/${sessionId}/snapshots`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      label: "boot-restore"
+    })
+  });
+  assert.equal(snapshot.response.status, 200);
+
+  const payloadText = "runtime restore payload";
+  const uploaded = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content`, {
+    method: "PUT",
+    headers: {
+      ...authHeaders,
+      "content-type": "text/plain"
+    },
+    body: payloadText
+  });
+  assert.equal(uploaded.response.status, 200);
+
+  const restored = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/restore`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(restored.response.status, 200);
+  assert.equal(restored.data.session.lastRestoredSnapshotId, snapshot.data.snapshot.id);
+  assert.equal(appliedRestores.length, 0);
+
+  const started = await requestJson(app, `/api/sessions/${sessionId}/start`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(started.response.status, 200);
+  assert.equal(started.data.session.state, "running");
+  assert.equal(started.data.runtimeRestore.snapshotId, snapshot.data.snapshot.id);
+  assert.equal(appliedRestores.length, 1);
+  assert.equal(appliedRestores[0].snapshotId, snapshot.data.snapshot.id);
+  assert.equal(Buffer.from(appliedRestores[0].contentBase64, "base64").toString("utf8"), payloadText);
+});
+
+test("worker auto-captures snapshot content from a running container", async () => {
+  const autosavePayload = "container autosave payload";
+  let runtime = {
+    desiredState: "stopped",
+    status: "idle",
+    runtimeState: "stopped",
+    bootCount: 0
+  };
+
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer() {
+      return {
+        async startRuntime({ sessionId }) {
+          runtime = {
+            ...runtime,
+            sessionId,
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy",
+            bootCount: runtime.bootCount + 1
+          };
+          return runtime;
+        },
+        async getRuntimeState() {
+          return runtime;
+        },
+        async fetch(request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/snapshot/export") {
+            return new Response(autosavePayload, {
+              headers: {
+                "content-type": "text/plain; charset=utf-8"
+              }
+            });
+          }
+          return new Response("ok");
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "runtime-autosave@example.com",
+    name: "Runtime Autosave"
+  });
+  const template = await service.createTemplate(owner.token, {
+    name: "runtime-autosave",
+    description: "Runtime autosave template"
+  });
+  const version = await service.addTemplateVersion(owner.token, template.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/runtime-autosave:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(version.build.id);
+  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
+
+  const created = await service.createSession(owner.token, {
+    name: "runtime-autosave-session",
+    templateId: template.template.id
+  });
+  const sessionId = created.session.id;
+  const authHeaders = {
+    authorization: `Bearer ${owner.token}`
+  };
+
+  const started = await requestJson(app, `/api/sessions/${sessionId}/start`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(started.response.status, 200);
+  assert.equal(started.data.session.state, "running");
+
+  const snapshot = await requestJson(app, `/api/sessions/${sessionId}/snapshots`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      label: "autosave"
+    })
+  });
+  assert.equal(snapshot.response.status, 200);
+  assert.equal(snapshot.data.snapshot.bytes, autosavePayload.length);
+  assert.equal(snapshot.data.runtimeCapture.bytes, autosavePayload.length);
+
+  const content = await app.fetch(
+    new Request(`http://example.test/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/content`, {
+      headers: authHeaders
+    })
+  );
+  assert.equal(content.status, 200);
+  assert.equal(await content.text(), autosavePayload);
+});

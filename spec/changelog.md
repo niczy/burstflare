@@ -918,3 +918,53 @@ This file records what has already been implemented in the repository and what h
     - `session.state = running`
     - `session.runtimeStatus = running`
     - `session.runtimeState = healthy`
+
+## 64. Container-Applied Snapshot Restore
+
+- Added a container-side snapshot restore endpoint in the session runtime image.
+- The session container now keeps a lightweight virtual restored-snapshot state, including:
+  - `restoredSnapshotId`
+  - `restoredAt`
+  - restored content metadata
+  - virtual file paths under `/workspace/.burstflare`
+- Snapshot restore now applies to the active container runtime when:
+  - the session is currently running
+  - the session container binding is present
+- Session start and restart now replay the most recently restored snapshot into the container runtime after the runtime comes up.
+- The session container now surfaces restored snapshot state in:
+  - preview HTML payload
+  - `/meta`
+  - shell commands such as `env`, `ls`, and `cat /workspace/.burstflare/last.snapshot`
+- Added Worker test coverage that proves:
+  - restoring a snapshot on a non-running session does not eagerly mutate the container
+  - starting that session replays the stored snapshot into the container runtime
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - `POST /api/sessions/:id/snapshots/:snapshotId/restore` now returns `runtimeRestore` for running sessions
+  - the live `runtimeRestore` payload includes:
+    - `appliedPath`
+    - `aliasPath`
+    - `bytes`
+    - `contentType`
+  - the live preview HTML now includes the restored snapshot id after a running-session restore
+
+## 65. Automatic Runtime Snapshot Capture
+
+- Snapshot creation now auto-captures runtime state from the session container when:
+  - the session is running
+  - the session container binding is present
+- Added a container-side snapshot export endpoint in the session runtime image.
+- The session runtime now exports either:
+  - the current restored snapshot payload
+  - or a fallback JSON runtime snapshot if no restored snapshot has been applied yet
+- `POST /api/sessions/:sessionId/snapshots` now:
+  - creates the snapshot record
+  - fetches runtime snapshot content from the running container
+  - stores that content into snapshot storage automatically
+  - returns `runtimeCapture` metadata in the API response
+- Added Worker test coverage that proves:
+  - creating a snapshot for a running session auto-populates snapshot content
+  - the stored snapshot can be downloaded immediately afterward
+- Verified locally through `npm run ci` and in the live Cloudflare deployment that:
+  - snapshot creation on a running session now returns `runtimeCapture`
+  - the live auto-captured snapshot content is persisted immediately
+  - the captured snapshot content includes the running session id

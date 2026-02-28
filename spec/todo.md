@@ -168,10 +168,10 @@ This file lists the remaining work required to close the gap between the current
   - container binding
   - container-backed preview path
   - live deploy verification
+  - snapshot-aware boot now replays the last restored snapshot into the runtime on session start/restart
 - Remaining:
   - startup hydration from persisted state
   - sleep/stop hooks
-  - snapshot-aware boot and restore
   - lifecycle analytics emission
 
 ### PR 12: SSH Over WebSocket End-To-End
@@ -202,7 +202,7 @@ This file lists the remaining work required to close the gap between the current
 
 ### PR 14: Workspace Snapshots, Persisted Paths, And Restore
 
-- Status: partially complete
+- Status: mostly complete
 - Done:
   - snapshot create/list metadata
   - snapshot content upload and download routes
@@ -214,9 +214,11 @@ This file lists the remaining work required to close the gap between the current
   - persisted-path config is now exposed in CLI and web template version inputs
   - explicit snapshot restore route with restore-state safety checks
   - browser restore control and restored-snapshot visibility in the session UI
+  - running-session snapshot restore now applies into the live container runtime
+  - session start/restart now replay the last restored snapshot into the container runtime
+  - snapshot creation on running sessions now auto-captures runtime state into snapshot storage
 - Remaining:
-  - container-side automatic snapshot upload/download
-  - container-side restore into the runtime filesystem
+  - broader persisted-path-aware snapshot capture/restore instead of the current runtime-level snapshot payload
 
 ### PR 15: Usage Metering, Quotas, And Plan Enforcement
 

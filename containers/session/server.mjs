@@ -6,6 +6,83 @@ import path from "node:path";
 const port = Number(process.env.PORT || 8080);
 const textEncoder = new TextEncoder();
 const wsMagic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const runtimeState = {
+  restoredSnapshotId: null,
+  restoredAt: null,
+  restoredBytes: 0,
+  restoredContentType: null,
+  files: new Map()
+};
+
+function fromBase64(value) {
+  return Buffer.from(String(value || ""), "base64");
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function applySnapshotRestore(payload) {
+  const sessionId = String(payload.sessionId || "unknown");
+  const snapshotId = String(payload.snapshotId || "unknown");
+  const label = String(payload.label || snapshotId);
+  const contentType = String(payload.contentType || "application/octet-stream");
+  const raw = fromBase64(payload.contentBase64);
+  const text = raw.toString("utf8");
+  const snapshotPath = `/workspace/.burstflare/snapshots/${snapshotId}.snapshot`;
+  const aliasPath = "/workspace/.burstflare/last.snapshot";
+
+  runtimeState.restoredSnapshotId = snapshotId;
+  runtimeState.restoredAt = new Date().toISOString();
+  runtimeState.restoredBytes = raw.byteLength;
+  runtimeState.restoredContentType = contentType;
+  runtimeState.files.set(snapshotPath, text);
+  runtimeState.files.set(aliasPath, text);
+
+  return {
+    ok: true,
+    sessionId,
+    snapshotId,
+    label,
+    appliedPath: snapshotPath,
+    aliasPath,
+    restoredAt: runtimeState.restoredAt,
+    bytes: raw.byteLength,
+    contentType
+  };
+}
+
+function exportSnapshotPayload(sessionId = "unknown") {
+  const aliasPath = "/workspace/.burstflare/last.snapshot";
+  const current = runtimeState.files.get(aliasPath);
+  if (current !== undefined) {
+    return {
+      body: Buffer.from(current, "utf8"),
+      contentType: runtimeState.restoredContentType || "text/plain; charset=utf-8"
+    };
+  }
+
+  const fallback = JSON.stringify(
+    {
+      sessionId,
+      exportedAt: new Date().toISOString(),
+      restoredSnapshotId: runtimeState.restoredSnapshotId,
+      restoredAt: runtimeState.restoredAt,
+      cwd: "/workspace"
+    },
+    null,
+    2
+  );
+  return {
+    body: Buffer.from(fallback, "utf8"),
+    contentType: "application/json; charset=utf-8"
+  };
+}
 
 function renderHtml(req) {
   const sessionId = new URL(req.url, "http://localhost").searchParams.get("sessionId") || "unknown";
@@ -80,7 +157,10 @@ function renderHtml(req) {
           sessionId,
           hostname: os.hostname(),
           now: new Date().toISOString(),
-          node: process.version
+          node: process.version,
+          restoredSnapshotId: runtimeState.restoredSnapshotId,
+          restoredAt: runtimeState.restoredAt,
+          restoredFiles: Array.from(runtimeState.files.keys())
         },
         null,
         2
@@ -194,7 +274,7 @@ function runShellCommand(state, command) {
   }
 
   if (trimmed === "help") {
-    return "available: help, pwd, ls, cd <path>, whoami, env, uname -a, exit";
+    return "available: help, pwd, ls, cd <path>, cat <path>, whoami, env, uname -a, exit";
   }
 
   if (trimmed === "pwd") {
@@ -202,6 +282,19 @@ function runShellCommand(state, command) {
   }
 
   if (trimmed === "ls") {
+    if (state.cwd === "/workspace/.burstflare/snapshots") {
+      const snapshots = Array.from(runtimeState.files.keys())
+        .filter((entry) => entry.startsWith("/workspace/.burstflare/snapshots/"))
+        .map((entry) => path.posix.basename(entry));
+      return snapshots.length ? snapshots.join("\n") : "";
+    }
+    if (state.cwd === "/workspace/.burstflare") {
+      const entries = ["last.snapshot"];
+      if (Array.from(runtimeState.files.keys()).some((entry) => entry.startsWith("/workspace/.burstflare/snapshots/"))) {
+        entries.push("snapshots");
+      }
+      return entries.join("\n");
+    }
     return [".burstflare", "workspace", "README.md", "logs"].join("\n");
   }
 
@@ -214,7 +307,8 @@ function runShellCommand(state, command) {
       `SESSION_ID=${state.sessionId}`,
       "USER=dev",
       `HOME=${state.home}`,
-      `PWD=${state.cwd}`
+      `PWD=${state.cwd}`,
+      `LAST_RESTORED_SNAPSHOT=${runtimeState.restoredSnapshotId || ""}`
     ].join("\n");
   }
 
@@ -231,6 +325,13 @@ function runShellCommand(state, command) {
     const target = trimmed.slice(2).trim();
     state.cwd = resolveShellPath(state.cwd, target);
     return state.cwd;
+  }
+
+  if (trimmed.startsWith("cat")) {
+    const target = trimmed.slice(3).trim();
+    const resolved = resolveShellPath(state.cwd, target);
+    const content = runtimeState.files.get(resolved);
+    return content ?? `cat: ${resolved}: No such file or directory`;
   }
 
   return [
@@ -312,7 +413,7 @@ function attachShell(req, socket) {
   });
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
 
   if (url.pathname === "/health") {
@@ -334,9 +435,27 @@ const server = http.createServer((req, res) => {
         path: url.pathname,
         search: url.search,
         hostname: os.hostname(),
-        node: process.version
+        node: process.version,
+        restoredSnapshotId: runtimeState.restoredSnapshotId,
+        restoredAt: runtimeState.restoredAt
       })
     );
+    return;
+  }
+
+  if (url.pathname === "/snapshot/restore" && req.method === "POST") {
+    const body = await readRequestBody(req);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    const restored = applySnapshotRestore(payload);
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(restored));
+    return;
+  }
+
+  if (url.pathname === "/snapshot/export" && req.method === "GET") {
+    const payload = exportSnapshotPayload(url.searchParams.get("sessionId") || "unknown");
+    res.writeHead(200, { "content-type": payload.contentType });
+    res.end(payload.body);
     return;
   }
 
