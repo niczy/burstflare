@@ -25,7 +25,6 @@ This file lists the remaining work required to close the gap between the current
 
 - Status: mostly complete
 - Remaining:
-  - tighten CI with deployment-oriented smoke checks
   - add staging/production environment separation that matches the plan more closely
 
 ### PR 02: Data Model And Migration Framework
@@ -245,11 +244,13 @@ This file lists the remaining work required to close the gap between the current
 ### PR 18: Beta Readiness, Docs, And Production Rollout
 
 - Status: not complete
+- Done:
+  - baseline synthetic smoke coverage exists for auth, build, session, snapshot, and report flows
 - Remaining:
   - operator runbooks
   - incident procedures
   - staging-to-production rollout checklist
-  - full synthetic smoke coverage
+  - fuller synthetic smoke coverage across the remaining runtime and operator edge cases
   - limited beta onboarding plan
   - narrowing feature flags to the supported beta scope
 

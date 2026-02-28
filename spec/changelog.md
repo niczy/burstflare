@@ -444,3 +444,22 @@ This file records what has already been implemented in the repository and what h
   - an `Auth Sessions` management card
   - a `Logout All Sessions` control
   - browser bundle wiring for `/api/auth/sessions`, targeted revoke, and `/api/auth/logout-all`
+
+## 39. Deployment-Oriented Smoke Coverage
+
+- Added a reusable smoke script at `scripts/smoke.mjs`.
+- The smoke flow now covers:
+  - health readiness
+  - registration and secondary login
+  - auth-session listing
+  - template creation
+  - template version enqueue and build processing
+  - promotion
+  - session creation and start
+  - snapshot creation
+  - admin report fetch
+- Added `npm run smoke`.
+- Updated GitHub Actions CI to boot the local dev server and run the smoke flow after lint, build, and tests.
+- Verified the smoke flow passes:
+  - locally against the dev server
+  - remotely against the deployed Worker

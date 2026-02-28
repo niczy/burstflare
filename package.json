@@ -16,6 +16,7 @@
     "cf:verify": "node scripts/cloudflare-verify.mjs",
     "dev": "node apps/edge/src/dev-server.js",
     "lint": "node scripts/lint.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "test": "node --test"
   },
   "engines": {
