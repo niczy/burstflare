@@ -140,6 +140,24 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    const staleConfig = JSON.parse(await readFile(configPath, "utf8"));
+    staleConfig.token = "browser_invalid";
+    await writeFile(configPath, JSON.stringify(staleConfig, null, 2));
+
+    code = await runCli(["auth", "whoami", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const whoamiOutput = JSON.parse(stdout.data.trim());
+    assert.equal(whoamiOutput.user.email, "cli@example.com");
+    const refreshedConfig = JSON.parse(await readFile(configPath, "utf8"));
+    assert.notEqual(refreshedConfig.token, "browser_invalid");
+
+    stdout.data = "";
+
     code = await runCli(["template", "create", "go-dev", "--description", "Go runtime", "--url", "http://local"], {
       fetchImpl,
       stdout,

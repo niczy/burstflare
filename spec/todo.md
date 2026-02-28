@@ -51,6 +51,7 @@ This file lists the remaining work required to close the gap between the current
   - basic registration and token-based auth flows exist
   - refresh-token rotation
   - explicit logout for issued access tokens
+  - browser client token refresh and logout UX
 - Remaining:
   - WebAuthn
   - Turnstile
@@ -89,6 +90,7 @@ This file lists the remaining work required to close the gap between the current
   - device-style auth flow
   - auth/session-oriented commands
   - refresh and logout commands
+  - automatic token refresh for authenticated CLI requests
 - Remaining:
   - broader CLI coverage and command ergonomics
 

@@ -204,3 +204,11 @@ This file records what has already been implemented in the repository and what h
 - Added a Worker `scheduled` handler that enqueues reconcile jobs when the cron fires.
 - Kept the existing queue consumer as the execution path for scheduled reconcile work.
 - Verified the live deployment now includes the `*/15 * * * *` schedule trigger.
+
+## 21. Client-Side Auto Refresh And Logout UX
+
+- Added CLI-side automatic access-token refresh on `401` responses when a refresh token is available.
+- Added web-app storage for refresh tokens in the browser client.
+- Added web-app automatic token refresh on `401` responses.
+- Added an explicit logout control in the web app.
+- Verified the local CLI can recover against the live Worker after the stored access token is deliberately corrupted, using only the saved refresh token.

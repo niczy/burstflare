@@ -188,6 +188,7 @@ export const html = `<!doctype html>
           <div class="row">
             <button id="registerButton">Register</button>
             <button class="secondary" id="loginButton">Login</button>
+            <button class="secondary" id="logoutButton">Logout</button>
           </div>
           <div class="muted" id="identity">Not signed in</div>
           <div class="error" id="errors"></div>
@@ -319,6 +320,7 @@ export const html = `<!doctype html>
 export const appJs = `
 const state = {
   token: localStorage.getItem("burstflare_token") || "",
+  refreshToken: localStorage.getItem("burstflare_refresh_token") || "",
   me: null
 };
 
@@ -330,16 +332,42 @@ function setError(message) {
   byId("errors").textContent = message || "";
 }
 
-function setToken(token) {
+function setAuth(token, refreshToken = state.refreshToken) {
   state.token = token || "";
+  state.refreshToken = refreshToken || "";
   if (state.token) {
     localStorage.setItem("burstflare_token", state.token);
   } else {
     localStorage.removeItem("burstflare_token");
   }
+  if (state.refreshToken) {
+    localStorage.setItem("burstflare_refresh_token", state.refreshToken);
+  } else {
+    localStorage.removeItem("burstflare_refresh_token");
+  }
 }
 
-async function api(path, options = {}) {
+async function refreshAuth() {
+  if (!state.refreshToken) {
+    throw new Error("Authentication expired");
+  }
+  const response = await fetch('/api/auth/refresh', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({ refreshToken: state.refreshToken })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    setAuth("", "");
+    throw new Error(data.error || "Authentication expired");
+  }
+  setAuth(data.token, data.refreshToken);
+  return data;
+}
+
+async function api(path, options = {}, allowRetry = true) {
   const headers = new Headers(options.headers || {});
   if (!headers.has("content-type") && options.body !== undefined) {
     headers.set("content-type", "application/json");
@@ -349,6 +377,10 @@ async function api(path, options = {}) {
   }
   const response = await fetch(path, { ...options, headers });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && allowRetry && state.refreshToken) {
+    await refreshAuth();
+    return api(path, options, false);
+  }
   if (!response.ok) {
     throw new Error(data.error || "Request failed");
   }
@@ -481,7 +513,7 @@ byId("registerButton").addEventListener("click", async () => {
       method: 'POST',
       body: JSON.stringify({ email: byId("email").value, name: byId("name").value })
     });
-    setToken(data.token);
+    setAuth(data.token, data.refreshToken);
   });
 });
 
@@ -489,10 +521,36 @@ byId("loginButton").addEventListener("click", async () => {
   await perform(async () => {
     const data = await api('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email: byId("email").value, kind: 'api' })
+      body: JSON.stringify({ email: byId("email").value, kind: 'browser' })
     });
-    setToken(data.token);
+    setAuth(data.token, data.refreshToken);
   });
+});
+
+byId("logoutButton").addEventListener("click", async () => {
+  setError("");
+  try {
+    if (state.token) {
+      await api('/api/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken: state.refreshToken })
+      });
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    setAuth("", "");
+    state.me = null;
+    renderIdentity();
+    byId("members").textContent = "";
+    byId("templates").textContent = "";
+    byId("builds").textContent = "";
+    byId("sessions").textContent = "";
+    byId("usage").textContent = "";
+    byId("report").textContent = "";
+    byId("releases").textContent = "";
+    byId("audit").textContent = "";
+  }
 });
 
 byId("inviteButton").addEventListener("click", async () => {
@@ -604,7 +662,7 @@ byId("reportButton").addEventListener("click", () => perform(async () => {}));
 if (state.token) {
   refresh().catch((error) => {
     console.error(error);
-    setToken("");
+    setAuth("", "");
     state.me = null;
     renderIdentity();
     setError(error.message || "Could not restore session");

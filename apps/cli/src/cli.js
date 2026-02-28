@@ -169,9 +169,109 @@ export async function runCli(argv, dependencies = {}) {
   const config = await readConfig(configPath);
   const { positionals, options } = parseArgs(argv);
   const baseUrl = getBaseUrl(options, config);
-  const token = getToken(options, config);
-  const refreshToken = getRefreshToken(options, config);
+  let token = getToken(options, config);
+  let refreshToken = getRefreshToken(options, config);
+  let authConfig = config;
   const [command = "help", subcommand, ...rest] = positionals;
+
+  async function rotateAuthTokens() {
+    if (!refreshToken) {
+      const error = new Error("Refresh token missing");
+      error.status = 401;
+      throw error;
+    }
+    const data = await requestJson(
+      `${baseUrl}/api/auth/refresh`,
+      {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ refreshToken })
+      },
+      fetchImpl
+    );
+    await saveAuthConfig(configPath, authConfig, baseUrl, data);
+    authConfig = {
+      ...authConfig,
+      baseUrl,
+      token: data.token,
+      refreshToken: data.refreshToken,
+      workspaceId: data.workspace.id,
+      userEmail: data.user.email
+    };
+    token = data.token;
+    refreshToken = data.refreshToken || "";
+    return data;
+  }
+
+  function withCurrentAuth(existingHeaders = {}) {
+    const merged = new Headers(existingHeaders);
+    if (!merged.has("authorization") && token) {
+      merged.set("authorization", `Bearer ${token}`);
+    }
+    return Object.fromEntries(merged.entries());
+  }
+
+  async function requestJsonAuthed(url, options = {}) {
+    const firstAttempt = {
+      ...options,
+      headers: withCurrentAuth(options.headers || {})
+    };
+    try {
+      return await requestJson(url, firstAttempt, fetchImpl);
+    } catch (error) {
+      if (error.status !== 401 || !refreshToken) {
+        throw error;
+      }
+      await rotateAuthTokens();
+      return requestJson(
+        url,
+        {
+          ...options,
+          headers: withCurrentAuth(options.headers || {})
+        },
+        fetchImpl
+      );
+    }
+  }
+
+  async function requestTextAuthed(url, options = {}) {
+    const firstAttempt = {
+      ...options,
+      headers: withCurrentAuth(options.headers || {})
+    };
+    try {
+      return await requestText(url, firstAttempt, fetchImpl);
+    } catch (error) {
+      if (error.status !== 401 || !refreshToken) {
+        throw error;
+      }
+      await rotateAuthTokens();
+      return requestText(
+        url,
+        {
+          ...options,
+          headers: withCurrentAuth(options.headers || {})
+        },
+        fetchImpl
+      );
+    }
+  }
+
+  async function fetchAuthed(url, options = {}) {
+    const attempt = () =>
+      fetchImpl(url, {
+        ...options,
+        headers: withCurrentAuth(options.headers || {})
+      });
+
+    let response = await attempt();
+    if (response.status !== 401 || !refreshToken) {
+      return response;
+    }
+    await rotateAuthTokens();
+    response = await attempt();
+    return response;
+  }
 
   try {
     if (command === "help") {
@@ -190,7 +290,7 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        await saveAuthConfig(configPath, config, baseUrl, data);
+        await saveAuthConfig(configPath, authConfig, baseUrl, data);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -205,7 +305,7 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        await saveAuthConfig(configPath, config, baseUrl, data);
+        await saveAuthConfig(configPath, authConfig, baseUrl, data);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -225,14 +325,13 @@ export async function runCli(argv, dependencies = {}) {
       }
 
       if (subcommand === "device-approve") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/cli/device/approve`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ deviceCode: options.code })
-          },
-          fetchImpl
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -248,64 +347,61 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        await saveAuthConfig(configPath, config, baseUrl, data);
+        await saveAuthConfig(configPath, authConfig, baseUrl, data);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "refresh") {
-        const data = await requestJson(
-          `${baseUrl}/api/auth/refresh`,
-          {
-            method: "POST",
-            headers: headers(),
-            body: JSON.stringify({ refreshToken })
-          },
-          fetchImpl
-        );
-        await saveAuthConfig(configPath, config, baseUrl, data);
+        const data = await rotateAuthTokens();
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "logout") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/auth/logout`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ refreshToken })
-          },
-          fetchImpl
+          }
         );
-        await clearAuthConfig(configPath, config, baseUrl);
+        await clearAuthConfig(configPath, authConfig, baseUrl);
+        authConfig = {
+          ...authConfig,
+          baseUrl,
+          token: "",
+          refreshToken: "",
+          workspaceId: ""
+        };
+        token = "";
+        refreshToken = "";
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "switch-workspace") {
         const workspaceId = rest[0];
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/auth/switch-workspace`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ workspaceId })
-          },
-          fetchImpl
+          }
         );
-        await saveAuthConfig(configPath, config, baseUrl, data);
+        await saveAuthConfig(configPath, authConfig, baseUrl, data);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "whoami") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/auth/me`,
           {
-            headers: headers(token, false)
-          },
-          fetchImpl
+            headers: headers(undefined, false)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -314,52 +410,48 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "workspace") {
       if (subcommand === "list") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/workspaces`,
           {
-            headers: headers(token, false)
-          },
-          fetchImpl
+            headers: headers(undefined, false)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "members") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/workspaces/current/members`,
           {
-            headers: headers(token, false)
-          },
-          fetchImpl
+            headers: headers(undefined, false)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "invite") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/workspaces/current/invites`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ email: options.email, role: options.role || "member" })
-          },
-          fetchImpl
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "accept-invite") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/workspaces/current/invites/accept`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ inviteCode: options.code })
-          },
-          fetchImpl
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -367,14 +459,13 @@ export async function runCli(argv, dependencies = {}) {
 
       if (subcommand === "set-role") {
         const userId = rest[0];
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/workspaces/current/members/${userId}/role`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ role: options.role })
-          },
-          fetchImpl
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -382,14 +473,13 @@ export async function runCli(argv, dependencies = {}) {
 
       if (subcommand === "plan") {
         const plan = rest[0];
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/workspaces/current/plan`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ plan })
-          },
-          fetchImpl
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -399,14 +489,13 @@ export async function runCli(argv, dependencies = {}) {
     if (command === "template") {
       if (subcommand === "create") {
         const name = rest[0];
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/templates`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ name, description: options.description || "" })
-          },
-          fetchImpl
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -414,11 +503,11 @@ export async function runCli(argv, dependencies = {}) {
 
       if (subcommand === "upload") {
         const templateId = rest[0];
-        const created = await requestJson(
+        const created = await requestJsonAuthed(
           `${baseUrl}/api/templates/${templateId}/versions`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({
               version: options.version,
               notes: options.notes || "",
@@ -427,23 +516,21 @@ export async function runCli(argv, dependencies = {}) {
                 features: ["ssh", "browser", "snapshots"]
               }
             })
-          },
-          fetchImpl
+          }
         );
         let result = created;
         if (options.file) {
           const bundleBody = await readFile(options.file);
-          const uploaded = await requestJson(
+          const uploaded = await requestJsonAuthed(
             `${baseUrl}/api/templates/${templateId}/versions/${created.templateVersion.id}/bundle`,
             {
               method: "PUT",
               headers: {
-                ...headers(token, false),
+                ...headers(undefined, false),
                 "content-type": options["content-type"] || "application/octet-stream"
               },
               body: bundleBody
-            },
-            fetchImpl
+            }
           );
           result = {
             ...created,
@@ -458,26 +545,24 @@ export async function runCli(argv, dependencies = {}) {
       if (subcommand === "promote") {
         const templateId = rest[0];
         const versionId = rest[1];
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/templates/${templateId}/promote`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ versionId })
-          },
-          fetchImpl
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
 
       if (subcommand === "list") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/templates`,
           {
-            headers: headers(token, false)
-          },
-          fetchImpl
+            headers: headers(undefined, false)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -486,12 +571,11 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "build") {
       if (subcommand === "list") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/template-builds`,
           {
-            headers: headers(token, false)
-          },
-          fetchImpl
+            headers: headers(undefined, false)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -499,25 +583,23 @@ export async function runCli(argv, dependencies = {}) {
 
       if (subcommand === "log") {
         const buildId = rest[0];
-        const data = await requestText(
+        const data = await requestTextAuthed(
           `${baseUrl}/api/template-builds/${buildId}/log`,
           {
-            headers: headers(token, false)
-          },
-          fetchImpl
+            headers: headers(undefined, false)
+          }
         );
         print(stdout, data.trimEnd());
         return 0;
       }
 
       if (subcommand === "process") {
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/template-builds/process`,
           {
             method: "POST",
-            headers: headers(token)
-          },
-          fetchImpl
+            headers: headers(undefined)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -525,13 +607,12 @@ export async function runCli(argv, dependencies = {}) {
 
       if (subcommand === "retry") {
         const buildId = rest[0];
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/template-builds/${buildId}/retry`,
           {
             method: "POST",
-            headers: headers(token)
-          },
-          fetchImpl
+            headers: headers(undefined)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -539,12 +620,11 @@ export async function runCli(argv, dependencies = {}) {
     }
 
     if (command === "release" && subcommand === "list") {
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/releases`,
         {
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -553,34 +633,31 @@ export async function runCli(argv, dependencies = {}) {
     if (command === "up") {
       const name = subcommand;
       const templateId = options.template;
-      const created = await requestJson(
+      const created = await requestJsonAuthed(
         `${baseUrl}/api/sessions`,
         {
           method: "POST",
-          headers: headers(token),
+          headers: headers(undefined),
           body: JSON.stringify({ name, templateId })
-        },
-        fetchImpl
+        }
       );
-      const started = await requestJson(
+      const started = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${created.session.id}/start`,
         {
           method: "POST",
-          headers: headers(token)
-        },
-        fetchImpl
+          headers: headers(undefined)
+        }
       );
       print(stdout, JSON.stringify(started, null, 2));
       return 0;
     }
 
     if (command === "list") {
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions`,
         {
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -588,12 +665,11 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "status") {
       const sessionId = subcommand;
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}`,
         {
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -601,12 +677,11 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "events") {
       const sessionId = subcommand;
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}/events`,
         {
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -614,13 +689,12 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "start") {
       const sessionId = subcommand;
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}/start`,
         {
           method: "POST",
-          headers: headers(token)
-        },
-        fetchImpl
+          headers: headers(undefined)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -628,13 +702,12 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "down") {
       const sessionId = subcommand;
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}/stop`,
         {
           method: "POST",
-          headers: headers(token)
-        },
-        fetchImpl
+          headers: headers(undefined)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -642,13 +715,12 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "restart") {
       const sessionId = subcommand;
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}/restart`,
         {
           method: "POST",
-          headers: headers(token)
-        },
-        fetchImpl
+          headers: headers(undefined)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -656,13 +728,12 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "delete") {
       const sessionId = subcommand;
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}`,
         {
           method: "DELETE",
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -671,29 +742,27 @@ export async function runCli(argv, dependencies = {}) {
     if (command === "snapshot") {
       if (subcommand === "save") {
         const sessionId = rest[0];
-        const created = await requestJson(
+        const created = await requestJsonAuthed(
           `${baseUrl}/api/sessions/${sessionId}/snapshots`,
           {
             method: "POST",
-            headers: headers(token),
+            headers: headers(undefined),
             body: JSON.stringify({ label: options.label || "manual" })
-          },
-          fetchImpl
+          }
         );
         let result = created;
         if (options.file) {
           const snapshotBody = await readFile(options.file);
-          const uploaded = await requestJson(
+          const uploaded = await requestJsonAuthed(
             `${baseUrl}/api/sessions/${sessionId}/snapshots/${created.snapshot.id}/content`,
             {
               method: "PUT",
               headers: {
-                ...headers(token, false),
+                ...headers(undefined, false),
                 "content-type": options["content-type"] || "application/octet-stream"
               },
               body: snapshotBody
-            },
-            fetchImpl
+            }
           );
           result = uploaded;
         }
@@ -703,12 +772,11 @@ export async function runCli(argv, dependencies = {}) {
 
       if (subcommand === "list") {
         const sessionId = rest[0];
-        const data = await requestJson(
+        const data = await requestJsonAuthed(
           `${baseUrl}/api/sessions/${sessionId}/snapshots`,
           {
-            headers: headers(token, false)
-          },
-          fetchImpl
+            headers: headers(undefined, false)
+          }
         );
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
@@ -717,8 +785,8 @@ export async function runCli(argv, dependencies = {}) {
       if (subcommand === "get") {
         const sessionId = rest[0];
         const snapshotId = rest[1];
-        const response = await fetchImpl(`${baseUrl}/api/sessions/${sessionId}/snapshots/${snapshotId}/content`, {
-          headers: headers(token, false)
+        const response = await fetchAuthed(`${baseUrl}/api/sessions/${sessionId}/snapshots/${snapshotId}/content`, {
+          headers: headers(undefined, false)
         });
         const body = new Uint8Array(await response.arrayBuffer());
         if (!response.ok) {
@@ -746,24 +814,22 @@ export async function runCli(argv, dependencies = {}) {
     }
 
     if (command === "usage") {
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/usage`,
         {
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
     }
 
     if (command === "report") {
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/admin/report`,
         {
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -771,13 +837,12 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "reconcile") {
       const route = options.enqueue ? "/api/admin/reconcile/enqueue" : "/api/admin/reconcile";
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}${route}`,
         {
           method: "POST",
-          headers: headers(token)
-        },
-        fetchImpl
+          headers: headers(undefined)
+        }
       );
       print(stdout, JSON.stringify(data, null, 2));
       return 0;
@@ -785,12 +850,11 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "preview") {
       const sessionId = subcommand;
-      const session = await requestJson(
+      const session = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}`,
         {
-          headers: headers(token, false)
-        },
-        fetchImpl
+          headers: headers(undefined, false)
+        }
       );
       const url = new URL(session.session.previewUrl, baseUrl).toString();
       print(stdout, url);
@@ -799,13 +863,12 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "ssh") {
       const sessionId = subcommand;
-      const data = await requestJson(
+      const data = await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}/ssh-token`,
         {
           method: "POST",
-          headers: headers(token)
-        },
-        fetchImpl
+          headers: headers(undefined)
+        }
       );
       print(stdout, data.sshCommand);
       return 0;
