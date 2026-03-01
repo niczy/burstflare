@@ -1,3 +1,5 @@
+// @ts-check
+
 export function clone(value) {
   if (typeof structuredClone === "function") {
     return structuredClone(value);
