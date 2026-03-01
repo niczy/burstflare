@@ -1,3 +1,5 @@
+// @ts-check
+
 import { spawn } from "node:child_process";
 import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -15,10 +17,43 @@ import {
 const CLI_NAME = "flare";
 const DEFAULT_BASE_URL = "https://burstflare.dev";
 
+/**
+ * @typedef {Record<string, any> & {
+ *   clientId?: string;
+ *   sshKeys?: Record<string, any>;
+ *   baseUrl?: string;
+ *   token?: string;
+ *   refreshToken?: string;
+ *   workspaceId?: string;
+ *   userEmail?: string;
+ * }} CLIConfig
+ */
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ *   code?: number | string | null;
+ * }} CliError
+ */
+
+/**
+ * @param {string} message
+ * @param {number} status
+ * @returns {CliError}
+ */
+function createCliError(message, status) {
+  const error = /** @type {CliError} */ (new Error(message));
+  error.status = status;
+  return error;
+}
+
 function createClientId() {
   return `cli_${globalThis.crypto.randomUUID()}`;
 }
 
+/**
+ * @param {CLIConfig} [config]
+ */
 function normalizeSshKeys(config = {}) {
   const keys = config?.sshKeys;
   if (!keys || typeof keys !== "object" || Array.isArray(keys)) {
@@ -27,6 +62,10 @@ function normalizeSshKeys(config = {}) {
   return keys;
 }
 
+/**
+ * @param {CLIConfig} [config]
+ * @returns {CLIConfig}
+ */
 function withLocalKeyState(config = {}) {
   return {
     ...config,
@@ -241,38 +280,44 @@ function defaultConfigPath(env = process.env) {
 async function readConfig(configPath) {
   try {
     const raw = await readFile(configPath, "utf8");
-    return JSON.parse(raw);
+    return /** @type {CLIConfig} */ (JSON.parse(raw));
   } catch (error) {
-    if (error.code === "ENOENT") {
-      return {};
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
+      return /** @type {CLIConfig} */ ({});
     }
     throw error;
   }
 }
 
+/**
+ * @param {string} configPath
+ * @param {CLIConfig} value
+ */
 async function writeConfig(configPath, value) {
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(value, null, 2));
 }
 
+/**
+ * @returns {Promise<any>}
+ */
 async function requestJson(url, options = {}, fetchImpl = fetch) {
   const response = await fetchImpl(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.error || `Request failed (${response.status})`);
-    error.status = response.status;
-    throw error;
+    throw createCliError(data.error || `Request failed (${response.status})`, response.status);
   }
   return data;
 }
 
+/**
+ * @returns {Promise<string>}
+ */
 async function requestText(url, options = {}, fetchImpl = fetch) {
   const response = await fetchImpl(url, options);
   const text = await response.text();
   if (!response.ok) {
-    const error = new Error(text || `Request failed (${response.status})`);
-    error.status = response.status;
-    throw error;
+    throw createCliError(text || `Request failed (${response.status})`, response.status);
   }
   return text;
 }
@@ -648,9 +693,7 @@ function parseIntegerOption(value) {
   }
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) {
-    const error = new Error("Expected an integer option value");
-    error.status = 400;
-    throw error;
+    throw createCliError("Expected an integer option value", 400);
   }
   return parsed;
 }
@@ -721,9 +764,9 @@ async function runForegroundCommand(spawnImpl, command, args, options = {}) {
         resolve();
         return;
       }
-      const error = new Error(
+      const error = /** @type {CliError} */ (new Error(
         signal ? `${command} terminated with signal ${signal}` : `${command} exited with code ${code}`
-      );
+      ));
       error.status = typeof code === "number" && code > 0 ? code : 1;
       reject(error);
     });
@@ -781,7 +824,8 @@ export async function runCli(argv, dependencies = {}) {
       print(stdout, positionals.length > 1 ? helpTextForTopic(positionals.slice(1), stdout, env) : helpText(stdout, env));
       return 0;
     } catch (error) {
-      print(stderr, error.message || "Command failed");
+      const typedError = /** @type {CliError} */ (error);
+      print(stderr, typedError.message || "Command failed");
       return 1;
     }
   }
@@ -790,7 +834,8 @@ export async function runCli(argv, dependencies = {}) {
       print(stdout, positionals.length > 0 ? helpTextForTopic(positionals, stdout, env) : helpText(stdout, env));
       return 0;
     } catch (error) {
-      print(stderr, error.message || "Command failed");
+      const typedError = /** @type {CliError} */ (error);
+      print(stderr, typedError.message || "Command failed");
       return 1;
     }
   }
@@ -854,9 +899,7 @@ export async function runCli(argv, dependencies = {}) {
 
   async function rotateAuthTokens() {
     if (!refreshToken) {
-      const error = new Error("Refresh token missing");
-      error.status = 401;
-      throw error;
+      throw createCliError("Refresh token missing", 401);
     }
     const data = await requestJson(
       `${baseUrl}/api/auth/refresh`,
@@ -890,7 +933,8 @@ export async function runCli(argv, dependencies = {}) {
     try {
       return await requestJson(url, firstAttempt, fetchImpl);
     } catch (error) {
-      if (error.status !== 401 || !refreshToken) {
+      const typedError = /** @type {CliError} */ (error);
+      if (typedError.status !== 401 || !refreshToken) {
         throw error;
       }
       await rotateAuthTokens();
@@ -913,7 +957,8 @@ export async function runCli(argv, dependencies = {}) {
     try {
       return await requestText(url, firstAttempt, fetchImpl);
     } catch (error) {
-      if (error.status !== 401 || !refreshToken) {
+      const typedError = /** @type {CliError} */ (error);
+      if (typedError.status !== 401 || !refreshToken) {
         throw error;
       }
       await rotateAuthTokens();
@@ -1102,7 +1147,8 @@ export async function runCli(argv, dependencies = {}) {
         };
         changed = true;
       } catch (error) {
-        if (![401, 403, 404, 409].includes(error.status)) {
+        const typedError = /** @type {CliError} */ (error);
+        if (![401, 403, 404, 409].includes(Number(typedError.status))) {
           throw error;
         }
       }
@@ -1122,7 +1168,8 @@ export async function runCli(argv, dependencies = {}) {
         }
       );
     } catch (error) {
-      if (error.status !== 409 || error.message !== "Session is not running") {
+      const typedError = /** @type {CliError} */ (error);
+      if (typedError.status !== 409 || typedError.message !== "Session is not running") {
         throw error;
       }
       await requestJsonAuthed(
@@ -1148,16 +1195,15 @@ export async function runCli(argv, dependencies = {}) {
         stdio: "inherit"
       });
     } catch (error) {
-      if (error?.message?.startsWith(`${command} exited with code `)) {
-        const code = error.message.slice(`${command} exited with code `.length);
-        const wrapped = new Error(`SSH session exited with code ${code}`);
-        wrapped.status = error.status;
+      const typedError = /** @type {CliError} */ (error);
+      if (typedError?.message?.startsWith(`${command} exited with code `)) {
+        const code = typedError.message.slice(`${command} exited with code `.length);
+        const wrapped = createCliError(`SSH session exited with code ${code}`, Number(typedError.status) || 1);
         throw wrapped;
       }
-      if (error?.message?.startsWith(`${command} terminated with signal `)) {
-        const signal = error.message.slice(`${command} terminated with signal `.length);
-        const wrapped = new Error(`SSH session terminated with signal ${signal}`);
-        wrapped.status = error.status;
+      if (typedError?.message?.startsWith(`${command} terminated with signal `)) {
+        const signal = typedError.message.slice(`${command} terminated with signal `.length);
+        const wrapped = createCliError(`SSH session terminated with signal ${signal}`, Number(typedError.status) || 1);
         throw wrapped;
       }
       throw error;
@@ -2201,7 +2247,8 @@ export async function runCli(argv, dependencies = {}) {
 
     throw new Error("Unknown command");
   } catch (error) {
-    print(stderr, error.message || "Command failed");
+    const typedError = /** @type {CliError} */ (error);
+    print(stderr, typedError.message || "Command failed");
     return 1;
   }
 }
