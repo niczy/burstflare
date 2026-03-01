@@ -14,6 +14,34 @@ import {
 const CLI_NAME = "flare";
 const DEFAULT_BASE_URL = "https://burstflare.dev";
 
+function createClientId() {
+  return `cli_${globalThis.crypto.randomUUID()}`;
+}
+
+function normalizeSshKeys(config = {}) {
+  const keys = config?.sshKeys;
+  if (!keys || typeof keys !== "object" || Array.isArray(keys)) {
+    return {};
+  }
+  return keys;
+}
+
+function withLocalKeyState(config = {}) {
+  return {
+    ...config,
+    clientId: config.clientId || createClientId(),
+    sshKeys: normalizeSshKeys(config)
+  };
+}
+
+function sshKeyDirectory(configPath) {
+  return path.join(path.dirname(configPath), "ssh");
+}
+
+function sessionSshKeyPath(configPath, sessionId) {
+  return path.join(sshKeyDirectory(configPath), `${sessionId}.ed25519`);
+}
+
 export function websocketUrlForSsh(baseUrl, sessionId, token) {
   const url = new URL(`/runtime/sessions/${sessionId}/ssh`, baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -318,24 +346,59 @@ function selectCurrentWorkspace(workspaces, workspaceId) {
 }
 
 async function saveAuthConfig(configPath, config, baseUrl, payload) {
-  await writeConfig(configPath, {
-    ...config,
+  const next = {
+    ...withLocalKeyState(config),
     baseUrl,
     token: payload.token,
     refreshToken: payload.refreshToken || "",
     workspaceId: payload.workspace.id,
     userEmail: payload.user.email
-  });
+  };
+  await writeConfig(configPath, next);
+  return next;
 }
 
 async function clearAuthConfig(configPath, config, baseUrl) {
-  await writeConfig(configPath, {
-    ...config,
+  const next = {
+    ...withLocalKeyState(config),
     baseUrl,
     token: "",
     refreshToken: "",
     workspaceId: "",
     userEmail: config.userEmail || ""
+  };
+  await writeConfig(configPath, next);
+  return next;
+}
+
+async function runForegroundCommand(spawnImpl, command, args, options = {}) {
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const child = spawnImpl(command, args, options);
+
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    });
+
+    child.on("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const error = new Error(
+        signal ? `${command} terminated with signal ${signal}` : `${command} exited with code ${code}`
+      );
+      error.status = typeof code === "number" && code > 0 ? code : 1;
+      reject(error);
+    });
   });
 }
 
@@ -438,7 +501,7 @@ export async function runCli(argv, dependencies = {}) {
   const stderr = dependencies.stderr || process.stderr;
   const env = dependencies.env || process.env;
   const configPath = dependencies.configPath || defaultConfigPath(env);
-  const config = await readConfig(configPath);
+  const config = withLocalKeyState(await readConfig(configPath));
   const { positionals, options } = parseArgs(argv);
   const baseUrl = getBaseUrl(options, config);
   let token = getToken(options, config);
@@ -512,17 +575,10 @@ export async function runCli(argv, dependencies = {}) {
       },
       fetchImpl
     );
-    await saveAuthConfig(configPath, authConfig, baseUrl, data);
-    authConfig = {
-      ...authConfig,
-      baseUrl,
-      token: data.token,
-      refreshToken: data.refreshToken,
-      workspaceId: data.workspace.id,
-      userEmail: data.user.email
-    };
-    token = data.token;
-    refreshToken = data.refreshToken || "";
+    authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
+    token = authConfig.token;
+    refreshToken = authConfig.refreshToken || "";
+    await syncKnownSshKeysForAuth(token);
     return data;
   }
 
@@ -610,6 +666,160 @@ export async function runCli(argv, dependencies = {}) {
     );
   }
 
+  async function persistAuthConfig(nextConfig) {
+    authConfig = withLocalKeyState(nextConfig);
+    token = authConfig.token || "";
+    refreshToken = authConfig.refreshToken || "";
+    await writeConfig(configPath, authConfig);
+    return authConfig;
+  }
+
+  async function ensureSessionSshKey(sessionId) {
+    let nextConfig = withLocalKeyState(authConfig);
+    const keyPath = sessionSshKeyPath(configPath, sessionId);
+    const publicKeyPath = `${keyPath}.pub`;
+    let privateKeyExists = true;
+    let publicKey = "";
+    try {
+      await readFile(keyPath, "utf8");
+      publicKey = (await readFile(publicKeyPath, "utf8")).trim();
+    } catch (_error) {
+      privateKeyExists = false;
+    }
+
+    if (!privateKeyExists || !publicKey) {
+      ensureCommands(["ssh-keygen"], {
+        env,
+        action: "flare ssh"
+      });
+      await mkdir(sshKeyDirectory(configPath), { recursive: true });
+      await runForegroundCommand(spawnImpl, "ssh-keygen", [
+        "-q",
+        "-t",
+        "ed25519",
+        "-N",
+        "",
+        "-C",
+        `${CLI_NAME}-${sessionId}`,
+        "-f",
+        keyPath
+      ], {
+        stdio: "ignore"
+      });
+      publicKey = (await readFile(publicKeyPath, "utf8")).trim();
+    }
+
+    const sshKeys = {
+      ...normalizeSshKeys(nextConfig)
+    };
+    const existing = sshKeys[sessionId] || {};
+    const entry = {
+      keyId: existing.keyId || `${nextConfig.clientId}:${sessionId}`,
+      label: existing.label || `${os.hostname()} ${sessionId}`,
+      privateKeyPath: keyPath,
+      publicKeyPath,
+      publicKey,
+      createdAt: existing.createdAt || new Date().toISOString(),
+      syncedAt: existing.syncedAt || null
+    };
+    const changed =
+      !sshKeys[sessionId] ||
+      sshKeys[sessionId].publicKey !== entry.publicKey ||
+      sshKeys[sessionId].privateKeyPath !== entry.privateKeyPath ||
+      sshKeys[sessionId].publicKeyPath !== entry.publicKeyPath;
+    sshKeys[sessionId] = entry;
+    if (changed) {
+      nextConfig = {
+        ...nextConfig,
+        sshKeys
+      };
+      await persistAuthConfig(nextConfig);
+    } else {
+      authConfig = nextConfig;
+    }
+    return {
+      ...entry
+    };
+  }
+
+  async function syncSessionSshKey(sessionId) {
+    const key = await ensureSessionSshKey(sessionId);
+    await requestJsonAuthed(
+      `${baseUrl}/api/sessions/${sessionId}/ssh-key`,
+      {
+        method: "PUT",
+        headers: headers(undefined),
+        body: JSON.stringify({
+          keyId: key.keyId,
+          label: key.label,
+          publicKey: key.publicKey
+        })
+      }
+    );
+    const sshKeys = {
+      ...normalizeSshKeys(authConfig),
+      [sessionId]: {
+        ...normalizeSshKeys(authConfig)[sessionId],
+        ...key,
+        syncedAt: new Date().toISOString()
+      }
+    };
+    await persistAuthConfig({
+      ...authConfig,
+      sshKeys
+    });
+    return sshKeys[sessionId];
+  }
+
+  async function syncKnownSshKeysForAuth(nextToken) {
+    const keyEntries = Object.entries(normalizeSshKeys(authConfig));
+    if (!nextToken || keyEntries.length === 0) {
+      return;
+    }
+    let changed = false;
+    for (const [sessionId, entry] of keyEntries) {
+      const publicKeyPath = entry?.publicKeyPath || `${sessionSshKeyPath(configPath, sessionId)}.pub`;
+      let publicKey = "";
+      try {
+        publicKey = (await readFile(publicKeyPath, "utf8")).trim();
+      } catch (_error) {
+        continue;
+      }
+      try {
+        await requestJson(
+          `${baseUrl}/api/sessions/${sessionId}/ssh-key`,
+          {
+            method: "PUT",
+            headers: {
+              ...headers(nextToken),
+              authorization: `Bearer ${nextToken}`
+            },
+            body: JSON.stringify({
+              keyId: entry.keyId,
+              label: entry.label,
+              publicKey
+            })
+          },
+          fetchImpl
+        );
+        authConfig.sshKeys[sessionId] = {
+          ...entry,
+          publicKey,
+          publicKeyPath,
+          syncedAt: new Date().toISOString()
+        };
+        changed = true;
+      } catch (error) {
+        if (![401, 403, 404, 409].includes(error.status)) {
+          throw error;
+        }
+      }
+    }
+    if (changed) {
+      await persistAuthConfig(authConfig);
+    }
+  }
+
   async function ensureSessionRunningForSsh(sessionId) {
     try {
       return await requestJsonAuthed(
@@ -641,46 +851,37 @@ export async function runCli(argv, dependencies = {}) {
   }
 
   async function runInteractiveCommand(command, args) {
-    await new Promise((resolve, reject) => {
-      let settled = false;
-      const child = spawnImpl(command, args, {
+    try {
+      await runForegroundCommand(spawnImpl, command, args, {
         stdio: "inherit"
       });
-
-      child.on("error", (error) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        reject(error);
-      });
-
-      child.on("exit", (code, signal) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (code === 0) {
-          resolve();
-          return;
-        }
-        const error = new Error(
-          signal ? `SSH session terminated with signal ${signal}` : `SSH session exited with code ${code}`
-        );
-        error.status = typeof code === "number" && code > 0 ? code : 1;
-        reject(error);
-      });
-    });
+    } catch (error) {
+      if (error?.message?.startsWith(`${command} exited with code `)) {
+        const code = error.message.slice(`${command} exited with code `.length);
+        const wrapped = new Error(`SSH session exited with code ${code}`);
+        wrapped.status = error.status;
+        throw wrapped;
+      }
+      if (error?.message?.startsWith(`${command} terminated with signal `)) {
+        const signal = error.message.slice(`${command} terminated with signal `.length);
+        const wrapped = new Error(`SSH session terminated with signal ${signal}`);
+        wrapped.status = error.status;
+        throw wrapped;
+      }
+      throw error;
+    }
   }
 
-  function buildSshAttachInfo(sessionId, data) {
+  function buildSshAttachInfo(sessionId, data, sshKey) {
     const sshUrl = websocketUrlForSsh(baseUrl, sessionId, data.token);
+    const keyPath = sshKey?.privateKeyPath || "<local-key-path>";
     return {
       sshUrl,
       sshUser: data.sshUser || "dev",
-      sshPassword: data.sshPassword || "",
+      sshPrivateKeyPath: keyPath,
       localCommand:
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p <local-port> dev@127.0.0.1",
+        `ssh -i ${keyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ` +
+        "-o IdentitiesOnly=yes -o PreferredAuthentications=publickey -p <local-port> dev@127.0.0.1",
       note: `Run \`flare ssh ${sessionId}\` to open the local tunnel automatically.`
     };
   }
@@ -716,7 +917,10 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        token = authConfig.token;
+        refreshToken = authConfig.refreshToken || "";
+        await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -731,7 +935,10 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        token = authConfig.token;
+        refreshToken = authConfig.refreshToken || "";
+        await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -751,7 +958,10 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        token = authConfig.token;
+        refreshToken = authConfig.refreshToken || "";
+        await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -797,7 +1007,10 @@ export async function runCli(argv, dependencies = {}) {
           },
           fetchImpl
         );
-        await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        token = authConfig.token;
+        refreshToken = authConfig.refreshToken || "";
+        await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -817,14 +1030,7 @@ export async function runCli(argv, dependencies = {}) {
             body: JSON.stringify({ refreshToken })
           }
         );
-        await clearAuthConfig(configPath, authConfig, baseUrl);
-        authConfig = {
-          ...authConfig,
-          baseUrl,
-          token: "",
-          refreshToken: "",
-          workspaceId: ""
-        };
+        authConfig = await clearAuthConfig(configPath, authConfig, baseUrl);
         token = "";
         refreshToken = "";
         print(stdout, JSON.stringify(data, null, 2));
@@ -839,14 +1045,7 @@ export async function runCli(argv, dependencies = {}) {
             headers: headers(undefined, false)
           }
         );
-        await clearAuthConfig(configPath, authConfig, baseUrl);
-        authConfig = {
-          ...authConfig,
-          baseUrl,
-          token: "",
-          refreshToken: "",
-          workspaceId: ""
-        };
+        authConfig = await clearAuthConfig(configPath, authConfig, baseUrl);
         token = "";
         refreshToken = "";
         print(stdout, JSON.stringify(data, null, 2));
@@ -863,7 +1062,10 @@ export async function runCli(argv, dependencies = {}) {
             body: JSON.stringify({ workspaceId })
           }
         );
-        await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
+        token = authConfig.token;
+        refreshToken = authConfig.refreshToken || "";
+        await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
@@ -1676,23 +1878,30 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "ssh") {
       const sessionId = subcommand;
+      const sshKey = await syncSessionSshKey(sessionId);
       const data = await ensureSessionRunningForSsh(sessionId);
-      const sshAttach = buildSshAttachInfo(sessionId, data);
+      const sshAttach = buildSshAttachInfo(sessionId, data, sshKey);
       if (options.print) {
         print(stdout, JSON.stringify(sshAttach, null, 2));
         return 0;
       }
-      ensureCommands(SSH_RUNTIME_DEPENDENCIES, {
+      ensureCommands(["ssh"], {
         env,
         action: "flare ssh"
       });
       const tunnel = await createSshTunnelImpl(sshAttach.sshUrl);
       try {
         await runInteractiveCommand("ssh", [
+          "-i",
+          sshAttach.sshPrivateKeyPath,
           "-o",
           "StrictHostKeyChecking=no",
           "-o",
           "UserKnownHostsFile=/dev/null",
+          "-o",
+          "IdentitiesOnly=yes",
+          "-o",
+          "PreferredAuthentications=publickey",
           "-p",
           String(tunnel.port),
           `${sshAttach.sshUser}@${tunnel.host}`

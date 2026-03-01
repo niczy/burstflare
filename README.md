@@ -24,7 +24,7 @@ https://burstflare.dev
 npm install -g @burstflare/flare
 ```
 
-The install checks for the local tool used by `flare ssh` and warns if `ssh` is missing.
+The install checks for the OpenSSH tools used by `flare ssh` and warns if `ssh` or `ssh-keygen` is missing.
 
 You can verify local CLI dependencies any time with:
 
@@ -53,7 +53,7 @@ flare session up sandbox --template <templateId>
 flare ssh <sessionId>
 ```
 
-`flare ssh` now wakes sleeping sessions if needed, then opens the tunnel and SSH session directly. Use `flare ssh <sessionId> --print` if you want to inspect the tunnel endpoint and local attach details.
+`flare ssh` now wakes sleeping sessions if needed, provisions a per-session SSH key in your local `flare` config directory, syncs the public key to the session, and opens the tunnel and SSH session directly. Use `flare ssh <sessionId> --print` if you want to inspect the tunnel endpoint and local attach details.
 
 ## Local Development
 

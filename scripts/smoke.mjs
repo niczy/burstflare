@@ -10,6 +10,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const TEST_SSH_PUBLIC_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare-smoke";
+
 async function requestJson(baseUrl, path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -173,6 +176,18 @@ async function main() {
   }
   if (started.runtime && started.runtime.status !== "running") {
     throw new Error(`Runtime did not start correctly (status=${started.runtime.status})`);
+  }
+  const syncedSshKey = await requestJson(baseUrl, `/api/sessions/${session.session.id}/ssh-key`, {
+    method: "PUT",
+    headers: authHeaders,
+    body: JSON.stringify({
+      keyId: "smoke:ssh",
+      label: "Smoke SSH",
+      publicKey: TEST_SSH_PUBLIC_KEY
+    })
+  });
+  if (syncedSshKey.sshKeyCount < 1) {
+    throw new Error("Session SSH key sync did not register a usable key");
   }
   const sshToken = await requestJson(baseUrl, `/api/sessions/${session.session.id}/ssh-token`, {
     method: "POST",

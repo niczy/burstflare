@@ -92,6 +92,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     await mkdir(toolDir, { recursive: true });
     await writeFile(path.join(toolDir, "ssh"), "#!/bin/sh\nexit 0\n");
     await chmod(path.join(toolDir, "ssh"), 0o755);
+    await writeFile(path.join(toolDir, "ssh-keygen"), "#!/bin/sh\nexit 0\n");
+    await chmod(path.join(toolDir, "ssh-keygen"), 0o755);
 
     let code = await runCli(["auth", "register", "--email", "cli@example.com", "--name", "CLI User", "--url", "http://local"], {
       fetchImpl,
@@ -656,6 +658,21 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     let spawned = null;
     let tunnelClosed = false;
     const spawnImpl = (command, args, options) => {
+      if (command === "ssh-keygen") {
+        const outputPath = args[args.indexOf("-f") + 1];
+        return {
+          on(event, handler) {
+            if (event === "exit") {
+              void (async () => {
+                await writeFile(outputPath, "PRIVATE KEY\n");
+                await writeFile(outputPath + ".pub", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHRlc3RrZXk= flare@test\n");
+                handler(0, null);
+              })();
+            }
+            return this;
+          }
+        };
+      }
       spawned = { command, args, options };
       return {
         on(event, handler) {
@@ -691,10 +708,16 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(stderr.data, "");
     assert.equal(spawned.command, "ssh");
     assert.deepEqual(spawned.args, [
+      "-i",
+      path.join(path.dirname(configPath), "ssh", `${sessionId}.ed25519`),
       "-o",
       "StrictHostKeyChecking=no",
       "-o",
       "UserKnownHostsFile=/dev/null",
+      "-o",
+      "IdentitiesOnly=yes",
+      "-o",
+      "PreferredAuthentications=publickey",
       "-p",
       "4123",
       "dev@127.0.0.1"
@@ -728,6 +751,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const printedSsh = JSON.parse(stdout.data.trim());
     assert.match(printedSsh.sshUrl, new RegExp(`^ws://local/runtime/sessions/${sessionId}/ssh\\?token=runtime_`));
     assert.equal(printedSsh.sshUser, "dev");
+    assert.equal(printedSsh.sshPrivateKeyPath, path.join(path.dirname(configPath), "ssh", `${sessionId}.ed25519`));
+    assert.match(printedSsh.localCommand, /-i .*\.ed25519/);
     assert.match(printedSsh.localCommand, /<local-port>/);
     assert.equal(stderr.data, "");
 
@@ -962,6 +987,7 @@ test("cli doctor reports missing local ssh dependencies", async () => {
   assert.match(stdout.data, /flare doctor/);
   assert.match(stdout.data, /ssh-ready: no/);
   assert.match(stdout.data, /ssh: missing/);
+  assert.match(stdout.data, /ssh-keygen: missing/);
   assert.match(stdout.data, /summary:/);
   assert.equal(stderr.data, "");
 });

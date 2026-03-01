@@ -902,7 +902,8 @@ async function applyRuntimeBootstrapToContainer(container, session, runtimeSecre
       secretPayload.runtimeSecrets && typeof secretPayload.runtimeSecrets === "object"
         ? secretPayload.runtimeSecrets
         : {},
-    runtimeVersion: Number.isInteger(session.runtimeVersion) ? session.runtimeVersion : 0
+    runtimeVersion: Number.isInteger(session.runtimeVersion) ? session.runtimeVersion : 0,
+    sshAuthorizedKeys: Array.isArray(session.sshAuthorizedKeys) ? session.sshAuthorizedKeys : []
   };
 
   let result = null;
@@ -2470,6 +2471,25 @@ export function createApp(options = {}) {
               contentType: request.headers.get("content-type") || "application/octet-stream"
             })
           );
+        })
+      )
+    },
+    {
+      method: "PUT",
+      pattern: "/api/sessions/:sessionId/ssh-key",
+      handler: withRateLimit(
+        {
+          scope: "runtime-key-sync",
+          limit: 24,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request, { sessionId }) => {
+          const token = requireToken(request, service);
+          if (!token) {
+            return unauthorized();
+          }
+          const body = await parseJson(await request.text());
+          return toJson(await service.upsertSessionSshKey(token, sessionId, body));
         })
       )
     },

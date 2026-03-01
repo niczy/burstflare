@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
 
+const TEST_SSH_PUBLIC_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
+
 function createObjectStore() {
   const bundles = new Map();
   const logs = new Map();
@@ -444,10 +447,17 @@ test("service covers invites, queued builds, releases, session events, usage, an
   await service.startSession(switched.token, staleSession.session.id);
   await service.stopSession(switched.token, staleSession.session.id);
 
+  const syncedSshKey = await service.upsertSessionSshKey(switched.token, session.session.id, {
+    keyId: "cli:test",
+    label: "CLI Test",
+    publicKey: TEST_SSH_PUBLIC_KEY
+  });
+  assert.equal(syncedSshKey.sshKeyCount, 1);
   const runtime = await service.issueRuntimeToken(switched.token, session.session.id);
-  assert.match(runtime.sshCommand, /wstunnel client/);
-  assert.match(runtime.sshCommand, /ssh -p 2222 dev@127\.0\.0\.1/);
-  await service.validateRuntimeToken(runtime.token, session.session.id);
+  assert.match(runtime.sshCommand, /ssh -i <local-key-path>/);
+  assert.equal(runtime.sshKeyCount, 1);
+  const runtimeSession = await service.validateRuntimeToken(runtime.token, session.session.id);
+  assert.deepEqual(runtimeSession.session.sshAuthorizedKeys, [TEST_SSH_PUBLIC_KEY]);
 
   const events = await service.listSessionEvents(switched.token, session.session.id);
   assert.ok(events.events.length >= 5);
