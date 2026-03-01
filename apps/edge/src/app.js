@@ -29,6 +29,17 @@ function requestIdFromRequest(request) {
   return request.headers.get(REQUEST_ID_HEADER) || globalThis.crypto.randomUUID();
 }
 
+function normalizeOrigin(value) {
+  if (!value) {
+    return "";
+  }
+  try {
+    return new URL(String(value)).origin;
+  } catch (_error) {
+    return "";
+  }
+}
+
 function errorCodeForStatus(status) {
   switch (status) {
     case 400:
@@ -1035,6 +1046,7 @@ export function createApp(options = {}) {
   const rateLimiter = createRateLimiter(options);
   const turnstile = createTurnstileVerifier(options);
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
+  const frontendOrigin = normalizeOrigin(options.FRONTEND_ORIGIN || options.frontendOrigin);
 
   function hasContainerBinding() {
     return hasRuntimeBinding(options);
@@ -1323,6 +1335,52 @@ export function createApp(options = {}) {
     return appJs.replace("__BURSTFLARE_TURNSTILE_SITE_KEY__", JSON.stringify(String(options.TURNSTILE_SITE_KEY || "")));
   }
 
+  function isFrontendPath(pathname) {
+    return pathname !== "/device" && !pathname.startsWith("/api/") && !pathname.startsWith("/runtime/");
+  }
+
+  async function proxyFrontendRequest(request) {
+    if (!frontendOrigin || !["GET", "HEAD"].includes(request.method)) {
+      return null;
+    }
+    const url = new URL(request.url);
+    const target = new URL(`${url.pathname}${url.search}`, frontendOrigin);
+    const headers = new Headers(request.headers);
+    headers.delete("host");
+    try {
+      return await fetch(target, {
+        method: request.method,
+        headers,
+        redirect: "manual"
+      });
+    } catch (error) {
+      const next = new Error(`Frontend origin is unavailable at ${frontendOrigin}`);
+      next.status = 502;
+      next.code = "FRONTEND_UNAVAILABLE";
+      next.cause = error;
+      throw next;
+    }
+  }
+
+  function legacyFrontendResponse(pathname) {
+    if (pathname === "/") {
+      return new Response(renderShellHtml(), {
+        headers: { "content-type": "text/html; charset=utf-8" }
+      });
+    }
+    if (pathname === "/app.js") {
+      return new Response(renderShellJs(), {
+        headers: { "content-type": "application/javascript; charset=utf-8" }
+      });
+    }
+    if (pathname === "/styles.css") {
+      return new Response(styles, {
+        headers: { "content-type": "text/css; charset=utf-8" }
+      });
+    }
+    return notFound();
+  }
+
   function createRuntimeSshBridge(sessionId) {
     if (typeof options.createWebSocketPair === "function") {
       return options.createWebSocketPair(sessionId);
@@ -1520,30 +1578,6 @@ export function createApp(options = {}) {
   }
 
   const routes = [
-    {
-      method: "GET",
-      pattern: "/",
-      handler: () =>
-        new Response(renderShellHtml(), {
-          headers: { "content-type": "text/html; charset=utf-8" }
-        })
-    },
-    {
-      method: "GET",
-      pattern: "/app.js",
-      handler: () =>
-        new Response(renderShellJs(), {
-          headers: { "content-type": "application/javascript; charset=utf-8" }
-        })
-    },
-    {
-      method: "GET",
-      pattern: "/styles.css",
-      handler: () =>
-        new Response(styles, {
-          headers: { "content-type": "text/css; charset=utf-8" }
-        })
-    },
     {
       method: "GET",
       pattern: "/device",
@@ -2844,6 +2878,10 @@ export function createApp(options = {}) {
         }
         const response = await route.handler(requestWithId, match.params);
         return normalizeErrorResponse(requestWithId, response);
+      }
+      if (isFrontendPath(url.pathname)) {
+        const frontendResponse = (await proxyFrontendRequest(requestWithId)) || legacyFrontendResponse(url.pathname);
+        return normalizeErrorResponse(requestWithId, frontendResponse);
       }
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/runtime/")) {
         return normalizeErrorResponse(requestWithId, notFound());
