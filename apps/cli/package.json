@@ -2,7 +2,7 @@
   "name": "@burstflare/flare",
   "version": "0.1.0",
   "description": "Cloudflare-native CLI for managing BurstFlare workspaces, templates, and runtime sessions.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://github.com/niczy/burstflare#readme",
   "repository": {

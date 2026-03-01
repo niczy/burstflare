@@ -82,3 +82,7 @@ FLARE_CONFIG=/path/to/config.json
 
 - BurstFlare expects a running API endpoint. Use `--url` to point the CLI at your local or deployed control plane.
 - For local development, the default dashboard and Worker-compatible dev server run at `http://127.0.0.1:8787`.
+
+## License
+
+Licensed under Apache-2.0. See `LICENSE`.

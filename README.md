@@ -122,3 +122,7 @@ If you are using Cloudflare Containers locally, make sure Docker is available be
 ## Current Status
 
 The planned product stack is implemented and deployed. The main follow-up work left is optional scale tuning, such as replacing the remaining normalized store abstraction with more direct repository-style persistence if future load requires it.
+
+## License
+
+Licensed under Apache-2.0. See `LICENSE`.
