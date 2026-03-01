@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:web": "npm run build --workspace @burstflare/web",
     "ci": "npm run lint && npm run build && npm test",
     "cf:generate": "node scripts/cloudflare-generate-wrangler.mjs",
     "cf:generate:production": "CLOUDFLARE_ENVIRONMENT=production node scripts/cloudflare-generate-wrangler.mjs",
@@ -22,6 +23,7 @@
     "cf:validate-schema:staging": "CLOUDFLARE_ENVIRONMENT=staging node scripts/cloudflare-validate-schema.mjs",
     "cf:verify": "node scripts/cloudflare-verify.mjs",
     "cf:verify:staging": "CLOUDFLARE_ENVIRONMENT=staging node scripts/cloudflare-verify.mjs",
+    "dev:web": "npm run dev --workspace @burstflare/web",
     "dev": "node apps/edge/src/dev-server.js",
     "lint": "node scripts/lint.mjs",
     "npm:cli:smoke": "node scripts/npm-cli-smoke.mjs",
@@ -33,7 +35,7 @@
     "test": "node --test"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.1.1",

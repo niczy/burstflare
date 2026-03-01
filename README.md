@@ -69,13 +69,19 @@ npm install
 npm run dev
 ```
 
-3. Open:
+3. Start the vinext frontend in a second terminal:
+
+```bash
+npm run dev:web
+```
+
+4. Open:
 
 ```text
 http://127.0.0.1:8787
 ```
 
-4. Point the CLI at local only when you are testing against the local stack:
+5. Point the CLI at local only when you are testing against the local stack:
 
 ```bash
 flare auth register --email you@example.com --url http://127.0.0.1:8787
