@@ -1,3 +1,5 @@
+// @ts-check
+
 import { BaseStore, createDefaultState } from "./store-base.js";
 import {
   META_TABLE,
