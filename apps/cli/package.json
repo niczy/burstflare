@@ -1,6 +1,6 @@
 {
   "name": "@burstflare/flare",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "CLI for managing BurstFlare workspaces, templates, and runtime sessions.",
   "license": "Apache-2.0",
   "type": "module",
@@ -23,6 +23,9 @@
   ],
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
   },
   "preferGlobal": true,
   "scripts": {

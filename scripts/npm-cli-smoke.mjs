@@ -274,10 +274,12 @@ async function main() {
         (editor && editor.url),
       "session editor did not return a URL"
     );
-    const ssh = runCli(["session", "ssh", session.id]);
+    const ssh = runCli(["session", "ssh", session.id, "--print"]);
     assert(
-      (typeof ssh === "string" && ssh.includes("ssh -p 2222")) ||
-        (ssh && (ssh.url || ssh.command || ssh.sshCommand)),
+      ssh &&
+        typeof ssh === "object" &&
+        typeof ssh.sshUrl === "string" &&
+        ssh.sshUrl.includes(`/runtime/sessions/${session.id}/ssh?token=`),
       "session ssh did not return attach details"
     );
     const events = unwrap(runCli(["session", "events", session.id]), "events");

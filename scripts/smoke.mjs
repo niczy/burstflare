@@ -178,8 +178,8 @@ async function main() {
     method: "POST",
     headers: authHeaders
   });
-  if (!String(sshToken.sshCommand || "").includes("ssh -p 2222 dev@127.0.0.1")) {
-    throw new Error("SSH command did not include the native SSH tunnel attach");
+  if (!sshToken.token || sshToken.sshUser !== "dev") {
+    throw new Error("SSH attach details did not include a runtime token and SSH user");
   }
 
   let previewChecked = false;
