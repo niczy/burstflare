@@ -1,8 +1,14 @@
+// @ts-check
+
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+/**
+ * @typedef {import("node:child_process").SpawnSyncOptions} SpawnSyncOptions
+ */
 
 function getArg(name) {
   const index = process.argv.indexOf(name);
@@ -12,10 +18,17 @@ function getArg(name) {
   return process.argv[index + 1];
 }
 
+/**
+ * @param {number} ms
+ */
 function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+/**
+ * @param {unknown} condition
+ * @param {string} message
+ */
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -40,25 +53,43 @@ async function waitForHealthy(baseUrl) {
   throw lastError || new Error("Dev server did not become healthy");
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {SpawnSyncOptions} [options]
+ */
 function spawnChecked(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     ...options
   });
   if (result.status !== 0) {
-    const detail = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+    const detail = [result.stdout, result.stderr]
+      .filter(Boolean)
+      .map((value) => String(value))
+      .join("\n")
+      .trim();
     throw new Error(detail || `${command} ${args.join(" ")} failed`);
   }
-  return (result.stdout || "").trim();
+  return String(result.stdout || "").trim();
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {any}
+ */
 function unwrap(value, key) {
   if (value && typeof value === "object" && !Array.isArray(value) && key in value) {
-    return value[key];
+    return /** @type {Record<string, any>} */ (value)[key];
   }
   return value;
 }
 
+/**
+ * @param {string} text
+ * @returns {any}
+ */
 function parseOutput(text) {
   if (!text) {
     return null;
@@ -82,6 +113,7 @@ async function main() {
   const configGuest = join(tempRoot, "guest-config.json");
   const configAux = join(tempRoot, "aux-config.json");
   const outputDir = join(tempRoot, "artifacts");
+  /** @type {import("node:child_process").ChildProcess | null} */
   let serverProcess = null;
   let baseUrl = baseUrlArg || "http://127.0.0.1:8787";
 
