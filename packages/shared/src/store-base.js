@@ -1,4 +1,20 @@
+// @ts-check
+
 import { clone } from "./utils.js";
+
+/**
+ * @typedef {{
+ *   collections?: string[];
+ * }} TransactionOptions
+ */
+
+/**
+ * @typedef {{
+ *   load(): Promise<any>;
+ *   save(nextState: any, previousState?: any, options?: TransactionOptions): Promise<void>;
+ *   loadCollections?: (collections: string[]) => Promise<any>;
+ * }} TransactionStore
+ */
 
 export function createDefaultState() {
   return {
@@ -24,16 +40,21 @@ export function createDefaultState() {
 export class BaseStore {
   #queue = Promise.resolve();
 
+  /**
+   * @param {(draft: any) => any | Promise<any>} work
+   * @param {TransactionOptions} [options]
+   */
   #runTransaction(work, options = {}) {
+    const store = /** @type {TransactionStore} */ (/** @type {unknown} */ (this));
     const next = this.#queue.then(async () => {
       const useScopedLoad =
         Array.isArray(options.collections) &&
         options.collections.length > 0 &&
-        typeof this.loadCollections === "function";
-      const state = useScopedLoad ? await this.loadCollections(options.collections) : await this.load();
+        typeof store.loadCollections === "function";
+      const state = useScopedLoad ? await store.loadCollections(options.collections) : await store.load();
       const draft = clone(state);
       const result = await work(draft);
-      await this.save(draft, state, useScopedLoad ? { collections: options.collections } : undefined);
+      await store.save(draft, state, useScopedLoad ? { collections: options.collections } : undefined);
       return result;
     });
     this.#queue = next.then(
@@ -47,6 +68,10 @@ export class BaseStore {
     return this.#runTransaction(work);
   }
 
+  /**
+   * @param {string[]} collections
+   * @param {(draft: any) => any | Promise<any>} work
+   */
   transactCollections(collections, work) {
     return this.#runTransaction(work, { collections });
   }
