@@ -1,8 +1,19 @@
+// @ts-check
+
 import { spawn } from "node:child_process";
 
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+/** @type {import("node:child_process").ChildProcess | null} */
 let activeChild = null;
 
+/** @type {NodeJS.Signals[]} */
+const shutdownSignals = ["SIGINT", "SIGTERM"];
+
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import("node:child_process").SpawnOptions} [options]
+ */
 function spawnCommand(command, args, options = {}) {
   const child = spawn(command, args, {
     stdio: "inherit",
@@ -12,12 +23,18 @@ function spawnCommand(command, args, options = {}) {
   return child;
 }
 
+/**
+ * @param {NodeJS.Signals} [signal]
+ */
 function stopChild(signal = "SIGTERM") {
   if (activeChild && !activeChild.killed) {
     activeChild.kill(signal);
   }
 }
 
+/**
+ * @param {string[]} args
+ */
 function runCommand(args) {
   return new Promise((resolve, reject) => {
     const child = spawnCommand(npmCommand, args);
@@ -45,7 +62,7 @@ async function main() {
   });
 }
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
+for (const signal of shutdownSignals) {
   process.on(signal, () => {
     stopChild(signal);
     process.exit(0);
@@ -53,7 +70,8 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error.stack}\n`);
+  const typedError = /** @type {Error} */ (error);
+  process.stderr.write(`${typedError.stack || typedError.message}\n`);
   stopChild("SIGTERM");
   process.exit(1);
 });
