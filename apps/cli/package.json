@@ -25,6 +25,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "commander": "^14.0.3",
     "ws": "^8.18.3"
   },
   "preferGlobal": true,

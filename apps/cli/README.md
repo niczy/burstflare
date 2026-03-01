@@ -68,6 +68,8 @@ flare ssh <sessionId>
 
 ```bash
 flare auth whoami
+flare help session
+flare template upload --help
 flare doctor
 flare workspace
 flare templates
@@ -76,6 +78,8 @@ flare sessions
 flare snapshot list <sessionId>
 flare report
 ```
+
+`flare help <topic>` and `--help` now show focused help for command groups and individual commands, while the default `flare` output stays grouped by command area.
 
 ## Config
 

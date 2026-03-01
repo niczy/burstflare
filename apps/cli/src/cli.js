@@ -3,6 +3,7 @@ import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Command } from "commander";
 import { WebSocket as NodeWebSocket } from "ws";
 import {
   buildDoctorReport,
@@ -291,6 +292,333 @@ function print(stream, value) {
   stream.write(`${value}\n`);
 }
 
+function shouldUseColor(stream, env = process.env) {
+  if (env.NO_COLOR !== undefined) {
+    return false;
+  }
+  if (env.FORCE_COLOR === "0") {
+    return false;
+  }
+  if (env.FORCE_COLOR) {
+    return true;
+  }
+  return Boolean(stream?.isTTY);
+}
+
+function styleText(value, codes, enabled) {
+  if (!enabled) {
+    return value;
+  }
+  return `${codes}${value}\u001B[0m`;
+}
+
+const HELP_CATALOG = [
+  {
+    title: "Authentication",
+    topics: [
+      {
+        kind: "group",
+        name: "auth",
+        summary: "Register, log in, and manage local auth state.",
+        commands: [
+          { name: "register", usageTail: "--email <email> [--name <name>]", summary: "Create a user and save auth tokens locally." },
+          { name: "login", usageTail: "--email <email>", summary: "Log in with an email-based API flow." },
+          { name: "recover", usageTail: "--email <email> --code <code>", summary: "Recover access with a recovery code." },
+          { name: "refresh", usageTail: "", summary: "Rotate the current access and refresh tokens." },
+          { name: "logout", usageTail: "", summary: "Revoke the current refresh token locally and remotely." },
+          { name: "logout-all", usageTail: "", summary: "Revoke every active auth session for the user." },
+          { name: "sessions", usageTail: "", summary: "List active auth sessions." },
+          { name: "revoke-session", usageTail: "<authSessionId>", summary: "Revoke one auth session by id." },
+          { name: "recovery-generate", usageTail: "", summary: "Generate a new batch of recovery codes." },
+          { name: "device-start", usageTail: "--email <email>", summary: "Start the CLI device authorization flow." },
+          { name: "device-approve", usageTail: "--code <deviceCode>", summary: "Approve a pending device code." },
+          { name: "device-exchange", usageTail: "--code <deviceCode>", summary: "Exchange a device code for tokens." },
+          { name: "switch-workspace", usageTail: "<workspaceId>", summary: "Switch the active workspace for the saved tokens." },
+          { name: "whoami", usageTail: "", summary: "Show the authenticated user and active workspace." }
+        ]
+      }
+    ]
+  },
+  {
+    title: "Workspace",
+    topics: [
+      {
+        kind: "group",
+        name: "workspace",
+        alias: "workspaces",
+        summary: "Inspect and manage the current workspace. Defaults to current when no subcommand is given.",
+        commands: [
+          { name: "current", usageTail: "", summary: "Show the selected workspace." },
+          { name: "list", usageTail: "", summary: "List every workspace the user can access." },
+          { name: "members", usageTail: "", summary: "List members in the current workspace." },
+          { name: "rename", usageTail: "<name>", summary: "Rename the current workspace." },
+          { name: "invite", usageTail: "--email <email> [--role <role>]", summary: "Invite a teammate into the workspace." },
+          { name: "accept-invite", usageTail: "--code <inviteCode>", summary: "Accept a workspace invite." },
+          { name: "set-role", usageTail: "<userId> --role <role>", summary: "Change a member role." },
+          { name: "plan", usageTail: "<free|pro|enterprise>", summary: "Change the workspace plan." },
+          { name: "quota-overrides", usageTail: "[--max-running-sessions <count>] [--max-storage-bytes <bytes>] [--clear]", summary: "Override or clear workspace quota limits." },
+          { name: "secrets", usageTail: "", summary: "List workspace secrets without values." },
+          { name: "set-secret", usageTail: "<name> --value <value>", summary: "Create or update a workspace secret." },
+          { name: "delete-secret", usageTail: "<name>", summary: "Delete a workspace secret." }
+        ]
+      }
+    ]
+  },
+  {
+    title: "Templates and Releases",
+    topics: [
+      {
+        kind: "group",
+        name: "template",
+        alias: "templates",
+        summary: "Create templates and manage template versions. Defaults to list when no subcommand is given.",
+        commands: [
+          { name: "list", usageTail: "[--active|--archived]", summary: "List templates, optionally filtered by archive state." },
+          { name: "inspect", usageTail: "<templateId>", summary: "Inspect one template." },
+          { name: "create", usageTail: "<name> [--description <text>]", summary: "Create a new template." },
+          { name: "upload", usageTail: "<templateId> --version <version> [--file <path>] [--notes <text>]", summary: "Create a template version and optionally upload a bundle." },
+          { name: "promote", usageTail: "<templateId> <versionId>", summary: "Promote a version to the active release." },
+          { name: "rollback", usageTail: "<templateId> [<releaseId>]", summary: "Roll back a template to a prior release." },
+          { name: "archive", usageTail: "<templateId>", summary: "Archive a template." },
+          { name: "restore", usageTail: "<templateId>", summary: "Restore an archived template." },
+          { name: "delete", usageTail: "<templateId>", summary: "Delete a template." }
+        ]
+      },
+      {
+        kind: "group",
+        name: "release",
+        alias: "releases",
+        summary: "Inspect release history. Defaults to list when no subcommand is given.",
+        commands: [{ name: "list", usageTail: "[--template <templateId>]", summary: "List releases, optionally filtered by template." }]
+      }
+    ]
+  },
+  {
+    title: "Builds",
+    topics: [
+      {
+        kind: "group",
+        name: "build",
+        alias: "builds",
+        summary: "Inspect and manage template builds. Defaults to list when no subcommand is given.",
+        commands: [
+          { name: "list", usageTail: "[--status <status>]", summary: "List template builds, optionally filtered by status." },
+          { name: "log", usageTail: "<buildId>", summary: "Print the build log." },
+          { name: "artifact", usageTail: "<buildId>", summary: "Print the build artifact output." },
+          { name: "process", usageTail: "", summary: "Process queued builds." },
+          { name: "retry", usageTail: "<buildId>", summary: "Retry one build." },
+          { name: "retry-dead-lettered", usageTail: "", summary: "Retry dead-lettered builds." }
+        ]
+      }
+    ]
+  },
+  {
+    title: "Sessions",
+    topics: [
+      {
+        kind: "group",
+        name: "session",
+        alias: "sessions",
+        summary: "Launch and control runtime sessions. Defaults to list when no subcommand is given.",
+        commands: [
+          { name: "list", usageTail: "[--status <status>] [--template <templateId>]", summary: "List sessions, optionally filtered by status or template." },
+          { name: "up", usageTail: "<name> --template <templateId>", summary: "Create and start a session." },
+          { name: "status", usageTail: "<sessionId>", summary: "Show session details." },
+          { name: "events", usageTail: "<sessionId>", summary: "List session events." },
+          { name: "start", usageTail: "<sessionId>", summary: "Start a sleeping session." },
+          { name: "stop", usageTail: "<sessionId>", summary: "Stop a running session." },
+          { name: "restart", usageTail: "<sessionId>", summary: "Restart a session." },
+          { name: "delete", usageTail: "<sessionId>", summary: "Delete a session." },
+          { name: "preview", usageTail: "<sessionId>", summary: "Print the session preview URL." },
+          { name: "editor", usageTail: "<sessionId>", summary: "Print the browser editor URL." },
+          { name: "ssh", usageTail: "<sessionId> [--print]", summary: "Open or print SSH attach details." }
+        ]
+      }
+    ]
+  },
+  {
+    title: "Snapshots and Operations",
+    topics: [
+      {
+        kind: "group",
+        name: "snapshot",
+        summary: "Save, restore, delete, and download session snapshots.",
+        commands: [
+          { name: "save", usageTail: "<sessionId> [--label <label>] [--file <path>]", summary: "Create a snapshot and optionally upload snapshot content." },
+          { name: "list", usageTail: "<sessionId>", summary: "List snapshots for a session." },
+          { name: "restore", usageTail: "<sessionId> <snapshotId>", summary: "Restore a snapshot onto a session." },
+          { name: "delete", usageTail: "<sessionId> <snapshotId>", summary: "Delete a snapshot." },
+          { name: "get", usageTail: "<sessionId> <snapshotId> [--output <path>]", summary: "Download snapshot content or write it to a file." }
+        ]
+      },
+      { kind: "command", name: "doctor", usageTail: "[--json]", summary: "Check local SSH dependencies." },
+      { kind: "command", name: "usage", usageTail: "", summary: "Fetch usage metrics." },
+      { kind: "command", name: "report", usageTail: "", summary: "Fetch the operator report." },
+      { kind: "command", name: "export", usageTail: "[--output <path>]", summary: "Export workspace data as JSON." },
+      {
+        kind: "group",
+        name: "reconcile",
+        usageTail: "[--enqueue]",
+        summary: "Run or preview operator reconcile workflows.",
+        commands: [
+          { name: "preview", usageTail: "", summary: "Preview reconcile work without changing state." },
+          { name: "sleep-running", usageTail: "", summary: "Sleep sessions that are still running." },
+          { name: "recover-builds", usageTail: "", summary: "Recover stalled builds." },
+          { name: "purge-sleeping", usageTail: "", summary: "Purge sleeping sessions past retention." },
+          { name: "purge-deleted", usageTail: "", summary: "Purge deleted sessions past retention." }
+        ]
+      }
+    ]
+  },
+  {
+    title: "Shortcuts",
+    topics: [
+      { kind: "command", name: "up", usageTail: "<name> --template <templateId>", summary: "Shortcut for session up." },
+      { kind: "command", name: "list", usageTail: "[--status <status>] [--template <templateId>]", summary: "Shortcut for session list." },
+      { kind: "command", name: "status", usageTail: "<sessionId>", summary: "Shortcut for session status." },
+      { kind: "command", name: "events", usageTail: "<sessionId>", summary: "Shortcut for session events." },
+      { kind: "command", name: "start", usageTail: "<sessionId>", summary: "Shortcut for session start." },
+      { kind: "command", name: "down", usageTail: "<sessionId>", summary: "Shortcut for session stop." },
+      { kind: "command", name: "restart", usageTail: "<sessionId>", summary: "Shortcut for session restart." },
+      { kind: "command", name: "delete", usageTail: "<sessionId>", summary: "Shortcut for session delete." },
+      { kind: "command", name: "preview", usageTail: "<sessionId>", summary: "Shortcut for session preview." },
+      { kind: "command", name: "editor", usageTail: "<sessionId>", summary: "Shortcut for session editor." },
+      { kind: "command", name: "ssh", usageTail: "<sessionId> [--print]", summary: "Shortcut for session ssh." }
+    ]
+  }
+];
+
+function commandUsageLine(commandName, usageTail = "") {
+  return [commandName, usageTail].filter(Boolean).join(" ");
+}
+
+function buildHelpIndex() {
+  const entries = [];
+  for (const section of HELP_CATALOG) {
+    for (const topic of section.topics) {
+      entries.push({
+        section: section.title,
+        path: [topic.name],
+        matchers: [[topic.name], ...(topic.alias ? [[topic.alias]] : [])]
+      });
+      if (topic.kind === "group") {
+        for (const command of topic.commands) {
+          entries.push({
+            section: section.title,
+            path: [topic.name, command.name],
+            matchers: [
+              [topic.name, command.name],
+              ...(topic.alias ? [[topic.alias, command.name]] : [])
+            ]
+          });
+        }
+      }
+    }
+  }
+  return entries;
+}
+
+const HELP_INDEX = buildHelpIndex();
+
+function resolveHelpPath(tokens = []) {
+  let bestMatch = null;
+  for (const entry of HELP_INDEX) {
+    for (const matcher of entry.matchers) {
+      if (matcher.length > tokens.length) {
+        continue;
+      }
+      let matches = true;
+      for (let index = 0; index < matcher.length; index += 1) {
+        if (matcher[index] !== tokens[index]) {
+          matches = false;
+          break;
+        }
+      }
+      if (!matches) {
+        continue;
+      }
+      if (!bestMatch || matcher.length > bestMatch.length) {
+        bestMatch = {
+          path: entry.path,
+          length: matcher.length
+        };
+      }
+    }
+  }
+  return bestMatch?.path || null;
+}
+
+function createHelpProgram() {
+  const program = new Command();
+  program.name(CLI_NAME);
+  program.description("BurstFlare command reference");
+  program.addHelpCommand(false);
+
+  for (const section of HELP_CATALOG) {
+    for (const topic of section.topics) {
+      const topLevel = program.command(topic.name).description(topic.summary);
+      topLevel.addHelpCommand(false);
+      if (topic.usageTail) {
+        topLevel.usage(topic.usageTail);
+      }
+      if (topic.kind === "command") {
+        continue;
+      }
+      for (const command of topic.commands) {
+        const subcommand = topLevel.command(command.name).description(command.summary);
+        if (command.usageTail) {
+          subcommand.usage(command.usageTail);
+        }
+      }
+    }
+  }
+
+  return program;
+}
+
+function findHelpCommand(program, pathSegments) {
+  let current = program;
+  for (const segment of pathSegments) {
+    current = current.commands.find((command) => command.name() === segment);
+    if (!current) {
+      return null;
+    }
+  }
+  return current;
+}
+
+function formatCommandHelp(text, stream, env = process.env) {
+  const useColor = shouldUseColor(stream, env);
+  const lines = text.trimEnd().split("\n");
+  if (!useColor) {
+    return lines.join("\n");
+  }
+  return lines
+    .map((line) => {
+      if (line.startsWith("Usage: ")) {
+        return `${styleText("Usage", "\u001B[1;33m", true)}:${line.slice("Usage:".length)}`;
+      }
+      if (/^[A-Z][A-Za-z ]+:$/.test(line)) {
+        return `${styleText(line.slice(0, -1), "\u001B[1;33m", true)}:`;
+      }
+      return line.replace(/^(\s*)flare\b/, (_match, indent) => `${indent}${styleText("flare", "\u001B[1;32m", true)}`);
+    })
+    .join("\n");
+}
+
+function helpTextForTopic(tokens, stream, env = process.env) {
+  const pathSegments = resolveHelpPath(tokens);
+  if (!pathSegments) {
+    throw new Error(`Unknown help topic: ${tokens.join(" ")}`);
+  }
+  const helpProgram = createHelpProgram();
+  const command = findHelpCommand(helpProgram, pathSegments);
+  if (!command) {
+    throw new Error(`Unknown help topic: ${tokens.join(" ")}`);
+  }
+  return formatCommandHelp(command.helpInformation(), stream, env);
+}
+
 function getBaseUrl(options, config) {
   return options.url || config.baseUrl || DEFAULT_BASE_URL;
 }
@@ -402,95 +730,41 @@ async function runForegroundCommand(spawnImpl, command, args, options = {}) {
   });
 }
 
-function helpText() {
-  return [
-    "auth register --email you@example.com [--name Name]",
-    "auth login --email you@example.com",
-    "auth recover --email you@example.com --code XXXX-XXXX-XXXX",
-    "auth refresh",
-    "auth logout",
-    "auth logout-all",
-    "auth sessions",
-    "auth revoke-session <authSessionId>",
-    "auth recovery-generate",
-    "auth device-start --email you@example.com",
-    "auth device-approve --code device_xxx",
-    "auth device-exchange --code device_xxx",
-    "auth switch-workspace <workspaceId>",
-    "auth whoami",
-    "workspace [current]",
-    "workspaces",
-    "workspace list",
-    "workspace members",
-    "workspace rename <name>",
-    "workspace invite --email teammate@example.com [--role member]",
-    "workspace accept-invite --code invite_xxx",
-    "workspace set-role <userId> --role viewer",
-    "workspace plan <free|pro|enterprise>",
-    "workspace quota-overrides [--max-running-sessions 5] [--max-storage-bytes 1048576] [--clear]",
-    "workspace secrets",
-    "workspace set-secret <NAME> --value super-secret",
-    "workspace delete-secret <NAME>",
-    "template [list] [--active|--archived]",
-    "templates",
-    "template inspect <templateId>",
-    "template create <name> [--description ...]",
-    "template upload <templateId> --version 1.0.0 [--file bundle.tgz] [--notes ...] [--simulate-failure] [--sleep-ttl-seconds 3600] [--persisted-paths /workspace,/home/dev/.cache]",
-    "template promote <templateId> <versionId>",
-    "template rollback <templateId> [<releaseId>]",
-    "template archive <templateId>",
-    "template restore <templateId>",
-    "template delete <templateId>",
-    "build [list] [--status queued|building|succeeded|failed|dead_lettered]",
-    "builds",
-    "build log <buildId>",
-    "build artifact <buildId>",
-    "build process",
-    "build retry <buildId>",
-    "build retry-dead-lettered",
-    "release [list] [--template <templateId>]",
-    "releases",
-    "session [list] [--status running|sleeping|deleted] [--template <templateId>]",
-    "sessions",
-    "session up <name> --template <templateId>",
-    "session status <sessionId>",
-    "session events <sessionId>",
-    "session start <sessionId>",
-    "session stop <sessionId>",
-    "session restart <sessionId>",
-    "session delete <sessionId>",
-    "session preview <sessionId>",
-    "session editor <sessionId>",
-    "session ssh <sessionId> [--print]",
-    "up <name> --template <templateId>",
-    "list [--status running|sleeping|deleted] [--template <templateId>]",
-    "status <sessionId>",
-    "events <sessionId>",
-    "start <sessionId>",
-    "down <sessionId>",
-    "restart <sessionId>",
-    "delete <sessionId>",
-    "snapshot save <sessionId> [--label manual] [--file snapshot.tgz]",
-    "snapshot list <sessionId>",
-    "snapshot restore <sessionId> <snapshotId>",
-    "snapshot delete <sessionId> <snapshotId>",
-    "snapshot get <sessionId> <snapshotId> [--output restored.bin]",
-    "doctor",
-    "usage",
-    "report",
-    "export [--output workspace-export.json]",
-    "reconcile [--enqueue]",
-    "reconcile preview",
-    "reconcile sleep-running",
-    "reconcile recover-builds",
-    "reconcile purge-sleeping",
-    "reconcile purge-deleted",
-    "preview <sessionId>",
-    "editor <sessionId>",
-    "ssh <sessionId> [--print]"
-  ]
-    .map((command) => `${CLI_NAME} ${command}`)
-    .join("\n");
+function helpText(stream, env = process.env) {
+  const useColor = shouldUseColor(stream, env);
+  const title = styleText("flare CLI", "\u001B[1;36m", useColor);
+  const usageLabel = styleText("Usage", "\u001B[1;33m", useColor);
+  const sectionLabel = (value) => styleText(value, "\u001B[1;33m", useColor);
+  const commandPrefix = styleText(CLI_NAME, "\u001B[1;32m", useColor);
+  const note = (value) => styleText(value, "\u001B[2m", useColor);
+
+  const lines = [
+    title,
+    `${usageLabel}: ${commandPrefix} <command> [options]`,
+    note(`Default API: ${DEFAULT_BASE_URL}`),
+    note("Use --url to point the CLI at a different control plane."),
+    ""
+  ];
+
+  for (const section of HELP_CATALOG) {
+    lines.push(sectionLabel(section.title));
+    for (const topic of section.topics) {
+      lines.push(`  ${commandPrefix} ${commandUsageLine(topic.name, topic.usageTail)}`);
+      if (topic.alias) {
+        lines.push(`  ${commandPrefix} ${topic.alias}`);
+      }
+      if (topic.kind === "group") {
+        for (const command of topic.commands) {
+          lines.push(`    ${commandPrefix} ${commandUsageLine(`${topic.name} ${command.name}`, command.usageTail)}`);
+        }
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push(note("Use `flare help <topic>` or append `--help` for focused command details."));
+  lines.push(note("Use the shortcuts when you want the common session commands without the session prefix."));
+  return lines.join("\n").trimEnd();
 }
 
 export async function runCli(argv, dependencies = {}) {
@@ -501,13 +775,31 @@ export async function runCli(argv, dependencies = {}) {
   const stderr = dependencies.stderr || process.stderr;
   const env = dependencies.env || process.env;
   const configPath = dependencies.configPath || defaultConfigPath(env);
-  const config = withLocalKeyState(await readConfig(configPath));
   const { positionals, options } = parseArgs(argv);
+  if (positionals[0] === "help") {
+    try {
+      print(stdout, positionals.length > 1 ? helpTextForTopic(positionals.slice(1), stdout, env) : helpText(stdout, env));
+      return 0;
+    } catch (error) {
+      print(stderr, error.message || "Command failed");
+      return 1;
+    }
+  }
+  if (options.help || positionals.length === 0) {
+    try {
+      print(stdout, positionals.length > 0 ? helpTextForTopic(positionals, stdout, env) : helpText(stdout, env));
+      return 0;
+    } catch (error) {
+      print(stderr, error.message || "Command failed");
+      return 1;
+    }
+  }
+  const config = withLocalKeyState(await readConfig(configPath));
   const baseUrl = getBaseUrl(options, config);
   let token = getToken(options, config);
   let refreshToken = getRefreshToken(options, config);
   let authConfig = config;
-  let [command = "help", subcommand, ...rest] = positionals;
+  let [command, subcommand, ...rest] = positionals;
 
   if (command === "workspaces") {
     command = "workspace";
@@ -887,11 +1179,6 @@ export async function runCli(argv, dependencies = {}) {
   }
 
   try {
-    if (command === "help") {
-      print(stdout, helpText());
-      return 0;
-    }
-
     if (command === "doctor") {
       const report = buildDoctorReport({
         env,

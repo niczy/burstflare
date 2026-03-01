@@ -964,10 +964,76 @@ test("cli help uses flare branding", async () => {
   });
 
   assert.equal(code, 0);
-  assert.match(stdout.data, /^flare auth register/m);
-  assert.match(stdout.data, /^flare template inspect <templateId>/m);
-  assert.match(stdout.data, /^flare session \[list\]/m);
+  assert.match(stdout.data, /^flare CLI$/m);
+  assert.match(stdout.data, /^Authentication$/m);
+  assert.match(stdout.data, /^  flare auth$/m);
+  assert.match(stdout.data, /^    flare auth register --email <email> \[--name <name>\]$/m);
+  assert.match(stdout.data, /^    flare template inspect <templateId>$/m);
+  assert.match(stdout.data, /^    flare session list \[--status <status>\] \[--template <templateId>\]$/m);
+  assert.match(stdout.data, /^Shortcuts$/m);
+  assert.match(stdout.data, /Use `flare help <topic>` or append `--help`/);
   assert.doesNotMatch(stdout.data, /burstflare auth register/);
+  assert.equal(stderr.data, "");
+});
+
+test("cli supports focused help for command groups and leaf commands", async () => {
+  const stdout = capture();
+  const stderr = capture();
+
+  let code = await runCli(["help", "session"], {
+    stdout,
+    stderr,
+    env: {
+      FLARE_CONFIG: path.join(os.tmpdir(), `flare-help-session-${Date.now()}.json`)
+    }
+  });
+
+  assert.equal(code, 0);
+  assert.match(stdout.data, /^Usage: flare session/m);
+  assert.match(stdout.data, /^Commands:$/m);
+  assert.match(stdout.data, /ssh\s+Open or print SSH attach details\./);
+  assert.equal(stderr.data, "");
+
+  stdout.data = "";
+
+  code = await runCli(["auth", "register", "--help"], {
+    stdout,
+    stderr,
+    env: {
+      FLARE_CONFIG: path.join(os.tmpdir(), `flare-help-register-${Date.now()}.json`)
+    }
+  });
+
+  assert.equal(code, 0);
+  assert.match(stdout.data, /^Usage: flare auth register/m);
+  assert.match(stdout.data, /Create a user and save auth tokens locally\./);
+  assert.match(stdout.data, /-h, --help/);
+  assert.equal(stderr.data, "");
+});
+
+test("cli help adds ansi color when output supports it", async () => {
+  const stdout = {
+    data: "",
+    isTTY: true,
+    write(chunk) {
+      this.data += chunk;
+    }
+  };
+  const stderr = capture();
+
+  const code = await runCli([], {
+    stdout,
+    stderr,
+    env: {
+      FORCE_COLOR: "1",
+      FLARE_CONFIG: path.join(os.tmpdir(), `flare-help-color-${Date.now()}.json`)
+    }
+  });
+
+  assert.equal(code, 0);
+  assert.match(stdout.data, /\u001B\[1;36mflare CLI\u001B\[0m/);
+  assert.match(stdout.data, /\u001B\[1;33mAuthentication\u001B\[0m/);
+  assert.match(stdout.data, /\u001B\[1;32mflare\u001B\[0m auth register/);
   assert.equal(stderr.data, "");
 });
 
