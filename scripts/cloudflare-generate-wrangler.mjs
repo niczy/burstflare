@@ -1,3 +1,4 @@
+import path from "node:path";
 import { loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
 
 function renderWrangler(state, config) {
@@ -19,13 +20,10 @@ function renderWrangler(state, config) {
   if (config.turnstileSecret) {
     vars.push(`TURNSTILE_SECRET = "${config.turnstileSecret}"`);
   }
-  if (config.frontendOrigin) {
-    vars.push(`FRONTEND_ORIGIN = "${config.frontendOrigin}"`);
-  }
-
   const lines = [`name = "${config.workerName}"
 main = "apps/edge/src/worker.js"
 compatibility_date = "2026-02-27"
+compatibility_flags = ["nodejs_compat"]
 
 [observability]
 enabled = true
@@ -36,6 +34,11 @@ head_sampling_rate = 1
 
 [vars]
 ${vars.join("\n")}
+
+[assets]
+directory = "${path.resolve(process.cwd(), "apps", "web", "dist", "client")}"
+binding = "ASSETS"
+not_found_handling = "none"
 
 [[d1_databases]]
 binding = "DB"

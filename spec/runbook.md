@@ -80,19 +80,17 @@ Use this sequence for every production rollout:
 
 1. `npm run ci`
 2. Authenticate Wrangler if needed (`npx wrangler whoami`)
-3. Deploy the vinext frontend (`npm run deploy:web`)
-4. Record the deployed frontend URL and set `FRONTEND_ORIGIN` in `.env`
-5. `npm run cf:validate-schema`
-6. `node scripts/cloudflare-generate-wrangler.mjs > wrangler.generated.toml`
-7. `sg docker -c 'npx wrangler deploy -c wrangler.generated.toml'`
-8. Wait for the reported `Current Version ID`
-9. `node scripts/smoke.mjs --base-url https://burstflare.nicholas-zhaoyu.workers.dev`
-10. Run one manual operator check:
+3. `npm run cf:validate-schema`
+4. `node scripts/cloudflare-generate-wrangler.mjs > wrangler.generated.toml`
+5. `sg docker -c 'npx wrangler deploy -c wrangler.generated.toml'`
+6. Wait for the reported `Current Version ID`
+7. `node scripts/smoke.mjs --base-url https://burstflare.nicholas-zhaoyu.workers.dev`
+8. Run one manual operator check:
    - create a session
    - open preview
    - open editor
    - stop the session
-11. Only announce the rollout after smoke plus the manual runtime check succeed
+9. Only announce the rollout after smoke plus the manual runtime check succeed
 
 ## 5. Limited Beta Onboarding
 

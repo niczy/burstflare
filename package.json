@@ -23,7 +23,6 @@
     "cf:validate-schema:staging": "CLOUDFLARE_ENVIRONMENT=staging node scripts/cloudflare-validate-schema.mjs",
     "cf:verify": "node scripts/cloudflare-verify.mjs",
     "cf:verify:staging": "CLOUDFLARE_ENVIRONMENT=staging node scripts/cloudflare-verify.mjs",
-    "deploy:web": "npm run deploy --workspace @burstflare/web",
     "dev:edge": "node apps/edge/src/dev-server.js",
     "dev:web": "npm run dev --workspace @burstflare/web",
     "dev": "node scripts/dev.mjs",

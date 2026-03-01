@@ -15,6 +15,7 @@ const CSRF_COOKIE = "burstflare_csrf";
 const REQUEST_ID_HEADER = "x-burstflare-request-id";
 const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
 const localWebAuthnChallenges = new Map();
+let defaultFrontendHandlerPromise = null;
 
 function tokenFromRequest(request, sessionCookieName) {
   const authHeader = request.headers.get("authorization");
@@ -28,15 +29,11 @@ function requestIdFromRequest(request) {
   return request.headers.get(REQUEST_ID_HEADER) || globalThis.crypto.randomUUID();
 }
 
-function normalizeOrigin(value) {
-  if (!value) {
-    return "";
+async function loadDefaultFrontendHandler() {
+  if (!defaultFrontendHandlerPromise) {
+    defaultFrontendHandlerPromise = import("../../web/dist/server/ssr/index.js").then((module) => module.default);
   }
-  try {
-    return new URL(String(value)).origin;
-  } catch (_error) {
-    return "";
-  }
+  return defaultFrontendHandlerPromise;
 }
 
 function errorCodeForStatus(status) {
@@ -1045,8 +1042,8 @@ export function createApp(options = {}) {
   const rateLimiter = createRateLimiter(options);
   const turnstile = createTurnstileVerifier(options);
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
-  const frontendOrigin = normalizeOrigin(options.FRONTEND_ORIGIN || options.frontendOrigin);
-  const frontendFetchImpl = options.frontendFetchImpl || globalThis.fetch;
+  const frontendHandler = options.frontendHandler || null;
+  const getFrontendAssetResponse = options.getFrontendAssetResponse || null;
 
   function hasContainerBinding() {
     return hasRuntimeBinding(options);
@@ -1328,27 +1325,29 @@ export function createApp(options = {}) {
     return pathname !== "/device" && !pathname.startsWith("/api/") && !pathname.startsWith("/runtime/");
   }
 
-  async function proxyFrontendRequest(request) {
-    if (!frontendOrigin || !["GET", "HEAD"].includes(request.method)) {
+  async function renderFrontendRequest(request) {
+    if (!["GET", "HEAD"].includes(request.method)) {
       return null;
     }
     const url = new URL(request.url);
-    const target = new URL(`${url.pathname}${url.search}`, frontendOrigin);
-    const headers = new Headers(request.headers);
-    headers.delete("host");
-    try {
-      return await frontendFetchImpl(target, {
-        method: request.method,
-        headers,
-        redirect: "manual"
-      });
-    } catch (error) {
-      const next = new Error(`Frontend origin is unavailable at ${frontendOrigin}`);
-      next.status = 502;
-      next.code = "FRONTEND_UNAVAILABLE";
-      next.cause = error;
-      throw next;
+    if (url.pathname.startsWith("/assets/")) {
+      if (typeof getFrontendAssetResponse === "function") {
+        const response = await getFrontendAssetResponse(request);
+        if (response) {
+          return response;
+        }
+      }
+      return notFound();
     }
+
+    const activeFrontendHandler = frontendHandler || (await loadDefaultFrontendHandler());
+    if (!activeFrontendHandler || typeof activeFrontendHandler.fetch !== "function") {
+      const error = new Error("Frontend handler is unavailable");
+      error.status = 503;
+      error.code = "FRONTEND_UNAVAILABLE";
+      throw error;
+    }
+    return activeFrontendHandler.fetch(request);
   }
 
   function createRuntimeSshBridge(sessionId) {
@@ -2850,11 +2849,11 @@ export function createApp(options = {}) {
         return normalizeErrorResponse(requestWithId, response);
       }
       if (isFrontendPath(url.pathname)) {
-        const frontendResponse = await proxyFrontendRequest(requestWithId);
+        const frontendResponse = await renderFrontendRequest(requestWithId);
         if (!frontendResponse) {
           return normalizeErrorResponse(
             requestWithId,
-            new Response("Frontend origin is not configured for this deployment.", {
+            new Response("Frontend route is unavailable for this request.", {
               status: 502,
               headers: { "content-type": "text/plain; charset=utf-8" }
             })

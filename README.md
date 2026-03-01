@@ -75,7 +75,7 @@ npm run dev
 http://127.0.0.1:8787
 ```
 
-`npm run dev` now starts both the vinext frontend and the edge API server, then proxies browser traffic through the edge origin.
+`npm run dev` builds the current vinext web bundle, then starts the edge server and serves the web app from the same local process.
 
 4. Point the CLI at local only when you are testing against the local stack:
 
@@ -87,7 +87,6 @@ flare auth register --email you@example.com --url http://127.0.0.1:8787
 
 ```bash
 npm run ci
-npm run deploy:web
 npm run smoke
 npm run ui:smoke
 npm run npm:cli:smoke

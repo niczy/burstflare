@@ -45,7 +45,6 @@ export async function loadCloudflareConfig() {
     containerImage: env.CLOUDFLARE_CONTAINER_IMAGE || "",
     turnstileSiteKey: env.TURNSTILE_SITE_KEY || "",
     turnstileSecret: env.TURNSTILE_SECRET || "",
-    frontendOrigin: env.FRONTEND_ORIGIN || env.CLOUDFLARE_FRONTEND_ORIGIN || "",
     slug: slugifyDomain(getRequiredEnv(env, "CLOUDFLARE_DOMAIN", ["domain"])),
     environment,
     workerName: environment === "production" ? "burstflare" : `burstflare-${environment}`,

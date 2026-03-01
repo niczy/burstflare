@@ -90,24 +90,26 @@ async function requestJson(app, path, init = {}) {
   return { response, data };
 }
 
-function createFrontendFetch(bodyByPath = {}) {
-  return async (url) => {
-    const requestUrl = new URL(String(url));
-    const body = bodyByPath[requestUrl.pathname] || bodyByPath.default;
-    if (body === undefined) {
-      return new Response("frontend missing", {
-        status: 404,
+function createFrontendHandler(bodyByPath = {}) {
+  return {
+    async fetch(request) {
+      const requestUrl = new URL(request.url);
+      const body = bodyByPath[requestUrl.pathname] || bodyByPath.default;
+      if (body === undefined) {
+        return new Response("frontend missing", {
+          status: 404,
+          headers: {
+            "content-type": "text/plain; charset=utf-8"
+          }
+        });
+      }
+      return new Response(body, {
+        status: 200,
         headers: {
-          "content-type": "text/plain; charset=utf-8"
+          "content-type": "text/html; charset=utf-8"
         }
       });
     }
-    return new Response(body, {
-      status: 200,
-      headers: {
-        "content-type": "text/html; charset=utf-8"
-      }
-    });
   };
 }
 
@@ -118,8 +120,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const queuedBuilds = [];
   const queuedReconcile = [];
   const app = createApp({
-    frontendOrigin: "http://frontend.test",
-    frontendFetchImpl: createFrontendFetch({
+    frontendHandler: createFrontendHandler({
       "/":
         "<!doctype html><title>BurstFlare</title><main>Quick Terminal Approve Device Code Recovery Code New Recovery Codes Sign In With Passkey Register Passkey id=\"passkeys\" The verification challenge loads automatically in the hosted app deviceStatus pendingDevices lastRefresh terminalOutput persistedPaths snapshotList snapshotContentPreview</main>"
     }),
@@ -163,8 +164,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(rootHtml, /snapshotContentPreview/);
 
   const turnstileApp = createApp({
-    frontendOrigin: "http://frontend.test",
-    frontendFetchImpl: createFrontendFetch({
+    frontendHandler: createFrontendHandler({
       "/": "<!doctype html><title>BurstFlare</title><main>strict frontend shell</main>"
     }),
     TURNSTILE_SECRET: "secret",

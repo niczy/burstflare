@@ -17,7 +17,7 @@ async function requestText(baseUrl, path) {
 
 async function waitForShell(baseUrl) {
   let lastError = null;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       return await requestText(baseUrl, "/");
     } catch (error) {

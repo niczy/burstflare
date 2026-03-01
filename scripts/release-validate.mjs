@@ -10,6 +10,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getTurnstileToken() {
+  return getArg("--turnstile-token") || process.env.BURSTFLARE_TURNSTILE_TOKEN || process.env.TURNSTILE_TOKEN || null;
+}
+
 async function requestJson(baseUrl, path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -26,6 +30,23 @@ async function requestJson(baseUrl, path, options = {}) {
     throw error;
   }
   return data;
+}
+
+async function requestText(baseUrl, path, options = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`${options.method || "GET"} ${path} failed`);
+    error.status = response.status;
+    error.body = text;
+    throw error;
+  }
+  return text;
 }
 
 async function waitForHealthy(baseUrl) {
@@ -74,14 +95,36 @@ async function waitForBuildReady(baseUrl, headers, buildId) {
 
 async function main() {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
-  await waitForHealthy(baseUrl);
+  const turnstileToken = getTurnstileToken();
+  const health = await waitForHealthy(baseUrl);
+
+  if (health.runtime?.turnstileEnabled && !turnstileToken) {
+    const homepage = await requestText(baseUrl, "/");
+    if (!homepage.includes("BurstFlare") || !homepage.includes('type="module"')) {
+      throw new Error("Frontend shell did not render expected vinext markup");
+    }
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          baseUrl,
+          limited: true,
+          reason: "Turnstile is enabled; pass --turnstile-token for authenticated release validation",
+          publicChecks: ["health", "homepage"]
+        },
+        null,
+        2
+      )}\n`
+    );
+    return;
+  }
 
   const email = `release-validate-${Date.now()}@example.com`;
   const register = await requestJson(baseUrl, "/api/auth/register", {
     method: "POST",
     body: JSON.stringify({
       email,
-      name: "Release Validator"
+      name: "Release Validator",
+      ...(turnstileToken ? { turnstileToken } : {})
     })
   });
   const headers = {

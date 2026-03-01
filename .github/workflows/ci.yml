@@ -19,7 +19,7 @@ jobs:
       - run: npm run ci
       - run: npm run ssh:smoke
       - run: |
-          BURSTFLARE_DATA_FILE=.local/ci-smoke-data.json npm run dev > /tmp/burstflare-dev.log 2>&1 &
+          BURSTFLARE_DATA_FILE=.local/ci-smoke-data.json npm run dev:edge > /tmp/burstflare-dev.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID' EXIT
           npm run smoke -- --base-url http://127.0.0.1:8787
