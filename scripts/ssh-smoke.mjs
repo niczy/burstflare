@@ -1,3 +1,5 @@
+// @ts-check
+
 import { generateKeyPairSync } from "node:crypto";
 import { spawn } from "node:child_process";
 import http from "node:http";
@@ -11,6 +13,26 @@ import { createSshTunnel } from "../apps/cli/src/cli.js";
 import ssh2 from "ssh2";
 
 const { Client: SshClient, Server: SshServer } = ssh2;
+
+/**
+ * @typedef {{
+ *   cwd?: string;
+ *   stdio?: import("node:child_process").StdioOptions;
+ * }} CommandOptions
+ */
+
+/**
+ * @typedef {{
+ *   stdout: string;
+ *   stderr: string;
+ * }} CommandResult
+ */
+
+/**
+ * @typedef {Error & {
+ *   code?: number | null;
+ * }} CommandError
+ */
 
 function assert(condition, message) {
   if (!condition) {
@@ -43,6 +65,12 @@ async function reservePort(host = "127.0.0.1") {
   return port;
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {CommandOptions} [options]
+ * @returns {Promise<CommandResult>}
+ */
 async function runCommand(command, args, options = {}) {
   const { cwd, stdio = "pipe" } = options;
   return new Promise((resolve, reject) => {
@@ -73,7 +101,9 @@ async function runCommand(command, args, options = {}) {
         });
         return;
       }
-      const error = new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`);
+      const error = /** @type {CommandError} */ (
+        new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`)
+      );
       error.code = code;
       reject(error);
     });
@@ -167,7 +197,7 @@ function createWebSocketProxyServer(targetPort) {
   });
 
   server.on("upgrade", (request, socket, head) => {
-    const url = new URL(request.url, "http://127.0.0.1");
+    const url = new URL(request.url || "/", "http://127.0.0.1");
     if (url.pathname !== "/ssh") {
       socket.destroy();
       return;
