@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
-    "start": "vinext start"
+    "start": "vinext start",
+    "deploy": "vinext deploy"
   },
   "dependencies": {
     "react": "^19.2.4",

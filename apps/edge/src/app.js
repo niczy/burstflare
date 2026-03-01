@@ -1,4 +1,3 @@
-import { html, appJs, styles } from "../../web/src/assets.js";
 import { createBurstFlareService } from "../../../packages/shared/src/service.js";
 import { createCloudflareStateStore } from "../../../packages/shared/src/cloudflare-store.js";
 import { createMemoryStore } from "../../../packages/shared/src/memory-store.js";
@@ -1047,6 +1046,7 @@ export function createApp(options = {}) {
   const turnstile = createTurnstileVerifier(options);
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
   const frontendOrigin = normalizeOrigin(options.FRONTEND_ORIGIN || options.frontendOrigin);
+  const frontendFetchImpl = options.frontendFetchImpl || globalThis.fetch;
 
   function hasContainerBinding() {
     return hasRuntimeBinding(options);
@@ -1324,17 +1324,6 @@ export function createApp(options = {}) {
     return sshCommand.replace("ws://localhost:8787", `wss://${host}`);
   }
 
-  function renderShellHtml() {
-    const turnstileScript = options.TURNSTILE_SITE_KEY
-      ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>'
-      : "";
-    return html.replace("__BURSTFLARE_TURNSTILE_SCRIPT__", turnstileScript);
-  }
-
-  function renderShellJs() {
-    return appJs.replace("__BURSTFLARE_TURNSTILE_SITE_KEY__", JSON.stringify(String(options.TURNSTILE_SITE_KEY || "")));
-  }
-
   function isFrontendPath(pathname) {
     return pathname !== "/device" && !pathname.startsWith("/api/") && !pathname.startsWith("/runtime/");
   }
@@ -1348,33 +1337,18 @@ export function createApp(options = {}) {
     const headers = new Headers(request.headers);
     headers.delete("host");
     try {
-      return await fetch(target, {
+      return await frontendFetchImpl(target, {
         method: request.method,
         headers,
         redirect: "manual"
       });
-    } catch (_error) {
-      return null;
+    } catch (error) {
+      const next = new Error(`Frontend origin is unavailable at ${frontendOrigin}`);
+      next.status = 502;
+      next.code = "FRONTEND_UNAVAILABLE";
+      next.cause = error;
+      throw next;
     }
-  }
-
-  function legacyFrontendResponse(pathname) {
-    if (pathname === "/") {
-      return new Response(renderShellHtml(), {
-        headers: { "content-type": "text/html; charset=utf-8" }
-      });
-    }
-    if (pathname === "/app.js") {
-      return new Response(renderShellJs(), {
-        headers: { "content-type": "application/javascript; charset=utf-8" }
-      });
-    }
-    if (pathname === "/styles.css") {
-      return new Response(styles, {
-        headers: { "content-type": "text/css; charset=utf-8" }
-      });
-    }
-    return notFound();
   }
 
   function createRuntimeSshBridge(sessionId) {
@@ -2876,7 +2850,16 @@ export function createApp(options = {}) {
         return normalizeErrorResponse(requestWithId, response);
       }
       if (isFrontendPath(url.pathname)) {
-        const frontendResponse = (await proxyFrontendRequest(requestWithId)) || legacyFrontendResponse(url.pathname);
+        const frontendResponse = await proxyFrontendRequest(requestWithId);
+        if (!frontendResponse) {
+          return normalizeErrorResponse(
+            requestWithId,
+            new Response("Frontend origin is not configured for this deployment.", {
+              status: 502,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            })
+          );
+        }
         return normalizeErrorResponse(requestWithId, frontendResponse);
       }
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/runtime/")) {

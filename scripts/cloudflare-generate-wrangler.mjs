@@ -19,6 +19,9 @@ function renderWrangler(state, config) {
   if (config.turnstileSecret) {
     vars.push(`TURNSTILE_SECRET = "${config.turnstileSecret}"`);
   }
+  if (config.frontendOrigin) {
+    vars.push(`FRONTEND_ORIGIN = "${config.frontendOrigin}"`);
+  }
 
   const lines = [`name = "${config.workerName}"
 main = "apps/edge/src/worker.js"
