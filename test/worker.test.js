@@ -90,6 +90,9 @@ async function requestJson(app, path, init = {}) {
   return { response, data };
 }
 
+const TEST_SSH_PUBLIC_KEY =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
+
 test("worker serves invite flow, bundle upload, build logs, session events, and runtime validation", async () => {
   const queuedBuilds = [];
   const queuedReconcile = [];
@@ -810,12 +813,24 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   );
   assert.equal(snapshotMissing.status, 404);
 
+  const syncedSshKey = await requestJson(app, `/api/sessions/${sessionId}/ssh-key`, {
+    method: "PUT",
+    headers: switchedHeaders,
+    body: JSON.stringify({
+      keyId: "cli:test",
+      label: "CLI Test",
+      publicKey: TEST_SSH_PUBLIC_KEY
+    })
+  });
+  assert.equal(syncedSshKey.response.status, 200);
+  assert.equal(syncedSshKey.data.sshKeyCount, 1);
+
   const ssh = await requestJson(app, `/api/sessions/${sessionId}/ssh-token`, {
     method: "POST",
     headers: switchedHeaders
   });
-  assert.match(ssh.data.sshCommand, /wstunnel client/);
-  assert.match(ssh.data.sshCommand, /ssh -p 2222 dev@127\.0\.0\.1/);
+  assert.match(ssh.data.sshCommand, /ssh -i <local-key-path>/);
+  assert.equal(ssh.data.sshKeyCount, 1);
 
   const runtimeInvalid = await app.fetch(
     new Request(`http://example.test/runtime/sessions/${sessionId}/ssh?token=${switchedToken}`)
@@ -1562,6 +1577,17 @@ test("worker secures runtime routes and redacts workspace secrets", async () => 
   });
   assert.equal(started.response.status, 200);
 
+  const syncedSshKey = await requestJson(app, `/api/sessions/${session.data.session.id}/ssh-key`, {
+    method: "PUT",
+    headers: ownerHeaders,
+    body: JSON.stringify({
+      keyId: "cli:security",
+      label: "Security CLI",
+      publicKey: TEST_SSH_PUBLIC_KEY
+    })
+  });
+  assert.equal(syncedSshKey.response.status, 200);
+
   const attackerPreview = await requestJson(app, `/runtime/sessions/${session.data.session.id}/preview`, {
     headers: attackerHeaders
   });
@@ -1699,6 +1725,11 @@ test("worker proxies runtime SSH websocket upgrades into the session container",
     templateId: template.template.id
   });
   await service.startSession(owner.token, session.session.id);
+  await service.upsertSessionSshKey(owner.token, session.session.id, {
+    keyId: "cli:ssh-proxy",
+    label: "SSH Proxy",
+    publicKey: TEST_SSH_PUBLIC_KEY
+  });
   const runtime = await service.issueRuntimeToken(owner.token, session.session.id);
 
   const response = await app.fetch(
@@ -1773,6 +1804,11 @@ test("worker proxies browser terminal websocket upgrades into the session contai
     templateId: template.template.id
   });
   await service.startSession(owner.token, session.session.id);
+  await service.upsertSessionSshKey(owner.token, session.session.id, {
+    keyId: "cli:terminal-proxy",
+    label: "Terminal Proxy",
+    publicKey: TEST_SSH_PUBLIC_KEY
+  });
   const runtime = await service.issueRuntimeToken(owner.token, session.session.id);
 
   const response = await app.fetch(

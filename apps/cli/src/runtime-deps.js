@@ -1,7 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import path from "node:path";
 
-export const SSH_RUNTIME_DEPENDENCIES = ["ssh"];
+export const SSH_RUNTIME_DEPENDENCIES = ["ssh", "ssh-keygen"];
 
 function commandCandidates(command, platform, env) {
   if (platform !== "win32") {
@@ -63,6 +63,18 @@ export function installHints(command, { platform = process.platform } = {}) {
     }
     return [
       "Install an OpenSSH client and make sure `ssh` is available on your PATH."
+    ];
+  }
+
+  if (command === "ssh-keygen") {
+    if (platform === "win32") {
+      return [
+        "Install OpenSSH tooling and make sure `ssh-keygen` is available on your PATH.",
+        "Windows: enable the built-in OpenSSH Client feature or install one with your preferred package manager."
+      ];
+    }
+    return [
+      "Install OpenSSH tooling and make sure `ssh-keygen` is available on your PATH."
     ];
   }
 

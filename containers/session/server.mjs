@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -19,6 +19,7 @@ const runtimeState = {
   restoredContentType: null,
   persistedPaths: [],
   secretNames: [],
+  sshAuthorizedKeys: [],
   bootstrap: null,
   lastLifecycle: null,
   files: new Map()
@@ -202,9 +203,44 @@ function resetRuntimeState() {
   runtimeState.restoredContentType = null;
   runtimeState.persistedPaths = [];
   runtimeState.secretNames = [];
+  runtimeState.sshAuthorizedKeys = [];
   runtimeState.bootstrap = null;
   runtimeState.lastLifecycle = null;
   runtimeState.files.clear();
+}
+
+function normalizeAuthorizedKeys(values) {
+  const keys = Array.isArray(values) ? values : [];
+  const normalized = [];
+  for (const entry of keys) {
+    const value = String(entry || "").trim();
+    if (!value) {
+      continue;
+    }
+    if (!/^ssh-(ed25519|rsa)\s+[A-Za-z0-9+/=]+(?:\s+.*)?$/.test(value)) {
+      continue;
+    }
+    if (!normalized.includes(value)) {
+      normalized.push(value);
+    }
+  }
+  return normalized;
+}
+
+function applyAuthorizedKeys(values) {
+  const keys = normalizeAuthorizedKeys(values);
+  runtimeState.sshAuthorizedKeys = keys;
+  const sshDir = "/home/dev/.ssh";
+  const authorizedKeysPath = `${sshDir}/authorized_keys`;
+  const body = keys.length > 0 ? `${keys.join("\n")}\n` : "";
+  try {
+    mkdirSync(sshDir, { recursive: true });
+    chmodSync(sshDir, 0o700);
+    writeFileSync(authorizedKeysPath, body, "utf8");
+    chmodSync(authorizedKeysPath, 0o600);
+  } catch (_error) {}
+  runtimeState.files.set(authorizedKeysPath, body);
+  return keys;
 }
 
 function applyRuntimeBootstrap(payload) {
@@ -215,6 +251,7 @@ function applyRuntimeBootstrap(payload) {
       : {};
   const runtimeSecretNames = Object.keys(runtimeSecrets).sort();
   const secretsEnv = runtimeSecretNames.map((name) => `${name}=${String(runtimeSecrets[name] ?? "")}`).join("\n");
+  const sshAuthorizedKeys = applyAuthorizedKeys(payload?.sshAuthorizedKeys);
   const bootstrap = {
     sessionId: String(payload?.sessionId || "unknown"),
     workspaceId: payload?.workspaceId || null,
@@ -225,6 +262,7 @@ function applyRuntimeBootstrap(payload) {
     lastRestoredSnapshotId: payload?.lastRestoredSnapshotId || null,
     persistedPaths,
     runtimeSecretNames,
+    sshKeyCount: sshAuthorizedKeys.length,
     runtimeVersion: Number.isInteger(payload?.runtimeVersion) ? payload.runtimeVersion : 0,
     bootstrappedAt: new Date().toISOString()
   };
@@ -933,7 +971,7 @@ async function ensureSshd() {
       "Protocol 2",
       `HostKey ${hostKeyPath}`,
       "PermitRootLogin no",
-      "PasswordAuthentication yes",
+      "PasswordAuthentication no",
       "PubkeyAuthentication yes",
       "PermitEmptyPasswords no",
       "ChallengeResponseAuthentication no",

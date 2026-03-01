@@ -137,6 +137,49 @@ function getRuntimeSecretMap(workspace) {
   return runtimeSecrets;
 }
 
+function getSessionSshKeys(session) {
+  if (!Array.isArray(session.sshAuthorizedKeys)) {
+    session.sshAuthorizedKeys = [];
+  }
+  return session.sshAuthorizedKeys;
+}
+
+function summarizeSessionSshKeys(session) {
+  return getSessionSshKeys(session).map((entry) => ({
+    keyId: entry.keyId,
+    label: entry.label,
+    userId: entry.userId,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt
+  }));
+}
+
+function listSessionAuthorizedPublicKeys(session) {
+  return getSessionSshKeys(session)
+    .map((entry) => String(entry.publicKey || "").trim())
+    .filter(Boolean);
+}
+
+function normalizeSessionSshKey(payload = {}) {
+  const keyId = String(payload.keyId || "").trim();
+  ensure(keyId, "SSH key id is required");
+  ensure(keyId.length <= 128, "SSH key id exceeds size limit");
+
+  const publicKey = String(payload.publicKey || "").trim();
+  ensure(publicKey, "SSH public key is required");
+  ensure(publicKey.length <= 4096, "SSH public key exceeds size limit", 413);
+  ensure(/^ssh-(ed25519|rsa)\s+[A-Za-z0-9+/=]+(?:\s+.*)?$/.test(publicKey), "SSH public key format is invalid");
+
+  const label = String(payload.label || "").trim();
+  ensure(label.length <= 128, "SSH key label exceeds size limit");
+
+  return {
+    keyId,
+    publicKey,
+    label: label || null
+  };
+}
+
 function toUint8Array(value) {
   if (value instanceof Uint8Array) {
     return value;
@@ -779,15 +822,24 @@ function formatTemplateDetail(state, template) {
   };
 }
 
-function formatSession(state, session) {
+function formatSession(state, session, { includeSshKeys = false } = {}) {
   const template = state.templates.find((entry) => entry.id === session.templateId);
   const events = state.sessionEvents.filter((entry) => entry.sessionId === session.id);
   const snapshots = state.snapshots.filter((entry) => entry.sessionId === session.id);
+  const { sshAuthorizedKeys: _sshAuthorizedKeys, ...baseSession } = session;
+  const sshKeyCount = getSessionSshKeys(session).length;
   return {
-    ...session,
+    ...baseSession,
     templateName: template?.name || "unknown",
     eventsCount: events.length,
-    snapshotCount: snapshots.length
+    snapshotCount: snapshots.length,
+    sshKeyCount,
+    ...(includeSshKeys
+      ? {
+          sshAuthorizedKeys: listSessionAuthorizedPublicKeys(session),
+          sshKeyMetadata: summarizeSessionSshKeys(session)
+        }
+      : {})
   };
 }
 
@@ -3629,6 +3681,7 @@ export function createBurstFlareService(options = {}) {
           runtimeUpdatedAt: null,
           persistedPaths: [...(activeVersion.manifest?.persistedPaths || [])],
           sleepTtlSeconds: activeVersion.manifest?.sleepTtlSeconds || null,
+          sshAuthorizedKeys: [],
           previewUrl: null
         };
         session.previewUrl = `/runtime/sessions/${session.id}/preview`;
@@ -4117,10 +4170,59 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
+    async upsertSessionSshKey(token, sessionId, payload) {
+      return transact(SESSION_SCOPE, (state) => {
+        const auth = requireSessionAccess(state, token, sessionId, clock);
+        ensure(auth.session.state !== "deleted", "Session is deleted", 409);
+        const normalized = normalizeSessionSshKey(payload);
+        const keys = getSessionSshKeys(auth.session);
+        const existing = keys.find((entry) => entry.keyId === normalized.keyId && entry.userId === auth.user.id);
+        const timestamp = nowIso(clock);
+        if (existing) {
+          existing.publicKey = normalized.publicKey;
+          existing.label = normalized.label;
+          existing.updatedAt = timestamp;
+        } else {
+          keys.push({
+            keyId: normalized.keyId,
+            label: normalized.label,
+            publicKey: normalized.publicKey,
+            userId: auth.user.id,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          });
+        }
+        auth.session.updatedAt = timestamp;
+        writeAudit(state, clock, {
+          action: "session.ssh_key_upserted",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "session",
+          targetId: auth.session.id,
+          details: {
+            keyId: normalized.keyId,
+            keyCount: keys.length
+          }
+        });
+        return {
+          ok: true,
+          sessionId: auth.session.id,
+          sshKey: {
+            keyId: normalized.keyId,
+            label: normalized.label,
+            createdAt: existing?.createdAt || timestamp,
+            updatedAt: timestamp
+          },
+          sshKeyCount: keys.length
+        };
+      });
+    },
+
     async issueRuntimeToken(token, sessionId) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state === "running", "Session is not running", 409);
+        ensure(listSessionAuthorizedPublicKeys(auth.session).length > 0, "SSH key is not configured for this session", 409);
         const runtimeToken = createToken(state, clock, {
           userId: auth.user.id,
           workspaceId: auth.workspace.id,
@@ -4137,10 +4239,10 @@ export function createBurstFlareService(options = {}) {
         return {
           token: runtimeToken.token,
           sshUser: "dev",
-          sshPassword: "burstflare",
           sshCommand:
-            `wstunnel client -L tcp://127.0.0.1:2222:ws://localhost:8787/runtime/sessions/${auth.session.id}/ssh?token=${runtimeToken.token}` +
-            ` && ssh -p 2222 dev@127.0.0.1`
+            "ssh -i <local-key-path> -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null " +
+            "-o IdentitiesOnly=yes -o PreferredAuthentications=publickey -p <local-port> dev@127.0.0.1",
+          sshKeyCount: listSessionAuthorizedPublicKeys(auth.session).length
         };
       });
     },
@@ -4151,7 +4253,7 @@ export function createBurstFlareService(options = {}) {
         return {
           ok: true,
           sessionId,
-          session: formatSession(state, access.session)
+          session: formatSession(state, access.session, { includeSshKeys: true })
         };
       });
     },
