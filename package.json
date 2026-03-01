@@ -11,7 +11,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:web": "npm run build --workspace @burstflare/web",
-    "ci": "npm run lint && npm run build && npm run build:web && npm test",
+    "ci": "npm run lint && npm run typecheck && npm run build && npm run build:web && npm test",
     "cf:generate": "node scripts/cloudflare-generate-wrangler.mjs",
     "cf:generate:production": "CLOUDFLARE_ENVIRONMENT=production node scripts/cloudflare-generate-wrangler.mjs",
     "cf:generate:staging": "CLOUDFLARE_ENVIRONMENT=staging node scripts/cloudflare-generate-wrangler.mjs",
@@ -32,6 +32,7 @@
     "ssh:smoke": "node scripts/ssh-smoke.mjs",
     "ssh:smoke:live": "node scripts/live-ssh-smoke.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "typecheck": "tsc --project tsconfig.json",
     "ui:smoke": "node scripts/ui-smoke.mjs",
     "test": "node --test"
   },
@@ -41,5 +42,12 @@
   "dependencies": {
     "@cloudflare/containers": "^0.1.1",
     "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260305.0",
+    "@types/node": "^25.3.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3"
   }
 }
