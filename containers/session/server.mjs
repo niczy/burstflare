@@ -1,3 +1,5 @@
+// @ts-check
+
 import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, chownSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -7,6 +9,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ * }} HttpError
+ */
 
 const port = Number(process.env.PORT || 8080);
 const sshPort = Number(process.env.BURSTFLARE_SSH_PORT || 2222);
@@ -370,7 +378,7 @@ function updateEditorFile(filePath, content, persistedPaths = runtimeState.persi
   const { scope } = listEditorFiles(persistedPaths);
   const normalized = normalizeRuntimeFilePath(filePath);
   if (!normalized || !isWithinPersistedPaths(normalized, scope)) {
-    const error = new Error("Editor path must stay inside the configured persisted paths");
+    const error = /** @type {HttpError} */ (new Error("Editor path must stay inside the configured persisted paths"));
     error.status = 400;
     throw error;
   }
