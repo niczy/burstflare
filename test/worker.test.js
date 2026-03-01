@@ -79,6 +79,28 @@ function concatBytes(...parts) {
   return merged;
 }
 
+async function signStripePayload(secret, payload, timestamp = Math.floor(Date.now() / 1000)) {
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    {
+      name: "HMAC",
+      hash: "SHA-256"
+    },
+    false,
+    ["sign"]
+  );
+  const digest = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${timestamp}.${payload}`)
+  );
+  const signature = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `t=${timestamp},v1=${signature}`;
+}
+
 async function requestJson(app, path, init = {}) {
   const url = path.startsWith("http://") || path.startsWith("https://") ? path : `http://example.test${path}`;
   const response = await app.fetch(
@@ -2649,4 +2671,160 @@ test("worker can roll back a template through the API", async () => {
   });
   assert.equal(releases.response.status, 200);
   assert.equal(releases.data.releases.at(-1).mode, "rollback");
+});
+
+test("worker exposes billing endpoints and validates Stripe webhooks", async () => {
+  const checkoutCalls = [];
+  const portalCalls = [];
+  const invoiceCalls = [];
+  const service = createWorkerService({
+    BILLING_RATE_RUNTIME_MINUTE_USD: "0.05",
+    BILLING_RATE_SNAPSHOT_USD: "0.50",
+    BILLING_RATE_TEMPLATE_BUILD_USD: "2.00",
+    billing: {
+      providerName: "stripe",
+      async createCheckoutSession(input) {
+        checkoutCalls.push(input);
+        return {
+          provider: "stripe",
+          id: "cs_worker_1",
+          url: "https://checkout.stripe.com/c/pay/cs_worker_1",
+          customerId: "cus_worker_1",
+          setupIntentId: "seti_worker_1",
+          billingStatus: "checkout_open"
+        };
+      },
+      async createPortalSession(input) {
+        portalCalls.push(input);
+        return {
+          provider: "stripe",
+          id: "bps_worker_1",
+          url: "https://billing.stripe.com/p/session/worker_1"
+        };
+      },
+      async createUsageInvoice(input) {
+        invoiceCalls.push(input);
+        return {
+          provider: "stripe",
+          id: "in_worker_1",
+          status: "open",
+          hostedInvoiceUrl: "https://invoice.stripe.com/i/in_worker_1",
+          currency: "usd",
+          amountUsd: input.pricing.totalUsd,
+          billingStatus: "active"
+        };
+      }
+    }
+  });
+  const app = createApp({
+    service,
+    STRIPE_WEBHOOK_SECRET: "whsec_test"
+  });
+
+  const owner = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: "billing-worker@example.com", name: "Billing Worker" })
+  });
+  const headers = {
+    authorization: `Bearer ${owner.data.token}`,
+    "content-type": "application/json"
+  };
+
+  const billing = await requestJson(app, "/api/workspaces/current/billing", {
+    headers: {
+      authorization: `Bearer ${owner.data.token}`
+    }
+  });
+  assert.equal(billing.response.status, 200);
+  assert.equal(billing.data.billing.provider, null);
+  assert.equal(billing.data.pricing.rates.runtimeMinuteUsd, 0.05);
+
+  const checkout = await requestJson(app, "/api/workspaces/current/billing/checkout", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      successUrl: "https://app.example.com/billing/success",
+      cancelUrl: "https://app.example.com/billing/cancel"
+    })
+  });
+  assert.equal(checkout.response.status, 200);
+  assert.equal(checkout.data.checkoutSession.id, "cs_worker_1");
+  assert.equal(checkout.data.billing.customerId, "cus_worker_1");
+  assert.equal(checkout.data.billing.billingStatus, "checkout_open");
+  assert.equal(checkoutCalls.length, 1);
+  assert.equal(checkoutCalls[0].workspace.id, owner.data.workspace.id);
+
+  const portal = await requestJson(app, "/api/workspaces/current/billing/portal", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      returnUrl: "https://app.example.com/settings"
+    })
+  });
+  assert.equal(portal.response.status, 200);
+  assert.equal(portal.data.portalSession.id, "bps_worker_1");
+  assert.equal(portalCalls.length, 1);
+  assert.equal(portalCalls[0].billing.customerId, "cus_worker_1");
+
+  const event = {
+    id: "evt_worker_checkout",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: "cs_worker_1",
+        customer: "cus_worker_1",
+        payment_method: "pm_worker_1",
+        setup_intent: "seti_worker_1",
+        metadata: {
+          workspaceId: owner.data.workspace.id
+        }
+      }
+    }
+  };
+  const payload = JSON.stringify(event);
+  const webhook = await requestJson(app, "/api/stripe/webhook", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "stripe-signature": await signStripePayload("whsec_test", payload)
+    },
+    body: payload
+  });
+  assert.equal(webhook.response.status, 200);
+  assert.equal(webhook.data.workspace.plan, "free");
+  assert.equal(webhook.data.billing.billingStatus, "active");
+  assert.equal(webhook.data.billing.defaultPaymentMethodId, "pm_worker_1");
+
+  const seeded = await service.createTemplate(owner.data.token, {
+    name: "usage-billing-template",
+    description: "usage"
+  });
+  const seededVersion = await service.addTemplateVersion(owner.data.token, seeded.template.id, {
+    version: "1.0.0",
+    manifest: {
+      image: "registry.cloudflare.com/example/usage-billing-template:1.0.0"
+    }
+  });
+  await service.processTemplateBuildById(seededVersion.build.id);
+  const usageInvoice = await requestJson(app, "/api/workspaces/current/billing/invoice", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.data.token}`
+    }
+  });
+  assert.equal(usageInvoice.response.status, 200);
+  assert.equal(usageInvoice.data.invoice.id, "in_worker_1");
+  assert.equal(invoiceCalls.length >= 1, true);
+  assert.equal(invoiceCalls.at(-1).usage.templateBuilds, 1);
+
+  const invalidWebhook = await requestJson(app, "/api/stripe/webhook", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "stripe-signature": "t=1,v1=invalid"
+    },
+    body: payload
+  });
+  assert.equal(invalidWebhook.response.status, 400);
+  assert.equal(invalidWebhook.data.error, "Stripe webhook timestamp outside tolerance");
 });

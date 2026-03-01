@@ -490,6 +490,268 @@ function createTurnstileVerifier(options) {
   };
 }
 
+function createHttpError(message, status, details = null) {
+  const error = new Error(message);
+  error.status = status;
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    error.details = details;
+  }
+  return error;
+}
+
+function readUsdRate(options, key, fallback) {
+  const raw = options[key];
+  if (raw === undefined || raw === null || raw === "") {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw createHttpError(`${key} must be a non-negative number`, 500);
+  }
+  return value;
+}
+
+function createBillingCatalog(options) {
+  return {
+    currency: "usd",
+    runtimeMinuteUsd: readUsdRate(options, "BILLING_RATE_RUNTIME_MINUTE_USD", 0.03),
+    snapshotUsd: readUsdRate(options, "BILLING_RATE_SNAPSHOT_USD", 0.02),
+    templateBuildUsd: readUsdRate(options, "BILLING_RATE_TEMPLATE_BUILD_USD", 0.1)
+  };
+}
+
+function usdToMinorUnits(amountUsd) {
+  const cents = Math.round(Number(amountUsd || 0) * 100);
+  if (!Number.isFinite(cents) || cents < 0) {
+    throw createHttpError("Invalid billing amount", 500);
+  }
+  return cents;
+}
+
+async function postStripeForm(options, pathname, form) {
+  const secretKey = options.STRIPE_SECRET_KEY || "";
+  if (!secretKey) {
+    throw createHttpError("Stripe billing is not configured", 501);
+  }
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const response = await fetchImpl(`https://api.stripe.com/v1${pathname}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${secretKey}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: form
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw createHttpError(data?.error?.message || `Stripe API request failed (${response.status})`, response.status >= 500 ? 502 : 400, {
+      provider: "stripe",
+      type: data?.error?.type || null,
+      code: data?.error?.code || null,
+      param: data?.error?.param || null
+    });
+  }
+  return data;
+}
+
+async function ensureStripeCustomer(options, { user, workspace, billing }) {
+  if (billing?.customerId) {
+    return billing.customerId;
+  }
+  const form = new URLSearchParams();
+  form.set("email", user.email);
+  if (user.name) {
+    form.set("name", user.name);
+  }
+  form.set("metadata[workspaceId]", workspace.id);
+  form.set("metadata[userId]", user.id);
+  const data = await postStripeForm(options, "/customers", form);
+  if (typeof data.id !== "string" || !data.id) {
+    throw createHttpError("Stripe customer id missing", 502);
+  }
+  return data.id;
+}
+
+function createStripeBillingProvider(options) {
+  if (options.billing) {
+    return options.billing;
+  }
+  if (!options.STRIPE_SECRET_KEY) {
+    return null;
+  }
+
+  return {
+    providerName: "stripe",
+
+    async createCheckoutSession({ user, workspace, billing, successUrl, cancelUrl }) {
+      const customerId = await ensureStripeCustomer(options, {
+        user,
+        workspace,
+        billing
+      });
+      const form = new URLSearchParams();
+      form.set("mode", "setup");
+      form.set("success_url", successUrl);
+      form.set("cancel_url", cancelUrl);
+      form.set("customer", customerId);
+      form.set("client_reference_id", workspace.id);
+      form.set("metadata[workspaceId]", workspace.id);
+      form.set("metadata[userId]", user.id);
+      form.set("metadata[pricingModel]", "usage");
+      form.set("setup_intent_data[metadata][workspaceId]", workspace.id);
+      form.set("setup_intent_data[metadata][userId]", user.id);
+
+      const data = await postStripeForm(options, "/checkout/sessions", form);
+      return {
+        provider: "stripe",
+        id: data.id,
+        url: data.url,
+        customerId,
+        setupIntentId: typeof data.setup_intent === "string" ? data.setup_intent : null,
+        billingStatus: "checkout_open"
+      };
+    },
+
+    async createPortalSession({ billing, returnUrl }) {
+      const form = new URLSearchParams();
+      form.set("customer", billing.customerId);
+      form.set("return_url", returnUrl);
+      const data = await postStripeForm(options, "/billing_portal/sessions", form);
+      return {
+        provider: "stripe",
+        id: data.id,
+        url: data.url
+      };
+    },
+
+    async createUsageInvoice({ workspace, billing, pricing }) {
+      const currency = pricing?.currency || "usd";
+      for (const lineItem of pricing?.lineItems || []) {
+        if (!lineItem?.quantity || !lineItem?.unitAmountUsd) {
+          continue;
+        }
+        const form = new URLSearchParams();
+        form.set("customer", billing.customerId);
+        form.set("currency", currency);
+        form.set("unit_amount", String(usdToMinorUnits(lineItem.unitAmountUsd)));
+        form.set("quantity", String(lineItem.quantity));
+        form.set("description", `Burstflare ${lineItem.metric} for workspace ${workspace.name}`);
+        form.set("metadata[workspaceId]", workspace.id);
+        form.set("metadata[metric]", lineItem.metric);
+        await postStripeForm(options, "/invoiceitems", form);
+      }
+
+      const invoiceForm = new URLSearchParams();
+      invoiceForm.set("customer", billing.customerId);
+      invoiceForm.set("collection_method", "charge_automatically");
+      invoiceForm.set("auto_advance", "true");
+      invoiceForm.set("metadata[workspaceId]", workspace.id);
+      invoiceForm.set("metadata[pricingModel]", "usage");
+      const invoice = await postStripeForm(options, "/invoices", invoiceForm);
+      return {
+        provider: "stripe",
+        id: invoice.id,
+        status: typeof invoice.status === "string" ? invoice.status : null,
+        hostedInvoiceUrl: invoice.hosted_invoice_url || null,
+        currency: typeof invoice.currency === "string" ? invoice.currency : currency,
+        amountUsd: Number((Number(invoice.amount_due || 0) / 100).toFixed(4)),
+        billingStatus: "active"
+      };
+    }
+  };
+}
+
+function parseStripeSignatureHeader(header) {
+  const parsed = {
+    timestamp: null,
+    signatures: []
+  };
+  for (const part of String(header || "").split(",")) {
+    const [key, ...rest] = part.split("=");
+    if (!key || !rest.length) {
+      continue;
+    }
+    const value = rest.join("=").trim();
+    if (!value) {
+      continue;
+    }
+    const normalizedKey = key.trim();
+    if (normalizedKey === "t") {
+      parsed.timestamp = value;
+    } else if (normalizedKey === "v1") {
+      parsed.signatures.push(value);
+    }
+  }
+  return parsed;
+}
+
+function hexFromBuffer(value) {
+  return Array.from(new Uint8Array(value))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function timingSafeEqual(left, right) {
+  if (typeof left !== "string" || typeof right !== "string" || left.length !== right.length) {
+    return false;
+  }
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+async function verifyStripeWebhookSignature(payload, signatureHeader, secret, toleranceSeconds = 300) {
+  if (!secret) {
+    throw createHttpError("Stripe webhook is not configured", 501);
+  }
+  if (!signatureHeader) {
+    throw createHttpError("Stripe signature missing", 400);
+  }
+
+  const parsed = parseStripeSignatureHeader(signatureHeader);
+  const timestampSeconds = Number(parsed.timestamp);
+  if (!Number.isFinite(timestampSeconds) || !parsed.signatures.length) {
+    throw createHttpError("Stripe signature is invalid", 400);
+  }
+
+  const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds);
+  if (ageSeconds > toleranceSeconds) {
+    throw createHttpError("Stripe webhook timestamp outside tolerance", 400);
+  }
+
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    {
+      name: "HMAC",
+      hash: "SHA-256"
+    },
+    false,
+    ["sign"]
+  );
+  const digest = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`${parsed.timestamp}.${payload}`)
+  );
+  const expected = hexFromBuffer(digest);
+  if (!parsed.signatures.some((entry) => timingSafeEqual(entry, expected))) {
+    throw createHttpError("Stripe signature verification failed", 400);
+  }
+}
+
+async function parseStripeWebhookEvent(request, options) {
+  const payload = await request.text();
+  await verifyStripeWebhookSignature(payload, request.headers.get("stripe-signature"), options.STRIPE_WEBHOOK_SECRET || "");
+  try {
+    return JSON.parse(payload);
+  } catch (_error) {
+    throw createHttpError("Invalid Stripe webhook payload", 400);
+  }
+}
+
 function createJobQueue(options) {
   if (!options.BUILD_QUEUE && !options.RECONCILE_QUEUE && !options.BUILD_WORKFLOW) {
     return null;
@@ -853,7 +1115,9 @@ export function createWorkerService(options = {}) {
   return createBurstFlareService({
     store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore(),
     objects: createObjectStore(options),
-    jobs: createJobQueue(options)
+    jobs: createJobQueue(options),
+    billing: createStripeBillingProvider(options),
+    billingCatalog: createBillingCatalog(options)
   });
 }
 
@@ -1904,6 +2168,14 @@ export function createApp(options = {}) {
       })
     },
     {
+      method: "POST",
+      pattern: "/api/stripe/webhook",
+      handler: withErrorHandling(async (request) => {
+        const event = await parseStripeWebhookEvent(request, options);
+        return toJson(await service.applyBillingWebhook(event));
+      })
+    },
+    {
       method: "GET",
       pattern: "/api/workspaces",
       handler: withErrorHandling(async (request) => {
@@ -1959,6 +2231,52 @@ export function createApp(options = {}) {
         }
         const body = await parseJson(await request.text());
         return toJson(await service.updateWorkspaceMemberRole(token, userId, body.role));
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/api/workspaces/current/billing",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.getWorkspaceBilling(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/workspaces/current/billing/checkout",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.createWorkspaceCheckoutSession(token, body));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/workspaces/current/billing/portal",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.createWorkspaceBillingPortalSession(token, body));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/workspaces/current/billing/invoice",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.createWorkspaceUsageInvoice(token));
       })
     },
     {

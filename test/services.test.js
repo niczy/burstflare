@@ -607,6 +607,186 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(roleUpdateAudit.details.role, "admin");
 });
 
+test("service creates usage-based billing sessions, invoices, and Stripe webhooks", async () => {
+  const checkoutCalls = [];
+  const portalCalls = [];
+  const invoiceCalls = [];
+  const store = createMemoryStore();
+  const service = createBurstFlareService({
+    store,
+    billingCatalog: {
+      runtimeMinuteUsd: 0.05,
+      snapshotUsd: 0.5,
+      templateBuildUsd: 2
+    },
+    billing: {
+      providerName: "stripe",
+      async createCheckoutSession(input) {
+        checkoutCalls.push(input);
+        return {
+          provider: "stripe",
+          id: "cs_test_1",
+          url: "https://checkout.stripe.com/c/pay/cs_test_1",
+          customerId: "cus_test_1",
+          setupIntentId: "seti_test_1",
+          billingStatus: "checkout_open"
+        };
+      },
+      async createPortalSession(input) {
+        portalCalls.push(input);
+        return {
+          provider: "stripe",
+          id: "bps_test_1",
+          url: "https://billing.stripe.com/p/session/test_1"
+        };
+      },
+      async createUsageInvoice(input) {
+        invoiceCalls.push(input);
+        return {
+          provider: "stripe",
+          id: "in_test_1",
+          status: "open",
+          hostedInvoiceUrl: "https://invoice.stripe.com/i/in_test_1",
+          currency: "usd",
+          amountUsd: input.pricing.totalUsd,
+          billingStatus: "active"
+        };
+      }
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "billing-owner@example.com",
+    name: "Billing Owner"
+  });
+
+  const checkout = await service.createWorkspaceCheckoutSession(owner.token, {
+    successUrl: "https://app.example.com/billing/success",
+    cancelUrl: "https://app.example.com/billing/cancel"
+  });
+  assert.equal(checkout.checkoutSession.id, "cs_test_1");
+  assert.equal(checkout.billing.pricingModel, "usage");
+  assert.equal(checkout.billing.provider, "stripe");
+  assert.equal(checkout.billing.customerId, "cus_test_1");
+  assert.equal(checkout.billing.billingStatus, "checkout_open");
+  assert.equal(checkout.billing.lastSetupIntentId, "seti_test_1");
+  assert.equal(checkout.workspace.plan, "free");
+  assert.equal(checkoutCalls.length, 1);
+  assert.equal(checkoutCalls[0].successUrl, "https://app.example.com/billing/success");
+  assert.equal(checkoutCalls[0].cancelUrl, "https://app.example.com/billing/cancel");
+  assert.equal(checkoutCalls[0].billing.customerId, null);
+
+  const listed = await service.getWorkspaceBilling(owner.token);
+  assert.equal(listed.billing.customerId, "cus_test_1");
+  assert.equal(listed.pricing.totalUsd, 0);
+  assert.equal(listed.pendingInvoiceEstimate.totalUsd, 0);
+
+  const portal = await service.createWorkspaceBillingPortalSession(owner.token, {
+    returnUrl: "https://app.example.com/settings"
+  });
+  assert.equal(portal.portalSession.id, "bps_test_1");
+  assert.equal(portal.billing.lastPortalSessionId, "bps_test_1");
+  assert.equal(portalCalls.length, 1);
+  assert.equal(portalCalls[0].billing.customerId, "cus_test_1");
+  assert.equal(portalCalls[0].returnUrl, "https://app.example.com/settings");
+
+  await store.transact((state) => {
+    state.usageEvents.push(
+      {
+        id: "use_runtime_1",
+        workspaceId: owner.workspace.id,
+        kind: "runtime_minutes",
+        value: 12,
+        details: {},
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: "use_snapshot_1",
+        workspaceId: owner.workspace.id,
+        kind: "snapshot",
+        value: 3,
+        details: {},
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: "use_build_1",
+        workspaceId: owner.workspace.id,
+        kind: "template_build",
+        value: 2,
+        details: {},
+        createdAt: new Date().toISOString()
+      }
+    );
+  });
+
+  const quoted = await service.getWorkspaceBilling(owner.token);
+  assert.equal(quoted.pendingInvoiceEstimate.totalUsd, 6.1);
+  assert.equal(quoted.pendingInvoiceEstimate.lineItems[0].amountUsd, 0.6);
+  assert.equal(quoted.pendingInvoiceEstimate.lineItems[1].amountUsd, 1.5);
+  assert.equal(quoted.pendingInvoiceEstimate.lineItems[2].amountUsd, 4);
+
+  const invoiced = await service.createWorkspaceUsageInvoice(owner.token);
+  assert.equal(invoiced.invoice.id, "in_test_1");
+  assert.equal(invoiced.invoice.amountUsd, 6.1);
+  assert.equal(invoiced.billing.lastInvoiceId, "in_test_1");
+  assert.equal(invoiced.billing.lastInvoiceAmountUsd, 6.1);
+  assert.equal(invoiced.billing.billedUsageTotals.runtimeMinutes, 12);
+  assert.equal(invoiceCalls.length, 1);
+  assert.equal(invoiceCalls[0].usage.runtimeMinutes, 12);
+  assert.equal(invoiceCalls[0].usage.snapshots, 3);
+  assert.equal(invoiceCalls[0].usage.templateBuilds, 2);
+
+  const noDelta = await service.createWorkspaceUsageInvoice(owner.token);
+  assert.equal(noDelta.invoice, null);
+  assert.equal(noDelta.pendingInvoiceEstimate.totalUsd, 0);
+
+  const activeEvent = {
+    id: "evt_checkout_complete",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: "cs_test_1",
+        customer: "cus_test_1",
+        payment_method: "pm_test_1",
+        setup_intent: "seti_test_1",
+        metadata: {
+          workspaceId: owner.workspace.id
+        }
+      }
+    }
+  };
+  const activated = await service.applyBillingWebhook(activeEvent);
+  assert.equal(activated.duplicate, false);
+  assert.equal(activated.billing.billingStatus, "active");
+  assert.equal(activated.billing.defaultPaymentMethodId, "pm_test_1");
+  assert.equal(activated.workspace.plan, "free");
+
+  const duplicate = await service.applyBillingWebhook(activeEvent);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.billing.billingStatus, "active");
+
+  const auth = await service.authenticate(owner.token);
+  assert.equal(auth.workspace.plan, "free");
+  assert.equal(auth.workspace.billing.billingStatus, "active");
+
+  const paid = await service.applyBillingWebhook({
+    id: "evt_invoice_paid",
+    type: "invoice.paid",
+    data: {
+      object: {
+        id: "in_test_1",
+        customer: "cus_test_1",
+        status: "paid",
+        currency: "usd",
+        amount_paid: 610,
+        metadata: { workspaceId: owner.workspace.id }
+      }
+    }
+  });
+  assert.equal(paid.billing.lastInvoiceStatus, "paid");
+  assert.equal(paid.billing.lastInvoiceAmountUsd, 6.1);
+});
+
 test("service records workflow dispatch metadata and workflow-driven build completion", async () => {
   const workflowRuns = [];
   const service = createBurstFlareService({

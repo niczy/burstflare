@@ -45,6 +45,13 @@ const PLANS = {
   }
 };
 
+const DEFAULT_BILLING_CATALOG = {
+  currency: "usd",
+  runtimeMinuteUsd: 0.03,
+  snapshotUsd: 0.02,
+  templateBuildUsd: 0.1
+};
+
 function nowMs(clock) {
   return clock();
 }
@@ -96,6 +103,181 @@ function getEffectiveLimits(workspace) {
     ...getPlan(workspace?.plan),
     ...getWorkspaceQuotaOverrides(workspace)
   };
+}
+
+function normalizeUsageTotals(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    runtimeMinutes: Number.isFinite(source.runtimeMinutes) ? Math.max(0, Number(source.runtimeMinutes)) : 0,
+    snapshots: Number.isFinite(source.snapshots) ? Math.max(0, Number(source.snapshots)) : 0,
+    templateBuilds: Number.isFinite(source.templateBuilds) ? Math.max(0, Number(source.templateBuilds)) : 0
+  };
+}
+
+function normalizeWorkspaceBilling(billing) {
+  const source = billing && typeof billing === "object" && !Array.isArray(billing) ? billing : {};
+  return {
+    pricingModel: typeof source.pricingModel === "string" ? source.pricingModel : "usage",
+    provider: typeof source.provider === "string" ? source.provider : null,
+    customerId: typeof source.customerId === "string" ? source.customerId : null,
+    billingStatus: typeof source.billingStatus === "string" ? source.billingStatus : null,
+    defaultPaymentMethodId: typeof source.defaultPaymentMethodId === "string" ? source.defaultPaymentMethodId : null,
+    lastSetupIntentId: typeof source.lastSetupIntentId === "string" ? source.lastSetupIntentId : null,
+    lastInvoiceId: typeof source.lastInvoiceId === "string" ? source.lastInvoiceId : null,
+    lastInvoiceStatus: typeof source.lastInvoiceStatus === "string" ? source.lastInvoiceStatus : null,
+    lastInvoiceCurrency: typeof source.lastInvoiceCurrency === "string" ? source.lastInvoiceCurrency : null,
+    lastInvoiceAmountUsd:
+      Number.isFinite(source.lastInvoiceAmountUsd) ? Math.max(0, Number(source.lastInvoiceAmountUsd)) : null,
+    billedUsageTotals: normalizeUsageTotals(source.billedUsageTotals),
+    subscriptionId: typeof source.subscriptionId === "string" ? source.subscriptionId : null,
+    subscriptionStatus: typeof source.subscriptionStatus === "string" ? source.subscriptionStatus : null,
+    pendingPlan: typeof source.pendingPlan === "string" ? source.pendingPlan : null,
+    currentPeriodEnd: typeof source.currentPeriodEnd === "string" ? source.currentPeriodEnd : null,
+    cancelAtPeriodEnd: Boolean(source.cancelAtPeriodEnd),
+    lastCheckoutSessionId: typeof source.lastCheckoutSessionId === "string" ? source.lastCheckoutSessionId : null,
+    lastPortalSessionId: typeof source.lastPortalSessionId === "string" ? source.lastPortalSessionId : null,
+    recentWebhookEventIds: Array.isArray(source.recentWebhookEventIds)
+      ? source.recentWebhookEventIds.filter((entry) => typeof entry === "string").slice(-25)
+      : [],
+    updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : null
+  };
+}
+
+function formatWorkspaceBilling(workspace) {
+  const billing = normalizeWorkspaceBilling(workspace?.billing);
+  return {
+    pricingModel: billing.pricingModel,
+    provider: billing.provider,
+    customerId: billing.customerId,
+    billingStatus: billing.billingStatus,
+    defaultPaymentMethodId: billing.defaultPaymentMethodId,
+    lastSetupIntentId: billing.lastSetupIntentId,
+    lastInvoiceId: billing.lastInvoiceId,
+    lastInvoiceStatus: billing.lastInvoiceStatus,
+    lastInvoiceCurrency: billing.lastInvoiceCurrency,
+    lastInvoiceAmountUsd: billing.lastInvoiceAmountUsd,
+    billedUsageTotals: billing.billedUsageTotals,
+    subscriptionId: billing.subscriptionId,
+    subscriptionStatus: billing.subscriptionStatus,
+    pendingPlan: billing.pendingPlan,
+    currentPeriodEnd: billing.currentPeriodEnd,
+    cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
+    lastCheckoutSessionId: billing.lastCheckoutSessionId,
+    lastPortalSessionId: billing.lastPortalSessionId,
+    updatedAt: billing.updatedAt
+  };
+}
+
+function writeWorkspaceBilling(workspace, clock, updates = {}) {
+  const current = normalizeWorkspaceBilling(workspace?.billing);
+  const next = {
+    ...current,
+    ...updates,
+    pricingModel: "usage",
+    billedUsageTotals:
+      updates.billedUsageTotals !== undefined ? normalizeUsageTotals(updates.billedUsageTotals) : current.billedUsageTotals,
+    recentWebhookEventIds: Array.isArray(updates.recentWebhookEventIds)
+      ? updates.recentWebhookEventIds.filter((entry) => typeof entry === "string").slice(-25)
+      : current.recentWebhookEventIds,
+    updatedAt: nowIso(clock)
+  };
+  workspace.billing = next;
+  return next;
+}
+
+function trackBillingWebhookEvent(workspace, clock, eventId) {
+  if (!eventId) {
+    return { duplicate: false, billing: normalizeWorkspaceBilling(workspace?.billing) };
+  }
+  const current = normalizeWorkspaceBilling(workspace?.billing);
+  if (current.recentWebhookEventIds.includes(eventId)) {
+    return { duplicate: true, billing: current };
+  }
+  return {
+    duplicate: false,
+    billing: writeWorkspaceBilling(workspace, clock, {
+      recentWebhookEventIds: [...current.recentWebhookEventIds, eventId]
+    })
+  };
+}
+
+function toIsoFromUnixSeconds(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return new Date(value * 1000).toISOString();
+}
+
+function normalizeBillingCatalog(catalog = {}) {
+  const source = catalog && typeof catalog === "object" && !Array.isArray(catalog) ? catalog : {};
+  const currency =
+    typeof source.currency === "string" && source.currency.trim() ? source.currency.trim().toLowerCase() : "usd";
+  const runtimeMinuteUsd = Number.isFinite(source.runtimeMinuteUsd)
+    ? Math.max(0, Number(source.runtimeMinuteUsd))
+    : DEFAULT_BILLING_CATALOG.runtimeMinuteUsd;
+  const snapshotUsd = Number.isFinite(source.snapshotUsd)
+    ? Math.max(0, Number(source.snapshotUsd))
+    : DEFAULT_BILLING_CATALOG.snapshotUsd;
+  const templateBuildUsd = Number.isFinite(source.templateBuildUsd)
+    ? Math.max(0, Number(source.templateBuildUsd))
+    : DEFAULT_BILLING_CATALOG.templateBuildUsd;
+  return {
+    currency,
+    runtimeMinuteUsd,
+    snapshotUsd,
+    templateBuildUsd
+  };
+}
+
+function priceUsageSummary(usage, catalog) {
+  const normalizedUsage = normalizeUsageTotals(usage);
+  const normalizedCatalog = normalizeBillingCatalog(catalog);
+  const runtimeUsd = normalizedUsage.runtimeMinutes * normalizedCatalog.runtimeMinuteUsd;
+  const snapshotsUsd = normalizedUsage.snapshots * normalizedCatalog.snapshotUsd;
+  const templateBuildsUsd = normalizedUsage.templateBuilds * normalizedCatalog.templateBuildUsd;
+  const totalUsd = runtimeUsd + snapshotsUsd + templateBuildsUsd;
+  return {
+    currency: normalizedCatalog.currency,
+    usage: normalizedUsage,
+    rates: {
+      runtimeMinuteUsd: normalizedCatalog.runtimeMinuteUsd,
+      snapshotUsd: normalizedCatalog.snapshotUsd,
+      templateBuildUsd: normalizedCatalog.templateBuildUsd
+    },
+    lineItems: [
+      {
+        metric: "runtimeMinutes",
+        quantity: normalizedUsage.runtimeMinutes,
+        unitAmountUsd: normalizedCatalog.runtimeMinuteUsd,
+        amountUsd: Number(runtimeUsd.toFixed(4))
+      },
+      {
+        metric: "snapshots",
+        quantity: normalizedUsage.snapshots,
+        unitAmountUsd: normalizedCatalog.snapshotUsd,
+        amountUsd: Number(snapshotsUsd.toFixed(4))
+      },
+      {
+        metric: "templateBuilds",
+        quantity: normalizedUsage.templateBuilds,
+        unitAmountUsd: normalizedCatalog.templateBuildUsd,
+        amountUsd: Number(templateBuildsUsd.toFixed(4))
+      }
+    ],
+    totalUsd: Number(totalUsd.toFixed(4))
+  };
+}
+
+function ensureAbsoluteHttpUrl(value, label) {
+  ensure(typeof value === "string" && value.trim(), `${label} is required`);
+  let url;
+  try {
+    url = new URL(value);
+  } catch (_error) {
+    fail(`${label} must be a valid absolute URL`);
+  }
+  ensure(["http:", "https:"].includes(url.protocol), `${label} must use http or https`);
+  return url.toString();
 }
 
 function normalizeSecretName(name) {
@@ -709,6 +891,21 @@ function summarizeUsage(state, workspaceId) {
   };
 }
 
+function summarizeBillableUsage(state, workspaceId) {
+  const usage = summarizeUsage(state, workspaceId);
+  return normalizeUsageTotals(usage);
+}
+
+function diffBillableUsageTotals(current, previous) {
+  const next = normalizeUsageTotals(current);
+  const prior = normalizeUsageTotals(previous);
+  return {
+    runtimeMinutes: Math.max(0, next.runtimeMinutes - prior.runtimeMinutes),
+    snapshots: Math.max(0, next.snapshots - prior.snapshots),
+    templateBuilds: Math.max(0, next.templateBuilds - prior.templateBuilds)
+  };
+}
+
 function ensureStorageWithinLimit(state, workspace, nextTotalBytes) {
   const limits = getEffectiveLimits(workspace);
   ensure(nextTotalBytes <= limits.maxStorageBytes, "Workspace storage limit reached", 403);
@@ -733,6 +930,7 @@ function formatWorkspace(state, workspace, role) {
     name: workspace.name,
     ownerUserId: workspace.ownerUserId,
     plan: workspace.plan,
+    billing: formatWorkspaceBilling(workspace),
     createdAt: workspace.createdAt,
     quotaOverrides: getWorkspaceQuotaOverrides(workspace),
     role,
@@ -1472,6 +1670,8 @@ export function createBurstFlareService(options = {}) {
   const clock = options.clock || (() => Date.now());
   const objects = options.objects || null;
   const jobs = options.jobs || null;
+  const billingProvider = options.billing || null;
+  const billingCatalog = normalizeBillingCatalog(options.billingCatalog);
   const AUTH_SCOPE = ["users", "workspaces", "memberships", "authTokens", "auditLogs"];
   const AUTH_DEVICE_SCOPE = [...AUTH_SCOPE, "deviceCodes", "usageEvents"];
   const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE, "workspaceInvites"];
@@ -1502,6 +1702,39 @@ export function createBurstFlareService(options = {}) {
       throw result[TRANSACTION_ERROR];
     }
     return result;
+  }
+
+  function requireBillingProvider() {
+    ensure(billingProvider, "Billing provider not configured", 501);
+    return billingProvider;
+  }
+
+  function findWorkspaceByBillingReference(
+    state,
+    { workspaceId = null, customerId = null, subscriptionId = null, checkoutSessionId = null } = {}
+  ) {
+    if (workspaceId) {
+      const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
+      if (workspace) {
+        return workspace;
+      }
+    }
+
+    return (
+      state.workspaces.find((entry) => {
+        const billing = normalizeWorkspaceBilling(entry.billing);
+        if (subscriptionId && billing.subscriptionId === subscriptionId) {
+          return true;
+        }
+        if (customerId && billing.customerId === customerId) {
+          return true;
+        }
+        if (checkoutSessionId && billing.lastCheckoutSessionId === checkoutSessionId) {
+          return true;
+        }
+        return false;
+      }) || null
+    );
   }
 
   function getWorkspaceBuildRecords(state, workspaceId = null) {
@@ -2784,6 +3017,319 @@ export function createBurstFlareService(options = {}) {
         return {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           limits: getEffectiveLimits(auth.workspace)
+        };
+      });
+    },
+
+    async getWorkspaceBilling(token) {
+      return transact(WORKSPACE_SCOPE, (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const usage = summarizeUsage(state, auth.workspace.id);
+        const billableUsage = summarizeBillableUsage(state, auth.workspace.id);
+        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const pendingUsage = diffBillableUsageTotals(billableUsage, billing.billedUsageTotals);
+        return {
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          billing: formatWorkspaceBilling(auth.workspace),
+          usage,
+          pricing: priceUsageSummary(billableUsage, billingCatalog),
+          pendingInvoiceEstimate: priceUsageSummary(pendingUsage, billingCatalog)
+        };
+      });
+    },
+
+    async createWorkspaceCheckoutSession(token, { successUrl, cancelUrl } = {}) {
+      return transact(WORKSPACE_SCOPE, async (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const provider = requireBillingProvider();
+        ensure(typeof provider.createCheckoutSession === "function", "Billing provider does not support checkout", 501);
+        const currentBilling = normalizeWorkspaceBilling(auth.workspace.billing);
+        const session = await provider.createCheckoutSession({
+          successUrl: ensureAbsoluteHttpUrl(successUrl, "Success URL"),
+          cancelUrl: ensureAbsoluteHttpUrl(cancelUrl, "Cancel URL"),
+          user: formatUser(auth.user),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          membership: auth.membership,
+          billing: formatWorkspaceBilling(auth.workspace),
+          pricing: priceUsageSummary(summarizeBillableUsage(state, auth.workspace.id), billingCatalog)
+        });
+        ensure(session && typeof session === "object", "Billing provider returned an invalid checkout session", 502);
+        ensure(typeof session.id === "string" && session.id, "Billing checkout session id missing", 502);
+        ensure(typeof session.url === "string" && session.url, "Billing checkout session URL missing", 502);
+
+        writeWorkspaceBilling(auth.workspace, clock, {
+          provider: session.provider || provider.providerName || currentBilling.provider || "external",
+          customerId:
+            typeof session.customerId === "string" && session.customerId ? session.customerId : currentBilling.customerId,
+          billingStatus:
+            typeof session.billingStatus === "string" && session.billingStatus
+              ? session.billingStatus
+              : currentBilling.billingStatus || "checkout_open",
+          lastCheckoutSessionId: session.id,
+          lastSetupIntentId:
+            typeof session.setupIntentId === "string" && session.setupIntentId
+              ? session.setupIntentId
+              : currentBilling.lastSetupIntentId
+        });
+
+        writeAudit(state, clock, {
+          action: "workspace.billing_checkout_created",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "billing_checkout",
+          targetId: session.id,
+          details: {
+            provider: session.provider || provider.providerName || "external",
+            pricingModel: "usage"
+          }
+        });
+
+        return {
+          checkoutSession: {
+            id: session.id,
+            url: session.url
+          },
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          billing: formatWorkspaceBilling(auth.workspace)
+        };
+      });
+    },
+
+    async createWorkspaceBillingPortalSession(token, { returnUrl } = {}) {
+      return transact(WORKSPACE_SCOPE, async (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const provider = requireBillingProvider();
+        ensure(typeof provider.createPortalSession === "function", "Billing provider does not support billing portal", 501);
+        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        ensure(billing.customerId, "Workspace is not linked to a billing customer", 409);
+
+        const session = await provider.createPortalSession({
+          returnUrl: ensureAbsoluteHttpUrl(returnUrl, "Return URL"),
+          user: formatUser(auth.user),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          membership: auth.membership,
+          billing: formatWorkspaceBilling(auth.workspace)
+        });
+        ensure(session && typeof session === "object", "Billing provider returned an invalid portal session", 502);
+        ensure(typeof session.id === "string" && session.id, "Billing portal session id missing", 502);
+        ensure(typeof session.url === "string" && session.url, "Billing portal session URL missing", 502);
+
+        writeWorkspaceBilling(auth.workspace, clock, {
+          provider: session.provider || provider.providerName || billing.provider || "external",
+          lastPortalSessionId: session.id
+        });
+
+        writeAudit(state, clock, {
+          action: "workspace.billing_portal_created",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "billing_portal",
+          targetId: session.id,
+          details: {
+            provider: session.provider || provider.providerName || billing.provider || "external"
+          }
+        });
+
+        return {
+          portalSession: {
+            id: session.id,
+            url: session.url
+          },
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          billing: formatWorkspaceBilling(auth.workspace)
+        };
+      });
+    },
+
+    async createWorkspaceUsageInvoice(token) {
+      return transact(WORKSPACE_SCOPE, async (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const provider = requireBillingProvider();
+        ensure(typeof provider.createUsageInvoice === "function", "Billing provider does not support usage invoices", 501);
+        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        ensure(billing.customerId, "Workspace is not linked to a billing customer", 409);
+
+        const currentUsage = summarizeBillableUsage(state, auth.workspace.id);
+        const pendingUsage = diffBillableUsageTotals(currentUsage, billing.billedUsageTotals);
+        const estimate = priceUsageSummary(pendingUsage, billingCatalog);
+        const hasBillableUsage = Object.values(pendingUsage).some((value) => value > 0);
+
+        if (!hasBillableUsage) {
+          return {
+            invoice: null,
+            billing: formatWorkspaceBilling(auth.workspace),
+            usage: summarizeUsage(state, auth.workspace.id),
+            pendingInvoiceEstimate: estimate
+          };
+        }
+
+        const invoice = await provider.createUsageInvoice({
+          user: formatUser(auth.user),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          membership: auth.membership,
+          billing: formatWorkspaceBilling(auth.workspace),
+          usage: pendingUsage,
+          pricing: estimate
+        });
+        ensure(invoice && typeof invoice === "object", "Billing provider returned an invalid invoice", 502);
+        ensure(typeof invoice.id === "string" && invoice.id, "Billing invoice id missing", 502);
+
+        writeWorkspaceBilling(auth.workspace, clock, {
+          provider: invoice.provider || provider.providerName || billing.provider || "external",
+          billingStatus:
+            typeof invoice.billingStatus === "string" && invoice.billingStatus
+              ? invoice.billingStatus
+              : billing.billingStatus || "active",
+          lastInvoiceId: invoice.id,
+          lastInvoiceStatus: typeof invoice.status === "string" ? invoice.status : null,
+          lastInvoiceCurrency: typeof invoice.currency === "string" ? invoice.currency : estimate.currency,
+          lastInvoiceAmountUsd:
+            Number.isFinite(invoice.amountUsd) ? Number(invoice.amountUsd) : Number(estimate.totalUsd.toFixed(4)),
+          billedUsageTotals: currentUsage
+        });
+
+        writeAudit(state, clock, {
+          action: "workspace.billing_usage_invoiced",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "billing_invoice",
+          targetId: invoice.id,
+          details: {
+            amountUsd: Number(estimate.totalUsd.toFixed(4)),
+            runtimeMinutes: pendingUsage.runtimeMinutes,
+            snapshots: pendingUsage.snapshots,
+            templateBuilds: pendingUsage.templateBuilds
+          }
+        });
+
+        return {
+          invoice: {
+            id: invoice.id,
+            status: invoice.status || null,
+            hostedInvoiceUrl: invoice.hostedInvoiceUrl || null,
+            amountUsd: Number(
+              (Number.isFinite(invoice.amountUsd) ? Number(invoice.amountUsd) : estimate.totalUsd).toFixed(4)
+            ),
+            currency: invoice.currency || estimate.currency
+          },
+          billing: formatWorkspaceBilling(auth.workspace),
+          usage: summarizeUsage(state, auth.workspace.id),
+          pendingInvoiceEstimate: priceUsageSummary(
+            diffBillableUsageTotals(currentUsage, normalizeWorkspaceBilling(auth.workspace.billing).billedUsageTotals),
+            billingCatalog
+          )
+        };
+      });
+    },
+
+    async applyBillingWebhook(event = {}) {
+      return transact(WORKSPACE_SCOPE, (state) => {
+        ensure(event && typeof event === "object" && !Array.isArray(event), "Billing event payload is required");
+        ensure(typeof event.type === "string" && event.type, "Billing event type is required");
+        ensure(typeof event.id === "string" && event.id, "Billing event id is required");
+        const payload = event.data?.object;
+        ensure(payload && typeof payload === "object" && !Array.isArray(payload), "Billing event object is required");
+
+        const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+        const workspace = findWorkspaceByBillingReference(state, {
+          workspaceId: typeof metadata.workspaceId === "string" ? metadata.workspaceId : null,
+          customerId: typeof payload.customer === "string" ? payload.customer : null,
+          subscriptionId: typeof payload.subscription === "string" ? payload.subscription : typeof payload.id === "string" && event.type.startsWith("customer.subscription.") ? payload.id : null,
+          checkoutSessionId: typeof payload.id === "string" && event.type.startsWith("checkout.session.") ? payload.id : null
+        });
+        ensure(workspace, "Workspace not found for billing event", 404);
+
+        const eventState = trackBillingWebhookEvent(workspace, clock, event.id);
+        if (eventState.duplicate) {
+          return {
+            ok: true,
+            duplicate: true,
+            eventId: event.id,
+            eventType: event.type,
+            workspace: formatWorkspace(state, workspace, getMembership(state, workspace.ownerUserId, workspace.id)?.role || "owner"),
+            billing: formatWorkspaceBilling(workspace)
+          };
+        }
+
+        const currentBilling = normalizeWorkspaceBilling(workspace.billing);
+
+        if (event.type.startsWith("checkout.session.")) {
+          writeWorkspaceBilling(workspace, clock, {
+            provider: currentBilling.provider || "stripe",
+            customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
+            billingStatus:
+              event.type === "checkout.session.completed"
+                ? "active"
+                : event.type === "checkout.session.expired"
+                  ? "checkout_expired"
+                  : currentBilling.billingStatus,
+            defaultPaymentMethodId:
+              typeof payload.payment_method === "string" && payload.payment_method
+                ? payload.payment_method
+                : currentBilling.defaultPaymentMethodId,
+            lastSetupIntentId:
+              typeof payload.setup_intent === "string" && payload.setup_intent
+                ? payload.setup_intent
+                : currentBilling.lastSetupIntentId,
+            lastCheckoutSessionId: typeof payload.id === "string" && payload.id ? payload.id : currentBilling.lastCheckoutSessionId,
+            subscriptionId: null,
+            subscriptionStatus: null,
+            pendingPlan: null
+          });
+        } else if (event.type.startsWith("customer.subscription.")) {
+          writeWorkspaceBilling(workspace, clock, {
+            provider: currentBilling.provider || "stripe",
+            customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
+            subscriptionId: typeof payload.id === "string" && payload.id ? payload.id : currentBilling.subscriptionId,
+            subscriptionStatus:
+              typeof payload.status === "string" && payload.status ? payload.status : currentBilling.subscriptionStatus,
+            currentPeriodEnd: toIsoFromUnixSeconds(Number(payload.current_period_end)),
+            cancelAtPeriodEnd: Boolean(payload.cancel_at_period_end)
+          });
+        } else if (event.type === "invoice.paid") {
+          writeWorkspaceBilling(workspace, clock, {
+            provider: currentBilling.provider || "stripe",
+            customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
+            billingStatus: "active",
+            lastInvoiceId: typeof payload.id === "string" ? payload.id : currentBilling.lastInvoiceId,
+            lastInvoiceStatus: typeof payload.status === "string" ? payload.status : "paid",
+            lastInvoiceCurrency:
+              typeof payload.currency === "string" ? payload.currency : currentBilling.lastInvoiceCurrency,
+            lastInvoiceAmountUsd:
+              Number.isFinite(payload.amount_paid) ? Number((Number(payload.amount_paid) / 100).toFixed(4)) : currentBilling.lastInvoiceAmountUsd
+          });
+        } else if (event.type === "invoice.payment_failed") {
+          writeWorkspaceBilling(workspace, clock, {
+            provider: currentBilling.provider || "stripe",
+            customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
+            billingStatus: "delinquent",
+            lastInvoiceId: typeof payload.id === "string" ? payload.id : currentBilling.lastInvoiceId,
+            lastInvoiceStatus: typeof payload.status === "string" ? payload.status : "open",
+            lastInvoiceCurrency:
+              typeof payload.currency === "string" ? payload.currency : currentBilling.lastInvoiceCurrency,
+            lastInvoiceAmountUsd:
+              Number.isFinite(payload.amount_due) ? Number((Number(payload.amount_due) / 100).toFixed(4)) : currentBilling.lastInvoiceAmountUsd
+          });
+        }
+
+        writeAudit(state, clock, {
+          action: "workspace.billing_webhook_applied",
+          actorUserId: null,
+          workspaceId: workspace.id,
+          targetType: "billing_event",
+          targetId: event.id,
+          details: {
+            eventType: event.type
+          }
+        });
+
+        return {
+          ok: true,
+          duplicate: false,
+          eventId: event.id,
+          eventType: event.type,
+          workspace: formatWorkspace(state, workspace, getMembership(state, workspace.ownerUserId, workspace.id)?.role || "owner"),
+          billing: formatWorkspaceBilling(workspace)
         };
       });
     },
