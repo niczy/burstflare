@@ -1,144 +1,255 @@
 export const styles = `
 :root {
   color-scheme: light;
-  --bg: #f5f5f2;
-  --bg-deep: #eceee7;
-  --panel: rgba(251, 251, 248, 0.9);
-  --panel-strong: #ffffff;
-  --ink: #151918;
-  --muted: #5c645f;
-  --accent: #0f766e;
-  --accent-soft: #d9f3ee;
-  --accent-strong: #0a5c56;
-  --border: rgba(21, 25, 24, 0.1);
-  --border-strong: rgba(21, 25, 24, 0.16);
-  --shadow: 0 24px 60px rgba(15, 118, 110, 0.08);
-  --shadow-soft: 0 12px 28px rgba(21, 25, 24, 0.05);
+  --bg: #f2eee8;
+  --bg-deep: #e7dfd4;
+  --panel: rgba(255, 252, 248, 0.9);
+  --panel-strong: #fffdf9;
+  --panel-soft: rgba(255, 250, 244, 0.72);
+  --ink: #162128;
+  --muted: #5b676e;
+  --accent: #b44c23;
+  --accent-deep: #8d3716;
+  --accent-soft: rgba(180, 76, 35, 0.1);
+  --line: rgba(22, 33, 40, 0.1);
+  --line-strong: rgba(22, 33, 40, 0.18);
+  --shadow: 0 28px 60px rgba(58, 37, 24, 0.08);
+  --shadow-soft: 0 16px 32px rgba(22, 33, 40, 0.06);
 }
 
 * { box-sizing: border-box; }
 
-body {
-  margin: 0;
-  font-family: "Avenir Next", "IBM Plex Sans", "Segoe UI", sans-serif;
-  color: var(--ink);
-  background:
-    radial-gradient(circle at 12% 18%, rgba(15, 118, 110, 0.16), transparent 24%),
-    radial-gradient(circle at 84% 12%, rgba(15, 118, 110, 0.08), transparent 18%),
-    linear-gradient(160deg, #fbfbf8 0%, var(--bg) 42%, var(--bg-deep) 100%);
+html, body {
+  min-height: 100%;
 }
 
-body::before {
+body {
+  margin: 0;
+  font-family: "Satoshi", "Avenir Next", "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 8% 10%, rgba(180, 76, 35, 0.16), transparent 22%),
+    radial-gradient(circle at 88% 14%, rgba(22, 33, 40, 0.07), transparent 18%),
+    radial-gradient(circle at 74% 78%, rgba(180, 76, 35, 0.08), transparent 20%),
+    linear-gradient(140deg, #faf6f0 0%, var(--bg) 42%, var(--bg-deep) 100%);
+}
+
+body::before,
+body::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
+}
+
+body::before {
   background:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.52), transparent 35%),
+    linear-gradient(120deg, rgba(255, 255, 255, 0.5), transparent 34%),
     repeating-linear-gradient(
       135deg,
-      rgba(21, 25, 24, 0.012) 0,
-      rgba(21, 25, 24, 0.012) 1px,
+      rgba(22, 33, 40, 0.014) 0,
+      rgba(22, 33, 40, 0.014) 1px,
       transparent 1px,
-      transparent 14px
+      transparent 17px
     );
-  opacity: 0.5;
+  opacity: 0.55;
+}
+
+body::after {
+  background:
+    linear-gradient(to right, transparent 0, rgba(255, 255, 255, 0.18) 50%, transparent 100%);
+  opacity: 0.35;
 }
 
 main {
-  max-width: 1380px;
+  min-height: 100dvh;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 28px clamp(18px, 3vw, 42px) 96px;
+  padding: clamp(16px, 2vw, 28px) clamp(14px, 2.8vw, 40px) 88px;
   position: relative;
   z-index: 1;
 }
 
 .shell {
   display: grid;
+  gap: 28px;
+}
+
+.hero {
+  display: grid;
+  gap: 28px;
+  grid-template-columns: minmax(0, 1.32fr) minmax(320px, 0.9fr);
+  align-items: start;
+}
+
+.hero-main,
+.hero-band,
+.grid,
+.stack,
+.list,
+.output-shell,
+.quickstart-grid,
+.split-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.hero-band {
+  grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.92fr);
+}
+
+.grid {
   gap: 24px;
 }
 
-.eyebrow {
+.grid.grid-2 {
+  grid-template-columns: minmax(0, 1.08fr) minmax(300px, 0.92fr);
+}
+
+.grid.grid-3 {
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.98fr) minmax(280px, 0.9fr);
+}
+
+.card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 30px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 250, 244, 0.82)),
+    linear-gradient(140deg, rgba(180, 76, 35, 0.02), transparent 46%);
+  padding: clamp(18px, 2vw, 28px);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.3), transparent 28%);
+  opacity: 0.55;
+}
+
+.card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-card {
+  display: grid;
+  gap: 20px;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 92% 14%, rgba(180, 76, 35, 0.14), transparent 20%),
+    linear-gradient(140deg, rgba(255, 252, 247, 0.98), rgba(255, 246, 238, 0.86));
+}
+
+.hero-card::after {
+  content: "";
+  position: absolute;
+  right: -40px;
+  top: -42px;
+  width: 220px;
+  height: 220px;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 76, 35, 0.14);
+  background: radial-gradient(circle, rgba(180, 76, 35, 0.1), transparent 65%);
+  pointer-events: none;
+}
+
+.hero-side {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.eyebrow,
+.pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
+  gap: 9px;
+  width: fit-content;
   border-radius: 999px;
-  background: rgba(15, 118, 110, 0.08);
-  color: var(--accent);
-  font-size: 0.76rem;
+  padding: 7px 12px;
+  font-size: 0.74rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.eyebrow::before {
+.eyebrow {
+  background: rgba(180, 76, 35, 0.1);
+  color: var(--accent);
+}
+
+.eyebrow::before,
+.pill::before {
   content: "";
   width: 8px;
   height: 8px;
   border-radius: 999px;
+}
+
+.eyebrow::before {
   background: var(--accent);
-  box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.12);
+  box-shadow: 0 0 0 5px rgba(180, 76, 35, 0.1);
 }
 
-.hero {
-  display: grid;
-  gap: 24px;
-  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
-  align-items: start;
+.pill {
+  background: rgba(22, 33, 40, 0.08);
+  color: var(--ink);
 }
 
-.card {
-  background: var(--panel);
-  backdrop-filter: blur(16px);
-  border: 1px solid var(--border);
-  border-radius: 28px;
-  padding: clamp(18px, 2vw, 28px);
-  box-shadow: var(--shadow);
+.pill::before {
+  background: var(--ink);
 }
 
-.hero-stack,
-.detail-grid,
-.operations-grid {
-  display: grid;
-  gap: 24px;
+.hero-topline {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.hero-split {
-  display: grid;
-  gap: 24px;
-  grid-template-columns: minmax(0, 1.18fr) minmax(280px, 0.82fr);
-}
-
-.hero-card {
-  min-height: 100%;
-  display: grid;
-  gap: 18px;
-  align-content: start;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(251, 251, 248, 0.82)),
-    linear-gradient(120deg, rgba(15, 118, 110, 0.07), transparent 46%);
+.section-kicker {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
 .title {
   margin: 0;
-  font-size: clamp(2.6rem, 6vw, 5.4rem);
+  max-width: 10ch;
+  font-size: clamp(3.1rem, 7vw, 6.2rem);
   line-height: 0.9;
-  font-weight: 800;
-  letter-spacing: -0.06em;
+  letter-spacing: -0.065em;
+  font-weight: 820;
+}
+
+.subtitle,
+.section-copy,
+.card-head p,
+.muted,
+.surface-note span,
+.step span {
+  color: var(--muted);
+  line-height: 1.65;
 }
 
 .subtitle {
   margin: 0;
-  color: var(--muted);
-  max-width: 62ch;
+  max-width: 66ch;
   font-size: 1rem;
-  line-height: 1.7;
 }
 
 .hero-copy {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .hero-metrics {
@@ -148,210 +259,29 @@ main {
 }
 
 .metric-chip {
-  padding: 14px 16px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(15, 118, 110, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(22, 33, 40, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: var(--shadow-soft);
 }
 
 .metric-chip strong {
   display: block;
-  font-size: 1.15rem;
-  letter-spacing: -0.04em;
-}
-
-.metric-chip span {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.section-kicker {
-  margin: 0;
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.section-title {
-  margin: 0;
-  font-size: clamp(1.35rem, 2vw, 1.8rem);
-  line-height: 1.1;
-  letter-spacing: -0.04em;
-}
-
-.section-copy {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.65;
-}
-
-.quickstart-shell {
-  display: grid;
-  gap: 18px;
-}
-
-.quickstart-grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.step {
-  display: grid;
-  gap: 10px;
-  padding: 16px;
-  border-radius: 22px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.74);
-  box-shadow: var(--shadow-soft);
-}
-
-.step strong {
-  font-size: 0.95rem;
-  letter-spacing: -0.02em;
-}
-
-.step span {
-  color: var(--muted);
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-.code-block {
-  margin: 0;
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  background: linear-gradient(145deg, rgba(17, 25, 24, 0.96), rgba(22, 34, 32, 0.96));
-  color: #e8f7f4;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.hero-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.mini-note {
-  margin: 0;
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: rgba(15, 118, 110, 0.08);
-  color: var(--accent-strong);
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-.grid {
-  display: grid;
-  gap: 24px;
-}
-
-.grid.grid-2 {
-  grid-template-columns: minmax(0, 1.06fr) minmax(300px, 0.94fr);
-}
-
-.grid.grid-3 {
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr) minmax(280px, 0.92fr);
-}
-
-.card-head {
-  display: grid;
-  gap: 6px;
-}
-
-.card-head h2 {
-  margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.04rem;
   letter-spacing: -0.03em;
 }
 
-.card-head p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.6;
-}
-
-label {
-  display: block;
-  font-size: 0.78rem;
-  font-weight: 700;
-  margin-bottom: 7px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.metric-chip span {
+  font-size: 0.84rem;
   color: var(--muted);
 }
 
-input,
-textarea,
-select {
-  width: 100%;
-  border-radius: 16px;
-  border: 1px solid var(--border-strong);
-  padding: 12px 13px;
-  font: inherit;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
-
-input:focus,
-textarea:focus,
-select:focus {
-  outline: 2px solid rgba(15, 118, 110, 0.18);
-  border-color: rgba(15, 118, 110, 0.45);
-}
-
-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 16px;
-  border: 0;
-  padding: 12px 15px;
-  font: inherit;
-  font-weight: 750;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  background: var(--accent);
-  color: white;
-  box-shadow: 0 14px 26px rgba(15, 118, 110, 0.18);
-  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.24s cubic-bezier(0.16, 1, 0.3, 1), background 0.24s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 32px rgba(15, 118, 110, 0.2);
-}
-
-button:active {
-  transform: translateY(1px) scale(0.99);
-}
-
-textarea {
-  min-height: 96px;
-  resize: vertical;
-}
-
-button.secondary {
-  background: var(--panel-strong);
-  color: var(--ink);
-  border: 1px solid var(--border);
-  box-shadow: none;
-}
-
-.stack {
-  display: grid;
-  gap: 14px;
-}
-
-.row {
+.hero-actions,
+.row,
+.inline-actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
@@ -361,62 +291,195 @@ button.secondary {
   flex: 1 1 180px;
 }
 
-.pill {
+.card-head {
+  display: grid;
+  gap: 6px;
+}
+
+.card-head h2,
+.section-title {
+  margin: 0;
+  font-size: clamp(1.3rem, 2vw, 1.85rem);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  font-weight: 780;
+}
+
+.section-copy {
+  margin: 0;
+}
+
+.quickstart-shell,
+.hero-pulse {
+  min-height: 100%;
+}
+
+.quickstart-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.step {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(22, 33, 40, 0.08);
+  background: var(--panel-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.step strong {
+  font-size: 0.92rem;
+  letter-spacing: -0.02em;
+}
+
+.code-block {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(180, 76, 35, 0.12);
+  background:
+    radial-gradient(circle at 100% 0, rgba(180, 76, 35, 0.08), transparent 28%),
+    linear-gradient(145deg, #171d24, #10161c);
+  color: #edf3f6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.mini-note,
+.surface-note {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(22, 33, 40, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.mini-note {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.58;
+}
+
+.surface-note strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.92rem;
+  letter-spacing: -0.02em;
+}
+
+label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 0.76rem;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border-radius: 18px;
+  border: 1px solid var(--line-strong);
+  padding: 13px 14px;
+  font: inherit;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: rgba(180, 76, 35, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.76),
+    0 0 0 4px rgba(180, 76, 35, 0.08);
+}
+
+textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 0.76rem;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  border: 0;
+  border-radius: 17px;
+  padding: 12px 16px;
+  font: inherit;
+  font-weight: 760;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  color: #fff7f2;
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+  box-shadow: 0 14px 28px rgba(180, 76, 35, 0.18);
+  transition:
+    transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.pill::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--accent);
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 32px rgba(180, 76, 35, 0.2);
+  filter: saturate(1.03);
 }
 
-.list {
-  display: grid;
-  gap: 12px;
+button:active {
+  transform: translateY(1px) scale(0.99);
 }
 
-.item {
-  background: var(--panel-strong);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 14px;
-  box-shadow: var(--shadow-soft);
+button.secondary {
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: none;
 }
 
 pre {
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   font-size: 0.82rem;
   line-height: 1.55;
-  margin: 0;
+}
+
+.item {
+  border-radius: 20px;
+  border: 1px solid rgba(22, 33, 40, 0.08);
+  background: rgba(255, 255, 255, 0.76);
+  padding: 14px 15px;
+  box-shadow: var(--shadow-soft);
+}
+
+.output-shell pre {
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(22, 33, 40, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .terminal {
-  min-height: 220px;
-  max-height: 360px;
+  min-height: 240px;
+  max-height: 380px;
   overflow: auto;
   padding: 16px;
-  border-radius: 20px;
-  border: 1px solid rgba(15, 118, 110, 0.12);
+  border-radius: 22px;
+  border: 1px solid rgba(180, 76, 35, 0.14);
   background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 35%),
-    linear-gradient(145deg, #151c1b, #111716);
-  color: #edf8f6;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    radial-gradient(circle at 95% 0, rgba(180, 76, 35, 0.12), transparent 24%),
+    linear-gradient(145deg, #11181f, #0b1016);
+  color: #edf2f5;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .terminal-input {
@@ -425,93 +488,65 @@ pre {
 
 .turnstile-shell {
   min-height: 72px;
-  border-radius: 18px;
-  border: 1px dashed var(--border);
   padding: 14px;
-  background: rgba(255, 255, 255, 0.78);
-}
-
-.split-panel {
-  display: grid;
-  gap: 16px;
+  border-radius: 20px;
+  border: 1px dashed rgba(22, 33, 40, 0.16);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .split-panel.columns {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
-.muted { color: var(--muted); }
 .error {
-  color: #9d2500;
   min-height: 1.25em;
   padding: 10px 12px;
   border-radius: 14px;
-  background: rgba(157, 37, 0, 0.06);
+  color: #a13814;
+  background: rgba(180, 76, 35, 0.08);
 }
 
-.surface-note {
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(21, 25, 24, 0.08);
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.surface-note strong {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 0.92rem;
-}
-
-.surface-note span {
-  color: var(--muted);
-  line-height: 1.55;
-  font-size: 0.9rem;
-}
-
-.output-shell {
+.section-shell {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
-.output-shell pre {
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.74);
-  box-shadow: var(--shadow-soft);
-}
-
-@media (max-width: 1080px) {
+@media (max-width: 1180px) {
   .hero,
-  .hero-split,
+  .hero-band,
   .grid.grid-2,
-  .grid.grid-3 {
+  .grid.grid-3,
+  .split-panel.columns {
     grid-template-columns: 1fr;
+  }
+
+  .hero-side {
+    position: static;
   }
 }
 
 @media (max-width: 820px) {
   main {
-    padding: 18px 14px 80px;
+    padding: 14px 12px 74px;
+  }
+
+  .card {
+    border-radius: 24px;
+    padding: 16px;
+  }
+
+  .title {
+    max-width: none;
+    font-size: clamp(2.45rem, 15vw, 4rem);
   }
 
   .hero-metrics,
-  .quickstart-grid,
-  .split-panel.columns {
+  .quickstart-grid {
     grid-template-columns: 1fr;
   }
 
   .row > * {
     flex-basis: 100%;
-  }
-
-  .card {
-    border-radius: 22px;
-    padding: 16px;
-  }
-
-  .title {
-    font-size: clamp(2.2rem, 15vw, 3.6rem);
   }
 }
 `;
@@ -528,91 +563,97 @@ export const html = `<!doctype html>
   <body>
     <main class="shell">
       <section class="hero">
-        <div class="hero-stack">
-          <div class="hero-split">
-            <div class="card hero-card">
-              <span class="eyebrow">Hosted workspace platform</span>
-              <div class="hero-copy">
-                <span class="pill">BurstFlare</span>
-                <h1 class="title">Create a workspace, ship a template, and get coding fast.</h1>
-                <p class="subtitle">
-                  BurstFlare brings sign-in, team setup, template releases, running sessions, snapshots, browser access, and SSH into
-                  one clean workspace hub. The page below is tuned to get a new user from account creation to an active environment
-                  without extra setup steps.
-                </p>
+        <div class="hero-main">
+          <div class="card hero-card">
+            <div class="hero-topline">
+              <span class="eyebrow">BurstFlare live product</span>
+              <span class="pill">Hosted by default</span>
+            </div>
+            <div class="hero-copy">
+              <div class="section-shell">
+                <p class="section-kicker">Build once. Launch often.</p>
+                <h1 class="title">A real workspace hub, not another setup ritual.</h1>
               </div>
-              <div class="hero-metrics">
-                <div class="metric-chip">
-                  <strong>1 shared workspace hub</strong>
-                  <span>accounts, templates, sessions, snapshots</span>
-                </div>
-                <div class="metric-chip">
-                  <strong>2 ways in</strong>
-                  <span>dashboard and the flare CLI</span>
-                </div>
-                <div class="metric-chip">
-                  <strong>Default live endpoint</strong>
-                  <span>burstflare.dev, with local override when needed</span>
-                </div>
+              <p class="subtitle">
+                BurstFlare keeps templates, sessions, previews, access flows, terminal tools, snapshots, and activity in one place so
+                teams can move from sign-in to a working environment without extra handoffs.
+              </p>
+            </div>
+            <div class="hero-metrics">
+              <div class="metric-chip">
+                <strong>Templates stay ready</strong>
+                <span>Create, queue, promote, and relaunch without rebuilding your whole process.</span>
               </div>
-              <div class="hero-actions">
-                <button class="secondary" id="refreshButton">Refresh Workspace</button>
-                <button class="secondary" id="reconcileButton">Run Cleanup</button>
+              <div class="metric-chip">
+                <strong>Sessions stay close</strong>
+                <span>Preview, editor, Quick Terminal, and SSH all hang off the same workspace flow.</span>
+              </div>
+              <div class="metric-chip">
+                <strong>One default endpoint</strong>
+                <span>burstflare.dev for production, with local override only when you want it.</span>
               </div>
             </div>
+            <div class="hero-actions">
+              <button class="secondary" id="refreshButton">Refresh Workspace</button>
+              <button class="secondary" id="reconcileButton">Run Cleanup</button>
+            </div>
+          </div>
 
+          <div class="hero-band">
             <div class="card quickstart-shell">
-              <p class="section-kicker">Quick Start</p>
-              <h2 class="section-title">Start on the hosted app, then drop into the CLI.</h2>
-              <p class="section-copy">
-                Most users start in the browser, then keep moving with the CLI. The default target is the live product at burstflare.dev.
-              </p>
+              <div class="card-head">
+                <h2>Quick Start</h2>
+                <p>Open the product first. Bring in the CLI when you want repeatable setup or operator workflows.</p>
+              </div>
               <div class="quickstart-grid">
                 <div class="step">
-                  <strong>1. Open the product</strong>
-                  <span>Create your account in the browser and land in the full workspace dashboard.</span>
+                  <strong>1. Open BurstFlare</strong>
+                  <span>Use the hosted app to create an account and land in the full dashboard immediately.</span>
                   <pre class="code-block">https://burstflare.dev</pre>
                 </div>
                 <div class="step">
-                  <strong>2. Install or open the CLI</strong>
-                  <span>flare points at the live app by default, so most users never need a URL flag.</span>
+                  <strong>2. Add the CLI</strong>
+                  <span><code>flare</code> points at the live product by default, so most users never need a URL flag.</span>
                   <pre class="code-block">npm install -g @burstflare/flare
 flare auth register --email you@example.com</pre>
                 </div>
                 <div class="step">
-                  <strong>3. Create a template release</strong>
-                  <span>Create a reusable environment, queue one version, then promote it when it is ready.</span>
+                  <strong>3. Ship a template</strong>
+                  <span>Create one reusable environment, upload a version, then promote the release.</span>
                   <pre class="code-block">flare template create node-dev
 flare template upload &lt;templateId&gt; --version 1.0.0
 flare template promote &lt;templateId&gt; &lt;versionId&gt;</pre>
                 </div>
                 <div class="step">
-                  <strong>4. Launch and attach</strong>
-                  <span>Start a workspace, then use Preview, Editor, Quick Terminal, or SSH from one place.</span>
+                  <strong>4. Launch a session</strong>
+                  <span>Start a workspace, then jump into Preview, Editor, Quick Terminal, or SSH.</span>
                   <pre class="code-block">flare session up sandbox --template &lt;templateId&gt;
 flare ssh &lt;sessionId&gt;</pre>
                 </div>
               </div>
               <p class="mini-note">
-                For local testing, pass <code>--url http://127.0.0.1:8787</code>. Everything on this page still works against a local
-                dev stack when you need it.
+                Local development still works. When you need it, pass <code>--url http://127.0.0.1:8787</code> and keep the same CLI flow.
               </p>
             </div>
-          </div>
 
-          <div class="card stack">
-          <div class="card-head">
-            <h2>Dashboard Pulse</h2>
-            <p>Live counts for the current workspace so you can see what is active before you start inviting people or launching more sessions.</p>
+            <div class="card hero-pulse">
+              <div class="card-head">
+                <h2>Dashboard Pulse</h2>
+                <p>See what is active before you invite teammates, promote another version, or start another session.</p>
+              </div>
+              <div class="surface-note">
+                <strong>Live workspace readout</strong>
+                <span>The counts below refresh from the current workspace and keep the whole surface grounded.</span>
+              </div>
+              <div class="list" id="dashboardPulse"></div>
+            </div>
           </div>
-          <div class="list" id="dashboardPulse"></div>
         </div>
-      </div>
 
-        <div class="card stack">
+        <aside class="card hero-side">
           <div class="card-head">
             <h2>Get Started</h2>
-            <p>Start here for sign-in, passkeys, recovery, and device approval. This is the fastest route into the rest of the product.</p>
+            <p>Use this rail for sign-in, passkeys, recovery, and device approval. It stays close while the rest of the dashboard moves.</p>
           </div>
           <div class="row">
             <div>
@@ -630,12 +671,14 @@ flare ssh &lt;sessionId&gt;</pre>
           </div>
           <div>
             <label for="turnstileToken">Verification Token</label>
-            <input id="turnstileToken" type="text" placeholder="Auto-filled when the challenge is active; leave blank unless you are testing locally" />
+            <input id="turnstileToken" type="text" placeholder="Leave blank unless you are testing a local environment" />
           </div>
           <div class="row">
             <button id="registerButton">Register</button>
             <button class="secondary" id="loginButton">Login</button>
             <button class="secondary" id="passkeyLoginButton">Sign In With Passkey</button>
+          </div>
+          <div class="row">
             <button class="secondary" id="recoverButton">Use Recovery Code</button>
             <button class="secondary" id="logoutButton">Logout</button>
           </div>
@@ -654,14 +697,14 @@ flare ssh &lt;sessionId&gt;</pre>
           <pre class="code-block" id="recoveryCodes">No recovery codes generated.</pre>
           <div class="list" id="passkeys"></div>
           <div class="error" id="errors"></div>
-        </div>
+        </aside>
       </section>
 
       <section class="grid grid-2">
         <div class="card stack">
           <div class="card-head">
-            <h2>Team & Workspace</h2>
-            <p>Rename the active workspace, invite teammates, accept invite codes, and adjust plan limits without leaving the page.</p>
+            <h2>Workspace Control</h2>
+            <p>Rename the active workspace, invite teammates, accept invite codes, and tune plan limits without leaving the main board.</p>
           </div>
           <div>
             <label for="workspaceName">Workspace Name</label>
@@ -694,13 +737,17 @@ flare ssh &lt;sessionId&gt;</pre>
             <button class="secondary" id="acceptInviteButton">Accept Invite</button>
             <button class="secondary" id="planButton">Upgrade To Pro</button>
           </div>
+          <div class="surface-note">
+            <strong>Workspace flow</strong>
+            <span>Set the workspace name, send the invite, then confirm the member list updates below.</span>
+          </div>
           <div class="list" id="members"></div>
         </div>
 
         <div class="card stack">
           <div class="card-head">
-            <h2>Access & Devices</h2>
-            <p>Review browser and CLI logins, approve device codes, or revoke access without forcing a full account reset.</p>
+            <h2>Sessions & Access</h2>
+            <p>Review active sign-ins, approve device codes, and clean up stale access without forcing a full account reset.</p>
           </div>
           <div>
             <label for="deviceCode">Approve Device Code</label>
@@ -721,7 +768,7 @@ flare ssh &lt;sessionId&gt;</pre>
         <div class="card stack">
           <div class="card-head">
             <h2>Template Studio</h2>
-            <p>Create reusable environments, queue versions, promote releases, and inspect build history from one place.</p>
+            <p>Define reusable environments, queue versions, process builds, and promote releases without leaving the same surface.</p>
           </div>
           <div>
             <label for="templateName">Template Name</label>
@@ -746,8 +793,8 @@ flare ssh &lt;sessionId&gt;</pre>
             <label for="persistedPaths">Persisted Paths</label>
             <input id="persistedPaths" type="text" placeholder="/workspace,/home/dev/.cache" />
           </div>
-          <button class="secondary" id="addVersionButton">Queue Build</button>
           <div class="row">
+            <button class="secondary" id="addVersionButton">Queue Build</button>
             <button class="secondary" id="processBuildsButton">Process Builds</button>
             <button class="secondary" id="listBuildsButton">Refresh Builds</button>
           </div>
@@ -764,7 +811,7 @@ flare ssh &lt;sessionId&gt;</pre>
           <button id="promoteButton">Promote Version</button>
           <div class="surface-note">
             <strong>Release shortcut</strong>
-            <span>Create a template, queue one build, refresh builds, then promote the version before launching a session.</span>
+            <span>Create a template, queue a version, refresh builds, then promote the result before launching a session.</span>
           </div>
           <div class="list" id="templates"></div>
           <div class="output-shell">
@@ -775,8 +822,8 @@ flare ssh &lt;sessionId&gt;</pre>
 
         <div class="card stack">
           <div class="card-head">
-            <h2>Launch Workspace</h2>
-            <p>Spin up a workspace from the current template, then route users into Preview, Editor, Quick Terminal, or SSH.</p>
+            <h2>Launch Sessions</h2>
+            <p>Start a workspace from the current template and route users into preview, editor, terminal, or SSH in one sequence.</p>
           </div>
           <div class="row">
             <div>
@@ -791,7 +838,7 @@ flare ssh &lt;sessionId&gt;</pre>
           <button id="createSessionButton">Create Session</button>
           <div class="surface-note">
             <strong>Session flow</strong>
-            <span>Create, start, inspect events, then use the quick actions on each card to preview, edit, or attach.</span>
+            <span>Create, start, inspect events, then use the quick actions on each session card to preview, edit, or attach.</span>
           </div>
           <div class="list" id="sessions"></div>
         </div>
@@ -799,7 +846,11 @@ flare ssh &lt;sessionId&gt;</pre>
         <div class="card stack">
           <div class="card-head">
             <h2>Quick Terminal</h2>
-            <p>Use the in-browser terminal for quick checks, then use the SSH action on a session card when you need a full shell.</p>
+            <p>Use the in-browser terminal for lightweight checks, then move to SSH when you need a full native shell.</p>
+          </div>
+          <div class="surface-note">
+            <strong>Terminal handoff</strong>
+            <span>Keep this panel open for quick checks while Preview and Editor stay on the session cards.</span>
           </div>
           <div class="muted" id="terminalStatus">Not connected</div>
           <pre class="terminal" id="terminalOutput">Waiting for a session attach...</pre>
@@ -815,7 +866,7 @@ flare ssh &lt;sessionId&gt;</pre>
         <div class="card stack">
           <div class="card-head">
             <h2>Snapshots & Health</h2>
-            <p>Capture session state, review snapshot content, and keep an eye on usage plus workspace health from one control area.</p>
+            <p>Capture a restorable checkpoint, inspect its content, and keep usage plus workspace health visible from one control area.</p>
           </div>
           <div class="row">
             <div>
@@ -847,11 +898,11 @@ flare ssh &lt;sessionId&gt;</pre>
         <div class="card stack">
           <div class="card-head">
             <h2>Releases & Activity</h2>
-            <p>Track what changed, which release is active, and what happened across the workspace.</p>
+            <p>Track release history, audit trails, and the main workspace timeline without dropping into a separate admin screen.</p>
           </div>
           <div class="surface-note">
             <strong>Daily loop</strong>
-            <span>Sign in, create or update a template, launch a session, then save a snapshot when you want a restorable checkpoint.</span>
+            <span>Sign in, adjust the workspace, ship a template, launch a session, then save a snapshot when you want a clean checkpoint.</span>
           </div>
           <div class="output-shell">
             <pre id="releases">[]</pre>
