@@ -1344,6 +1344,32 @@ export function createApp(options = {}) {
     return { client, server };
   }
 
+  function appendResponseHeaders(response, extraHeaders) {
+    if (!(response instanceof Response)) {
+      return response;
+    }
+    if (response.status === 101) {
+      return response;
+    }
+    const entries = Object.entries(extraHeaders);
+    try {
+      for (const [name, value] of entries) {
+        response.headers.set(name, value);
+      }
+      return response;
+    } catch (_error) {
+      const headers = new Headers(response.headers);
+      for (const [name, value] of entries) {
+        headers.set(name, value);
+      }
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      });
+    }
+  }
+
   function withRateLimit(config, handler) {
     return async (request, params = {}) => {
       const identity = config.identity ? config.identity(request, params) : requestIdentity(request);
@@ -1364,10 +1390,11 @@ export function createApp(options = {}) {
         );
       }
       const response = await handler(request, params);
-      response.headers.set("x-burstflare-rate-limit-limit", String(result.limit));
-      response.headers.set("x-burstflare-rate-limit-remaining", String(result.remaining));
-      response.headers.set("x-burstflare-rate-limit-reset", new Date(result.resetAt).toISOString());
-      return response;
+      return appendResponseHeaders(response, {
+        "x-burstflare-rate-limit-limit": String(result.limit),
+        "x-burstflare-rate-limit-remaining": String(result.remaining),
+        "x-burstflare-rate-limit-reset": new Date(result.resetAt).toISOString()
+      });
     };
   }
 
