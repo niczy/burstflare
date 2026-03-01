@@ -1,5 +1,20 @@
+// @ts-check
+
 import { accessSync, constants } from "node:fs";
 import path from "node:path";
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ *   missingCommands?: string[];
+ * }} CommandDependencyError
+ */
+
+/**
+ * @typedef {{
+ *   write(chunk: string): void;
+ * }} WritableOutput
+ */
 
 export const SSH_RUNTIME_DEPENDENCIES = ["ssh", "ssh-keygen"];
 
@@ -134,12 +149,21 @@ export function ensureCommands(commands, options = {}) {
   if (!missing.length) {
     return [];
   }
-  const error = new Error(formatMissingCommandMessage(missing, options));
+  const error = /** @type {CommandDependencyError} */ (new Error(formatMissingCommandMessage(missing, options)));
   error.status = 127;
   error.missingCommands = missing;
   throw error;
 }
 
+/**
+ * @param {{
+ *   stderr?: WritableOutput;
+ *   commands?: string[];
+ *   env?: NodeJS.ProcessEnv;
+ *   platform?: NodeJS.Platform;
+ *   nodeVersion?: string;
+ * }} [options]
+ */
 export function runInstallDependencyCheck({
   stderr = process.stderr,
   commands = SSH_RUNTIME_DEPENDENCIES,
