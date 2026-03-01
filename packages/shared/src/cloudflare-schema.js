@@ -1,11 +1,29 @@
 // @ts-check
 
+/**
+ * @typedef {{
+ *   name: string;
+ *   field: string;
+ * }} TableColumn
+ */
+
+/**
+ * @typedef {{
+ *   source: string;
+ *   table: string;
+ *   keyOf: (row: any, index?: number) => string;
+ *   columns: TableColumn[];
+ *   indexes?: string[];
+ * }} TableDefinition
+ */
+
 export const LEGACY_TABLE = "_burstflare_state";
 export const LEGACY_STATE_KEY = "global";
 export const META_TABLE = "bf_state_meta";
 export const SCHEMA_VERSION_KEY = "schema_version";
 export const NORMALIZED_SCHEMA_VERSION = "1";
 
+/** @type {TableDefinition[]} */
 export const TABLES = [
   {
     source: "users",
