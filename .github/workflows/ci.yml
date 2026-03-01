@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BURSTFLARE_DEPLOYED_URL: https://burstflare.nicholas-zhaoyu.workers.dev
+      BURSTFLARE_LIVE_SMOKE_REFRESH_TOKEN: ${{ secrets.BURSTFLARE_LIVE_SMOKE_REFRESH_TOKEN }}
+      BURSTFLARE_LIVE_SMOKE_TEMPLATE_ID: ${{ secrets.BURSTFLARE_LIVE_SMOKE_TEMPLATE_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,3 +42,7 @@ jobs:
       - run: |
           node --input-type=module -e "const response = await fetch(process.env.BURSTFLARE_DEPLOYED_URL + '/api/health'); if (!response.ok) { throw new Error('Health check failed (' + response.status + ')'); } const payload = await response.json(); if (!payload.ok) { throw new Error('Health payload was not ok'); }"
           node scripts/ui-smoke.mjs --base-url \"$BURSTFLARE_DEPLOYED_URL\"
+      - if: env.BURSTFLARE_LIVE_SMOKE_REFRESH_TOKEN != '' && env.BURSTFLARE_LIVE_SMOKE_TEMPLATE_ID != ''
+        run: npm ci
+      - if: env.BURSTFLARE_LIVE_SMOKE_REFRESH_TOKEN != '' && env.BURSTFLARE_LIVE_SMOKE_TEMPLATE_ID != ''
+        run: npm run ssh:smoke:live -- --base-url "$BURSTFLARE_DEPLOYED_URL"
