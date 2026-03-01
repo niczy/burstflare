@@ -1,3 +1,5 @@
+// @ts-check
+
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -17,7 +19,7 @@ export async function loadEnv(filePath = ".env") {
   try {
     content = await readFile(absolute, "utf8");
   } catch (error) {
-    if (error.code === "ENOENT") {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
       return {};
     }
     throw error;
@@ -40,6 +42,10 @@ export async function loadEnv(filePath = ".env") {
   return env;
 }
 
+/**
+ * @param {Record<string, string>} dotEnv
+ * @param {NodeJS.ProcessEnv} [runtimeEnv]
+ */
 export function mergeEnv(dotEnv, runtimeEnv = process.env) {
   return {
     ...dotEnv,
@@ -47,6 +53,11 @@ export function mergeEnv(dotEnv, runtimeEnv = process.env) {
   };
 }
 
+/**
+ * @param {Record<string, string | undefined>} env
+ * @param {string} key
+ * @param {string[]} [fallbackKeys]
+ */
 export function getRequiredEnv(env, key, fallbackKeys = []) {
   for (const candidate of [key, ...fallbackKeys]) {
     const value = env[candidate];
@@ -57,6 +68,9 @@ export function getRequiredEnv(env, key, fallbackKeys = []) {
   throw new Error(`Missing required environment variable: ${key}`);
 }
 
+/**
+ * @param {string} value
+ */
 export function slugifyDomain(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }

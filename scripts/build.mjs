@@ -1,3 +1,5 @@
+// @ts-check
+
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -29,6 +31,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error.stack}\n`);
+  const typedError = /** @type {Error} */ (error);
+  process.stderr.write(`${typedError.stack || typedError.message}\n`);
   process.exit(1);
 });
