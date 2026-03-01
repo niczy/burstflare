@@ -2,6 +2,13 @@ name = "burstflare"
 main = "apps/edge/src/worker.js"
 compatibility_date = "2026-02-27"
 
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+
 [vars]
 BURSTFLARE_DATA_FILE = ".local/burstflare-data.json"
 

@@ -24,6 +24,13 @@ function renderWrangler(state, config) {
 main = "apps/edge/src/worker.js"
 compatibility_date = "2026-02-27"
 
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+
 [vars]
 ${vars.join("\n")}
 
