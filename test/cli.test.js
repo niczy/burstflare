@@ -637,7 +637,42 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
+    let spawned = null;
+    const spawnImpl = (shell, args, options) => {
+      spawned = { shell, args, options };
+      return {
+        on(event, handler) {
+          if (event === "exit") {
+            setImmediate(() => handler(0, null));
+          }
+          return this;
+        }
+      };
+    };
+
     code = await runCli(["ssh", sessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath,
+      env: {
+        ...process.env,
+        SHELL: "/bin/sh"
+      },
+      spawnImpl
+    });
+    assert.equal(code, 0);
+    assert.equal(stdout.data, "");
+    assert.equal(stderr.data, "");
+    assert.equal(spawned.shell, "/bin/sh");
+    assert.match(spawned.args[1], /wstunnel client/);
+    assert.match(spawned.args[1], /ssh -p 2222 dev@127\.0\.0\.1/);
+    assert.equal(spawned.options.stdio, "inherit");
+
+    stdout.data = "";
+    stderr.data = "";
+
+    code = await runCli(["ssh", sessionId, "--url", "http://local", "--print"], {
       fetchImpl,
       stdout,
       stderr,

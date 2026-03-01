@@ -54,6 +54,8 @@ flare session up sandbox --template <templateId>
 flare ssh <sessionId>
 ```
 
+`flare ssh` opens the tunnel and SSH session directly. Add `--print` to output the raw command instead.
+
 ## Common Commands
 
 ```bash

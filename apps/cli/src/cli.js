@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -219,7 +220,7 @@ function helpText() {
     "session delete <sessionId>",
     "session preview <sessionId>",
     "session editor <sessionId>",
-    "session ssh <sessionId>",
+    "session ssh <sessionId> [--print]",
     "up <name> --template <templateId>",
     "list [--status running|sleeping|deleted] [--template <templateId>]",
     "status <sessionId>",
@@ -244,7 +245,7 @@ function helpText() {
     "reconcile purge-deleted",
     "preview <sessionId>",
     "editor <sessionId>",
-    "ssh <sessionId>"
+    "ssh <sessionId> [--print]"
   ]
     .map((command) => `${CLI_NAME} ${command}`)
     .join("\n");
@@ -252,6 +253,7 @@ function helpText() {
 
 export async function runCli(argv, dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl || fetch;
+  const spawnImpl = dependencies.spawnImpl || spawn;
   const stdout = dependencies.stdout || process.stdout;
   const stderr = dependencies.stderr || process.stderr;
   const env = dependencies.env || process.env;
@@ -426,6 +428,40 @@ export async function runCli(argv, dependencies = {}) {
       },
       fetchImpl
     );
+  }
+
+  async function runInteractiveCommand(commandLine) {
+    const shell = env.SHELL || "/bin/sh";
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const child = spawnImpl(shell, ["-lc", commandLine], {
+        stdio: "inherit"
+      });
+
+      child.on("error", (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(error);
+      });
+
+      child.on("exit", (code, signal) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        const error = new Error(
+          signal ? `SSH session terminated with signal ${signal}` : `SSH session exited with code ${code}`
+        );
+        error.status = typeof code === "number" && code > 0 ? code : 1;
+        reject(error);
+      });
+    });
   }
 
   try {
@@ -1412,7 +1448,11 @@ export async function runCli(argv, dependencies = {}) {
           headers: headers(undefined)
         }
       );
-      print(stdout, data.sshCommand);
+      if (options.print) {
+        print(stdout, data.sshCommand);
+        return 0;
+      }
+      await runInteractiveCommand(data.sshCommand);
       return 0;
     }
 

@@ -45,6 +45,8 @@ flare session up sandbox --template <templateId>
 flare ssh <sessionId>
 ```
 
+`flare ssh` now opens the tunnel and SSH session directly. Use `flare ssh <sessionId> --print` if you want the raw command instead.
+
 ## Local Development
 
 1. Install dependencies:
