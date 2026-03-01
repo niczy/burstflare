@@ -1,6 +1,6 @@
 {
   "name": "@burstflare/flare",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "CLI for managing BurstFlare workspaces, templates, and runtime sessions.",
   "license": "Apache-2.0",
   "type": "module",

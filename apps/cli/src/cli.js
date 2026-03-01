@@ -430,8 +430,38 @@ export async function runCli(argv, dependencies = {}) {
     );
   }
 
+  async function ensureSessionRunningForSsh(sessionId) {
+    try {
+      return await requestJsonAuthed(
+        `${baseUrl}/api/sessions/${sessionId}/ssh-token`,
+        {
+          method: "POST",
+          headers: headers(undefined)
+        }
+      );
+    } catch (error) {
+      if (error.status !== 409 || error.message !== "Session is not running") {
+        throw error;
+      }
+      await requestJsonAuthed(
+        `${baseUrl}/api/sessions/${sessionId}/start`,
+        {
+          method: "POST",
+          headers: headers(undefined)
+        }
+      );
+      return requestJsonAuthed(
+        `${baseUrl}/api/sessions/${sessionId}/ssh-token`,
+        {
+          method: "POST",
+          headers: headers(undefined)
+        }
+      );
+    }
+  }
+
   async function runInteractiveCommand(commandLine) {
-    const shell = env.SHELL || "/bin/sh";
+    const shell = "/bin/sh";
     await new Promise((resolve, reject) => {
       let settled = false;
       const child = spawnImpl(shell, ["-lc", commandLine], {
@@ -1441,13 +1471,7 @@ export async function runCli(argv, dependencies = {}) {
 
     if (command === "ssh") {
       const sessionId = subcommand;
-      const data = await requestJsonAuthed(
-        `${baseUrl}/api/sessions/${sessionId}/ssh-token`,
-        {
-          method: "POST",
-          headers: headers(undefined)
-        }
-      );
+      const data = await ensureSessionRunningForSsh(sessionId);
       if (options.print) {
         print(stdout, data.sshCommand);
         return 0;
