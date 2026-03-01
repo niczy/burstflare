@@ -1,5 +1,13 @@
+// @ts-check
+
 import path from "node:path";
 import { loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
+
+/**
+ * @typedef {Error & {
+ *   payload?: unknown;
+ * }} CloudflareScriptError
+ */
 
 function renderWrangler(state, config) {
   const { resources } = state;
@@ -114,6 +122,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
+  const typedError = /** @type {CloudflareScriptError} */ (error);
+  process.stderr.write(`${typedError.message}\n`);
   process.exit(1);
 });

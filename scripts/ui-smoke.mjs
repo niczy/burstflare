@@ -1,3 +1,5 @@
+// @ts-check
+
 function getArg(name) {
   const index = process.argv.indexOf(name);
   if (index === -1 || index === process.argv.length - 1) {
@@ -61,6 +63,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error.stack}\n`);
+  const typedError = /** @type {Error} */ (error);
+  process.stderr.write(`${typedError.stack || typedError.message}\n`);
   process.exit(1);
 });
