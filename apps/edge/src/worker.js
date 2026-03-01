@@ -1,8 +1,25 @@
+// @ts-check
+
 import { Container, getContainer } from "@cloudflare/containers";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import { createApp, createWorkerService, handleQueueBatch, handleScheduled } from "./app.js";
 
 const RUNTIME_STATE_KEY = "burstflare:runtime-state";
+
+/**
+ * @typedef {{
+ *   storage: {
+ *     get(key: string): Promise<any>;
+ *     put(key: string, value: any): Promise<void>;
+ *   };
+ * }} RuntimeStorageContext
+ */
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ * }} StatusError
+ */
 
 function nowIso() {
   return new Date().toISOString();
@@ -13,8 +30,12 @@ export class BurstFlareSessionContainer extends Container {
   requiredPorts = [8080];
   sleepAfter = "15m";
 
+  runtimeStorage() {
+    return /** @type {RuntimeStorageContext} */ (/** @type {any} */ (this).ctx).storage;
+  }
+
   async readRuntimeState() {
-    const current = await this.ctx.storage.get(RUNTIME_STATE_KEY);
+    const current = await this.runtimeStorage().get(RUNTIME_STATE_KEY);
     if (current) {
       return current;
     }
@@ -50,7 +71,7 @@ export class BurstFlareSessionContainer extends Container {
       ...patch,
       updatedAt: nowIso()
     };
-    await this.ctx.storage.put(RUNTIME_STATE_KEY, next);
+    await this.runtimeStorage().put(RUNTIME_STATE_KEY, next);
     return next;
   }
 
@@ -257,7 +278,7 @@ export class BurstFlareBuildWorkflow extends WorkflowEntrypoint {
         });
       });
     } catch (error) {
-      if (error?.status === 404) {
+      if ((/** @type {StatusError} */ (error)).status === 404) {
         return {
           buildId,
           processed: 0,
@@ -281,7 +302,7 @@ export class BurstFlareBuildWorkflow extends WorkflowEntrypoint {
         };
       });
     } catch (error) {
-      if (error?.status === 404) {
+      if ((/** @type {StatusError} */ (error)).status === 404) {
         return {
           buildId,
           processed: 0,
