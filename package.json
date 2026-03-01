@@ -27,6 +27,7 @@
     "npm:cli:smoke": "node scripts/npm-cli-smoke.mjs",
     "release:validate": "node scripts/release-validate.mjs",
     "ssh:smoke": "node scripts/ssh-smoke.mjs",
+    "ssh:smoke:live": "node scripts/live-ssh-smoke.mjs",
     "smoke": "node scripts/smoke.mjs",
     "ui:smoke": "node scripts/ui-smoke.mjs",
     "test": "node --test"
