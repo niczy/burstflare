@@ -1,3 +1,5 @@
+// @ts-check
+
 import { createCloudflareClient, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
 import {
   LEGACY_TABLE,
@@ -6,6 +8,12 @@ import {
   SCHEMA_VERSION_KEY,
   TABLES
 } from "../packages/shared/src/cloudflare-schema.js";
+
+/**
+ * @typedef {Error & {
+ *   payload?: unknown;
+ * }} CloudflareScriptError
+ */
 
 function flattenResults(result) {
   if (Array.isArray(result)) {
@@ -85,9 +93,10 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  if (error.payload) {
-    process.stderr.write(`${JSON.stringify(error.payload, null, 2)}\n`);
+  const typedError = /** @type {CloudflareScriptError} */ (error);
+  process.stderr.write(`${typedError.message}\n`);
+  if (typedError.payload) {
+    process.stderr.write(`${JSON.stringify(typedError.payload, null, 2)}\n`);
   }
   process.exit(1);
 });
