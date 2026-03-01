@@ -200,6 +200,15 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     body: JSON.stringify({ email: "strict-missing@example.com", name: "Strict Missing" })
   });
   assert.equal(strictMissing.response.status, 400);
+  assert.equal(strictMissing.data.code, "BAD_REQUEST");
+  assert.equal(strictMissing.data.status, 400);
+  assert.equal(strictMissing.data.method, "POST");
+  assert.equal(strictMissing.data.path, "/api/auth/register");
+  assert.match(strictMissing.data.requestId, /^[0-9a-f-]+$/);
+  assert.equal(
+    strictMissing.response.headers.get("x-burstflare-request-id"),
+    strictMissing.data.requestId
+  );
 
   const strictAllowed = await requestJson(turnstileApp, "/api/auth/register", {
     method: "POST",
@@ -210,6 +219,35 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     })
   });
   assert.equal(strictAllowed.response.status, 200);
+
+  const invalidJson = await requestJson(app, "/api/auth/register", {
+    method: "POST",
+    body: "{"
+  });
+  assert.equal(invalidJson.response.status, 400);
+  assert.equal(invalidJson.data.error, "Invalid JSON request body");
+  assert.equal(invalidJson.data.code, "INVALID_JSON");
+  assert.equal(invalidJson.data.status, 400);
+  assert.equal(invalidJson.data.method, "POST");
+  assert.equal(invalidJson.data.path, "/api/auth/register");
+  assert.match(invalidJson.data.requestId, /^[0-9a-f-]+$/);
+  assert.equal(
+    invalidJson.response.headers.get("x-burstflare-request-id"),
+    invalidJson.data.requestId
+  );
+
+  const unauthenticatedSessions = await requestJson(app, "/api/sessions");
+  assert.equal(unauthenticatedSessions.response.status, 401);
+  assert.equal(unauthenticatedSessions.data.error, "Unauthorized");
+  assert.equal(unauthenticatedSessions.data.code, "UNAUTHORIZED");
+  assert.equal(unauthenticatedSessions.data.status, 401);
+  assert.equal(unauthenticatedSessions.data.method, "GET");
+  assert.equal(unauthenticatedSessions.data.path, "/api/sessions");
+  assert.match(unauthenticatedSessions.data.requestId, /^[0-9a-f-]+$/);
+  assert.equal(
+    unauthenticatedSessions.response.headers.get("x-burstflare-request-id"),
+    unauthenticatedSessions.data.requestId
+  );
 
   const owner = await requestJson(app, "/api/auth/register", {
     method: "POST",
