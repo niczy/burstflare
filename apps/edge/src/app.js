@@ -1,3 +1,5 @@
+// @ts-check
+
 import { createBurstFlareService } from "../../../packages/shared/src/service.js";
 import { createCloudflareStateStore } from "../../../packages/shared/src/cloudflare-store.js";
 import { createMemoryStore } from "../../../packages/shared/src/memory-store.js";
@@ -15,6 +17,35 @@ const CSRF_COOKIE = "burstflare_csrf";
 const REQUEST_ID_HEADER = "x-burstflare-request-id";
 const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
 const localWebAuthnChallenges = new Map();
+/**
+ * @typedef {{
+ *   fetch(request: Request): Promise<Response> | Response;
+ * }} FrontendHandler
+ */
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ *   code?: string;
+ *   details?: unknown;
+ *   hint?: string;
+ * }} AppError
+ */
+
+/**
+ * @typedef {Record<string, any> & {
+ *   status?: number;
+ *   code?: string;
+ *   requestId?: string;
+ *   method?: string;
+ *   path?: string;
+ *   details?: unknown;
+ *   hint?: string;
+ *   error?: string;
+ * }} ErrorResponsePayload
+ */
+
+/** @type {Promise<FrontendHandler | null> | null} */
 let defaultFrontendHandlerPromise = null;
 
 function tokenFromRequest(request, sessionCookieName) {
@@ -68,15 +99,20 @@ function errorCodeForStatus(status) {
 }
 
 function normalizeThrownError(error) {
-  if (error instanceof SyntaxError && !error.status) {
-    const next = new Error("Invalid JSON request body");
-    next.status = 400;
+  if (error instanceof SyntaxError && !(/** @type {AppError} */ (error)).status) {
+    const next = createHttpError("Invalid JSON request body", 400);
     next.code = "INVALID_JSON";
     return next;
   }
-  return error;
+  return /** @type {AppError} */ (error);
 }
 
+/**
+ * @param {Request} request
+ * @param {number} status
+ * @param {ErrorResponsePayload} [payload]
+ * @returns {ErrorResponsePayload}
+ */
 function buildErrorPayload(request, status, payload = {}) {
   const url = new URL(request.url);
   return {
@@ -203,9 +239,7 @@ function requireToken(request, service) {
     const csrfCookie = readCookie(cookieHeader, CSRF_COOKIE);
     const csrfHeader = request.headers.get("x-burstflare-csrf");
     if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-      const error = new Error("CSRF token mismatch");
-      error.status = 403;
-      throw error;
+      throw createHttpError("CSRF token mismatch", 403);
     }
   }
   return token;
@@ -232,9 +266,7 @@ async function readEditorRequestAuth(request, service) {
     const form = new URLSearchParams(bodyText || "");
     const csrfValue = form.get("csrf") || request.headers.get("x-burstflare-csrf");
     if (!csrfCookie || !csrfValue || csrfCookie !== csrfValue) {
-      const error = new Error("CSRF token mismatch");
-      error.status = 403;
-      throw error;
+      throw createHttpError("CSRF token mismatch", 403);
     }
   }
 
@@ -254,6 +286,19 @@ function toJsonWithCookies(data, cookies, init = {}) {
     response.headers.append("set-cookie", value);
   }
   return response;
+}
+
+/**
+ * @param {WebSocket} socket
+ */
+function webSocketUpgradeResponse(socket) {
+  return new Response(
+    null,
+    /** @type {ResponseInit & { webSocket: WebSocket }} */ ({
+      status: 101,
+      webSocket: socket
+    })
+  );
 }
 
 function authCookies(service, token, csrfToken) {
@@ -463,10 +508,8 @@ function createTurnstileVerifier(options) {
       if (!secret) {
         return;
       }
-      if (!token) {
-        const error = new Error("Turnstile token is required");
-        error.status = 400;
-        throw error;
+    if (!token) {
+        throw createHttpError("Turnstile token is required", 400);
       }
       const response = await fetchImpl("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
         method: "POST",
@@ -478,20 +521,26 @@ function createTurnstileVerifier(options) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
-        const error = new Error((data["error-codes"] && data["error-codes"].join(", ")) || "Turnstile verification failed");
-        error.status = 400;
-        throw error;
+        throw createHttpError((data["error-codes"] && data["error-codes"].join(", ")) || "Turnstile verification failed", 400);
       }
     }
   };
 }
 
-function createHttpError(message, status, details = null) {
-  const error = new Error(message);
+/**
+ * @param {string} message
+ * @param {number} status
+ * @param {unknown} [details]
+ * @param {Partial<AppError>} [extras]
+ * @returns {AppError}
+ */
+function createHttpError(message, status, details = null, extras = {}) {
+  const error = /** @type {AppError} */ (new Error(message));
   error.status = status;
   if (details && typeof details === "object" && !Array.isArray(details)) {
     error.details = details;
   }
+  Object.assign(error, extras);
   return error;
 }
 
@@ -1009,19 +1058,13 @@ function parseClientData(clientDataValue) {
 function verifyClientData(clientDataValue, expected) {
   const { clientDataJSON, parsed } = parseClientData(clientDataValue);
   if (parsed.type !== expected.type) {
-    const error = new Error("Passkey client data type mismatch");
-    error.status = 401;
-    throw error;
+    throw createHttpError("Passkey client data type mismatch", 401);
   }
   if (parsed.challenge !== expected.challenge) {
-    const error = new Error("Passkey challenge mismatch");
-    error.status = 401;
-    throw error;
+    throw createHttpError("Passkey challenge mismatch", 401);
   }
   if (parsed.origin !== expected.origin) {
-    const error = new Error("Passkey origin mismatch");
-    error.status = 401;
-    throw error;
+    throw createHttpError("Passkey origin mismatch", 401);
   }
   return {
     clientDataJSON,
@@ -1055,9 +1098,7 @@ function importPasskeyKey(publicKey, algorithm) {
       ["verify"]
     );
   }
-  const error = new Error("Unsupported passkey algorithm");
-  error.status = 400;
-  throw error;
+  throw createHttpError("Unsupported passkey algorithm", 400);
 }
 
 async function verifyPasskeyAssertion(assertion, expected, passkey) {
@@ -1083,9 +1124,7 @@ async function verifyPasskeyAssertion(assertion, expected, passkey) {
         };
   const valid = await globalThis.crypto.subtle.verify(verifyOptions, key, signature, verificationData);
   if (!valid) {
-    const error = new Error("Passkey assertion invalid");
-    error.status = 401;
-    throw error;
+    throw createHttpError("Passkey assertion invalid", 401);
   }
   return {
     signCount: readUint32(authenticatorData, 33)
@@ -1524,9 +1563,7 @@ export function createApp(options = {}) {
     const response = await container.fetch(createSnapshotRestoreRequest(session, snapshotId, snapshot, content));
     if (!response.ok) {
       const message = await response.text().catch(() => "Snapshot restore failed");
-      const error = new Error(message || "Snapshot restore failed");
-      error.status = 502;
-      throw error;
+      throw createHttpError(message || "Snapshot restore failed", 502);
     }
     const data = await response.json().catch(() => ({}));
     return {
@@ -1567,9 +1604,7 @@ export function createApp(options = {}) {
     const response = await container.fetch(createSnapshotExportRequest(session));
     if (!response.ok) {
       const message = await response.text().catch(() => "Snapshot export failed");
-      const error = new Error(message || "Snapshot export failed");
-      error.status = 502;
-      throw error;
+      throw createHttpError(message || "Snapshot export failed", 502);
     }
     const body = await response.arrayBuffer();
     return {
@@ -1606,10 +1641,9 @@ export function createApp(options = {}) {
 
     const activeFrontendHandler = frontendHandler || (await loadDefaultFrontendHandler());
     if (!activeFrontendHandler || typeof activeFrontendHandler.fetch !== "function") {
-      const error = new Error("Frontend handler is unavailable");
-      error.status = 503;
-      error.code = "FRONTEND_UNAVAILABLE";
-      throw error;
+      throw createHttpError("Frontend handler is unavailable", 503, null, {
+        code: "FRONTEND_UNAVAILABLE"
+      });
     }
     return activeFrontendHandler.fetch(request);
   }
@@ -1732,15 +1766,11 @@ export function createApp(options = {}) {
   async function finishPasskeyRegistration(request, token, body) {
     const challenge = await webAuthnChallenges.consume(body.challengeId);
     if (!challenge || challenge.kind !== "passkey-register") {
-      const error = new Error("Passkey registration challenge not found");
-      error.status = 400;
-      throw error;
+      throw createHttpError("Passkey registration challenge not found", 400);
     }
     const auth = await service.authenticate(token);
     if (auth.user.id !== challenge.userId || auth.workspace.id !== challenge.workspaceId) {
-      const error = new Error("Passkey registration challenge does not match the current session");
-      error.status = 403;
-      throw error;
+      throw createHttpError("Passkey registration challenge does not match the current session", 403);
     }
     verifyClientData(body.credential?.response?.clientDataJSON, {
       challenge: challenge.challenge,
@@ -1784,14 +1814,10 @@ export function createApp(options = {}) {
   async function finishPasskeyLogin(body) {
     const challenge = await webAuthnChallenges.consume(body.challengeId);
     if (!challenge || challenge.kind !== "passkey-login") {
-      const error = new Error("Passkey login challenge not found");
-      error.status = 400;
-      throw error;
+      throw createHttpError("Passkey login challenge not found", 400);
     }
     if (!challenge.credentialIds.includes(body.credential?.id)) {
-      const error = new Error("Passkey credential is not allowed for this challenge");
-      error.status = 401;
-      throw error;
+      throw createHttpError("Passkey credential is not allowed for this challenge", 401);
     }
     const assertion = await service.getPasskeyAssertion({
       userId: challenge.userId,
@@ -3097,10 +3123,7 @@ export function createApp(options = {}) {
               headers: { "content-type": "text/plain; charset=utf-8" }
             });
           }
-          return new Response(null, {
-            status: 101,
-            webSocket: bridge.client
-          });
+          return webSocketUpgradeResponse(bridge.client);
         })
       )
     },
@@ -3142,10 +3165,7 @@ export function createApp(options = {}) {
               headers: { "content-type": "text/plain; charset=utf-8" }
             });
           }
-          return new Response(null, {
-            status: 101,
-            webSocket: bridge.client
-          });
+          return webSocketUpgradeResponse(bridge.client);
         })
       )
     }
