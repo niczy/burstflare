@@ -2,6 +2,12 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import {
+  buildDoctorReport,
+  ensureCommands,
+  formatDoctorReport,
+  SSH_RUNTIME_DEPENDENCIES
+} from "./runtime-deps.js";
 
 const CLI_NAME = "flare";
 const DEFAULT_BASE_URL = "https://burstflare.dev";
@@ -234,6 +240,7 @@ function helpText() {
     "snapshot restore <sessionId> <snapshotId>",
     "snapshot delete <sessionId> <snapshotId>",
     "snapshot get <sessionId> <snapshotId> [--output restored.bin]",
+    "doctor",
     "usage",
     "report",
     "export [--output workspace-export.json]",
@@ -498,6 +505,20 @@ export async function runCli(argv, dependencies = {}) {
     if (command === "help") {
       print(stdout, helpText());
       return 0;
+    }
+
+    if (command === "doctor") {
+      const report = buildDoctorReport({
+        env,
+        platform: process.platform,
+        nodeVersion: process.version
+      });
+      if (options.json) {
+        print(stdout, JSON.stringify(report, null, 2));
+        return report.ok ? 0 : 1;
+      }
+      print(stdout, formatDoctorReport(report));
+      return report.ok ? 0 : 1;
     }
 
     if (command === "auth") {
@@ -1476,6 +1497,10 @@ export async function runCli(argv, dependencies = {}) {
         print(stdout, data.sshCommand);
         return 0;
       }
+      ensureCommands(SSH_RUNTIME_DEPENDENCIES, {
+        env,
+        action: "flare ssh"
+      });
       await runInteractiveCommand(data.sshCommand);
       return 0;
     }

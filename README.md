@@ -24,6 +24,14 @@ https://burstflare.dev
 npm install -g @burstflare/flare
 ```
 
+The install checks for the local tools used by `flare ssh` and warns if `wstunnel` or `ssh` is missing.
+
+You can verify local CLI dependencies any time with:
+
+```bash
+flare doctor
+```
+
 3. Create your account. `flare` points to `https://burstflare.dev` by default.
 
 ```bash

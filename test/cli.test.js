@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { runCli } from "../apps/cli/src/cli.js";
 import { createApp } from "../apps/edge/src/app.js";
 
@@ -85,9 +85,15 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
   const bundlePath = path.join(os.tmpdir(), `flare-bundle-${Date.now()}.txt`);
   const restoredPath = path.join(os.tmpdir(), `flare-restored-${Date.now()}.txt`);
   const exportPath = path.join(os.tmpdir(), `flare-export-${Date.now()}.json`);
+  const toolDir = path.join(os.tmpdir(), `flare-tools-${Date.now()}`);
 
   try {
     await writeFile(bundlePath, "cli bundle payload");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(path.join(toolDir, "ssh"), "#!/bin/sh\nexit 0\n");
+    await writeFile(path.join(toolDir, "wstunnel"), "#!/bin/sh\nexit 0\n");
+    await chmod(path.join(toolDir, "ssh"), 0o755);
+    await chmod(path.join(toolDir, "wstunnel"), 0o755);
 
     let code = await runCli(["auth", "register", "--email", "cli@example.com", "--name", "CLI User", "--url", "http://local"], {
       fetchImpl,
@@ -668,8 +674,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       stderr,
       configPath,
       env: {
-        ...process.env,
-        SHELL: "/bin/zsh"
+        PATH: toolDir
       },
       spawnImpl
     });
@@ -707,6 +712,29 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.match(stdout.data, /wstunnel client/);
     assert.match(stdout.data, /ssh -p 2222 dev@127\.0\.0\.1/);
     assert.equal(stderr.data, "");
+
+    stdout.data = "";
+    stderr.data = "";
+
+    let missingSpawned = false;
+    code = await runCli(["ssh", sessionId, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath,
+      env: {
+        PATH: ""
+      },
+      spawnImpl() {
+        missingSpawned = true;
+        throw new Error("spawn should not run when dependencies are missing");
+      }
+    });
+    assert.equal(code, 1);
+    assert.equal(missingSpawned, false);
+    assert.match(stderr.data, /Missing local dependencies for flare ssh/);
+    assert.match(stderr.data, /wstunnel/);
+    assert.match(stderr.data, /ssh/);
 
     stdout.data = "";
     stderr.data = "";
@@ -877,6 +905,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     await rm(bundlePath, { force: true });
     await rm(restoredPath, { force: true });
     await rm(exportPath, { force: true });
+    await rm(toolDir, { force: true, recursive: true });
   }
 });
 
@@ -897,6 +926,26 @@ test("cli help uses flare branding", async () => {
   assert.match(stdout.data, /^flare template inspect <templateId>/m);
   assert.match(stdout.data, /^flare session \[list\]/m);
   assert.doesNotMatch(stdout.data, /burstflare auth register/);
+  assert.equal(stderr.data, "");
+});
+
+test("cli doctor reports missing local ssh dependencies", async () => {
+  const stdout = capture();
+  const stderr = capture();
+
+  const code = await runCli(["doctor"], {
+    stdout,
+    stderr,
+    env: {
+      PATH: ""
+    }
+  });
+
+  assert.equal(code, 1);
+  assert.match(stdout.data, /flare doctor/);
+  assert.match(stdout.data, /ssh-ready: no/);
+  assert.match(stdout.data, /wstunnel: missing/);
+  assert.match(stdout.data, /summary:/);
   assert.equal(stderr.data, "");
 });
 

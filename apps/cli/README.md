@@ -17,6 +17,14 @@ Global install:
 npm install -g @burstflare/flare
 ```
 
+The npm install now checks for the local tools used by `flare ssh` and warns if `wstunnel` or `ssh` is missing.
+
+You can re-check your machine any time with:
+
+```bash
+flare doctor
+```
+
 One-off use with `npx`:
 
 ```bash
@@ -60,6 +68,7 @@ flare ssh <sessionId>
 
 ```bash
 flare auth whoami
+flare doctor
 flare workspace
 flare templates
 flare template inspect <templateId>
