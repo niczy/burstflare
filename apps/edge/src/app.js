@@ -1353,12 +1353,8 @@ export function createApp(options = {}) {
         headers,
         redirect: "manual"
       });
-    } catch (error) {
-      const next = new Error(`Frontend origin is unavailable at ${frontendOrigin}`);
-      next.status = 502;
-      next.code = "FRONTEND_UNAVAILABLE";
-      next.cause = error;
-      throw next;
+    } catch (_error) {
+      return null;
     }
   }
 
