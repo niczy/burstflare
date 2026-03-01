@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "apps/**/*.js",
+    "apps/**/*.jsx",
+    "apps/**/*.mjs",
+    "packages/**/*.js",
+    "scripts/**/*.mjs",
+    "test/**/*.js",
+    "containers/**/*.mjs",
+    "types/**/*.d.ts"
+  ],
+  "exclude": ["**/dist/**", "**/node_modules/**"]
+}
