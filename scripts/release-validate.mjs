@@ -1,3 +1,5 @@
+// @ts-check
+
 function getArg(name) {
   const index = process.argv.indexOf(name);
   if (index === -1 || index === process.argv.length - 1) {
@@ -14,6 +16,26 @@ function getTurnstileToken() {
   return getArg("--turnstile-token") || process.env.BURSTFLARE_TURNSTILE_TOKEN || process.env.TURNSTILE_TOKEN || null;
 }
 
+/**
+ * @typedef {{
+ *   method?: string;
+ *   headers?: HeadersInit;
+ *   body?: BodyInit | null;
+ * }} RequestOptions
+ */
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ *   body?: unknown;
+ * }} HttpRequestError
+ */
+
+/**
+ * @param {string} baseUrl
+ * @param {string} path
+ * @param {RequestOptions} [options]
+ */
 async function requestJson(baseUrl, path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -24,7 +46,7 @@ async function requestJson(baseUrl, path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.error || `${options.method || "GET"} ${path} failed`);
+    const error = /** @type {HttpRequestError} */ (new Error(data.error || `${options.method || "GET"} ${path} failed`));
     error.status = response.status;
     error.body = data;
     throw error;
@@ -32,6 +54,11 @@ async function requestJson(baseUrl, path, options = {}) {
   return data;
 }
 
+/**
+ * @param {string} baseUrl
+ * @param {string} path
+ * @param {RequestOptions} [options]
+ */
 async function requestText(baseUrl, path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
@@ -41,7 +68,7 @@ async function requestText(baseUrl, path, options = {}) {
   });
   const text = await response.text();
   if (!response.ok) {
-    const error = new Error(`${options.method || "GET"} ${path} failed`);
+    const error = /** @type {HttpRequestError} */ (new Error(`${options.method || "GET"} ${path} failed`));
     error.status = response.status;
     error.body = text;
     throw error;
