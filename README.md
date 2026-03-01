@@ -1,74 +1,74 @@
 # BurstFlare
 
-BurstFlare is a Cloudflare-native control plane for disposable development workspaces.
+BurstFlare is a hosted workspace product for creating reusable dev environments, launching working sessions, and handing users into preview, browser tools, or SSH without bouncing between multiple systems.
 
-It combines:
+## What It Does
+
 - account and workspace management
-- template and release management
-- queue and workflow driven builds
-- container-backed runtime sessions
-- browser preview, browser terminal, editor, and SSH access
-- snapshots, audit, quota, and operator tooling
+- team invites, access review, and recovery flows
+- template creation, versioning, and release promotion
+- live workspace sessions with preview, terminal, editor, and SSH access
+- snapshots, activity history, reporting, and export tools
 
-The stack is built around Cloudflare Workers, D1, KV, R2, Queues, Workflows, Durable Objects, and Containers.
+## Product Quick Start
 
-## What You Get
+1. Open the product:
 
-- A browser-first dashboard for onboarding, workspace control, template management, session launch, snapshots, and reporting
-- A `flare` CLI for auth, template, release, session, reconcile, and export workflows
-- Cloudflare provisioning and validation scripts for local and hosted environments
-- CI, smoke checks, and a deployable Worker path
+```text
+https://burstflare.dev
+```
 
-## Quick Start
+2. Install the CLI:
 
-### Local Dashboard
+```bash
+npm install -g @burstflare/flare
+```
 
-1. Install dependencies.
+3. Create your account. `flare` points to `https://burstflare.dev` by default.
+
+```bash
+flare auth register --email you@example.com
+```
+
+4. Create and promote a template:
+
+```bash
+flare template create node-dev
+flare template upload <templateId> --version 1.0.0
+flare template promote <templateId> <versionId>
+```
+
+5. Launch a workspace and attach:
+
+```bash
+flare session up sandbox --template <templateId>
+flare ssh <sessionId>
+```
+
+## Local Development
+
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Start the local dev server.
+2. Start the local app:
 
 ```bash
 npm run dev
 ```
 
-3. Open the homepage.
+3. Open:
 
 ```text
 http://127.0.0.1:8787
 ```
 
-The homepage includes a built-in Quick Start rail that walks through registration, template creation, promotion, and session launch.
-
-### CLI Quick Start
-
-1. Register with the local control plane.
+4. Point the CLI at local only when you are testing against the local stack:
 
 ```bash
 flare auth register --email you@example.com --url http://127.0.0.1:8787
-```
-
-2. Create a template and queue a build.
-
-```bash
-flare template create node-dev --url http://127.0.0.1:8787
-flare template upload <templateId> --version 1.0.0 --url http://127.0.0.1:8787
-```
-
-3. Promote the version and launch a session.
-
-```bash
-flare template promote <templateId> <versionId> --url http://127.0.0.1:8787
-flare session up sandbox --template <templateId> --url http://127.0.0.1:8787
-```
-
-4. Attach with SSH when needed.
-
-```bash
-flare ssh <sessionId> --url http://127.0.0.1:8787
 ```
 
 ## Common Commands
@@ -77,51 +77,24 @@ flare ssh <sessionId> --url http://127.0.0.1:8787
 npm run ci
 npm run smoke
 npm run ui:smoke
+npm run npm:cli:smoke
 npm run release:validate
 ```
 
-Cloudflare operations:
-
-```bash
-npm run cf:verify
-npm run cf:provision
-npm run cf:migrate
-npm run cf:generate
-```
-
-## Deploy To Cloudflare
-
-1. Configure your local `.env` with Cloudflare account details, API token, and optional Turnstile keys.
-2. Provision resources.
-3. Apply migrations.
-4. Generate Wrangler config.
-5. Deploy with Wrangler.
-
-Typical flow:
-
-```bash
-npm run cf:provision
-npm run cf:migrate
-npm run cf:generate
-npx wrangler deploy -c wrangler.generated.toml
-```
-
-If you are using Cloudflare Containers locally, make sure Docker is available before deploy.
-
 ## Project Layout
 
-- `apps/edge`: Worker app, API routes, runtime wiring
-- `apps/web`: browser shell asset bundle
+- `apps/edge`: API and runtime entrypoints
+- `apps/web`: browser shell assets
 - `apps/cli`: `flare` CLI
-- `packages/shared`: service layer, stores, domain logic
-- `containers/session`: runtime container image
-- `infra/migrations`: D1 schema migrations
-- `scripts`: build, smoke, Cloudflare provisioning, validation, and release scripts
-- `spec`: product docs, architecture, plan, changelog, todo, runbook
+- `packages/shared`: shared service and domain logic
+- `containers/session`: runtime image
+- `infra/migrations`: schema migrations
+- `scripts`: build, smoke, release, and deploy utilities
+- `spec`: product docs, architecture, plan, changelog, todo, and runbook
 
 ## Current Status
 
-The planned product stack is implemented and deployed. The main follow-up work left is optional scale tuning, such as replacing the remaining normalized store abstraction with more direct repository-style persistence if future load requires it.
+The product is live at `https://burstflare.dev`, the web app is production-oriented by default, and the CLI ships as `@burstflare/flare`.
 
 ## License
 

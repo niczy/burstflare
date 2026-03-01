@@ -840,6 +840,54 @@ test("cli help uses flare branding", async () => {
   assert.equal(stderr.data, "");
 });
 
+test("cli uses burstflare.dev by default when no url is provided", async () => {
+  const stdout = capture();
+  const stderr = capture();
+  const configPath = path.join(os.tmpdir(), `flare-default-url-${Date.now()}.json`);
+  let requestedUrl = "";
+
+  try {
+    const code = await runCli(["auth", "register", "--email", "default-url@example.com", "--name", "Default Url"], {
+      fetchImpl: async (url) => {
+        requestedUrl = url;
+        return new Response(
+          JSON.stringify({
+            user: {
+              id: "usr_default",
+              email: "default-url@example.com",
+              name: "Default Url"
+            },
+            workspace: {
+              id: "ws_default",
+              name: "Default Url Workspace"
+            },
+            authSessionId: "auths_default",
+            token: "browser_default",
+            refreshToken: "refresh_default"
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        );
+      },
+      stdout,
+      stderr,
+      configPath
+    });
+
+    assert.equal(code, 0);
+    assert.equal(requestedUrl, "https://burstflare.dev/api/auth/register");
+    const savedConfig = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(savedConfig.baseUrl, "https://burstflare.dev");
+    assert.equal(stderr.data, "");
+  } finally {
+    await rm(configPath, { force: true });
+  }
+});
+
 test("cli supports noun-first aliases and local list filters", async () => {
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),

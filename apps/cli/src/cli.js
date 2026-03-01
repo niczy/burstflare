@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 const CLI_NAME = "flare";
+const DEFAULT_BASE_URL = "https://burstflare.dev";
 
 function parseArgs(argv) {
   const positionals = [];
@@ -84,7 +85,7 @@ function print(stream, value) {
 }
 
 function getBaseUrl(options, config) {
-  return options.url || config.baseUrl || "http://127.0.0.1:8787";
+  return options.url || config.baseUrl || DEFAULT_BASE_URL;
 }
 
 function getToken(options, config) {

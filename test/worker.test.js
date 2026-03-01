@@ -117,14 +117,14 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const rootResponse = await app.fetch(new Request("http://example.test/"));
   assert.equal(rootResponse.status, 200);
   const rootHtml = await rootResponse.text();
-  assert.match(rootHtml, /Browser Terminal/);
+  assert.match(rootHtml, /Quick Terminal/);
   assert.match(rootHtml, /Approve Device Code/);
   assert.match(rootHtml, /Recovery Code/);
   assert.match(rootHtml, /New Recovery Codes/);
-  assert.match(rootHtml, /Passkey Login/);
+  assert.match(rootHtml, /Sign In With Passkey/);
   assert.match(rootHtml, /Register Passkey/);
   assert.match(rootHtml, /id="passkeys"/);
-  assert.match(rootHtml, /Turnstile is not configured for this deployment/);
+  assert.match(rootHtml, /The verification challenge loads automatically in the hosted app/);
   assert.match(rootHtml, /deviceStatus/);
   assert.match(rootHtml, /pendingDevices/);
   assert.match(rootHtml, /lastRefresh/);

@@ -531,87 +531,88 @@ export const html = `<!doctype html>
         <div class="hero-stack">
           <div class="hero-split">
             <div class="card hero-card">
-              <span class="eyebrow">Cloudflare-native workspace control</span>
+              <span class="eyebrow">Hosted workspace platform</span>
               <div class="hero-copy">
                 <span class="pill">BurstFlare</span>
-                <h1 class="title">Launch dev workspaces without juggling five tools.</h1>
+                <h1 class="title">Create a workspace, ship a template, and get coding fast.</h1>
                 <p class="subtitle">
-                  BurstFlare keeps account auth, template releases, queue-driven builds, container sessions, snapshots, browser access,
-                  and SSH handoff inside one Cloudflare-native control plane. The dashboard below is built to move from first login to
-                  active session fast.
+                  BurstFlare brings sign-in, team setup, template releases, running sessions, snapshots, browser access, and SSH into
+                  one clean workspace hub. The page below is tuned to get a new user from account creation to an active environment
+                  without extra setup steps.
                 </p>
               </div>
               <div class="hero-metrics">
                 <div class="metric-chip">
-                  <strong>1 control plane</strong>
-                  <span>accounts, builds, runtime, storage</span>
+                  <strong>1 shared workspace hub</strong>
+                  <span>accounts, templates, sessions, snapshots</span>
                 </div>
                 <div class="metric-chip">
-                  <strong>2 entry points</strong>
-                  <span>web shell and the flare CLI</span>
+                  <strong>2 ways in</strong>
+                  <span>dashboard and the flare CLI</span>
                 </div>
                 <div class="metric-chip">
-                  <strong>Cloudflare only</strong>
-                  <span>D1, KV, R2, Queues, Workflows, Containers</span>
+                  <strong>Default live endpoint</strong>
+                  <span>burstflare.dev, with local override when needed</span>
                 </div>
               </div>
               <div class="hero-actions">
-                <button class="secondary" id="refreshButton">Refresh Data</button>
-                <button class="secondary" id="reconcileButton">Reconcile</button>
+                <button class="secondary" id="refreshButton">Refresh Workspace</button>
+                <button class="secondary" id="reconcileButton">Run Cleanup</button>
               </div>
             </div>
 
             <div class="card quickstart-shell">
               <p class="section-kicker">Quick Start</p>
-              <h2 class="section-title">Get a working environment in minutes.</h2>
+              <h2 class="section-title">Start on the hosted app, then drop into the CLI.</h2>
               <p class="section-copy">
-                Use the browser for onboarding, then switch to the CLI when you want scripted setup or repeatable ops.
+                Most users start in the browser, then keep moving with the CLI. The default target is the live product at burstflare.dev.
               </p>
               <div class="quickstart-grid">
                 <div class="step">
-                  <strong>1. Run the local control plane</strong>
-                  <span>Install dependencies, then boot the Worker-compatible dev server.</span>
-                  <pre class="code-block">npm install
-npm run dev</pre>
+                  <strong>1. Open the product</strong>
+                  <span>Create your account in the browser and land in the full workspace dashboard.</span>
+                  <pre class="code-block">https://burstflare.dev</pre>
                 </div>
                 <div class="step">
-                  <strong>2. Register in the shell or CLI</strong>
-                  <span>Use the auth card on the right, or register directly with the flare CLI.</span>
-                  <pre class="code-block">flare auth register --email you@example.com --url http://127.0.0.1:8787</pre>
+                  <strong>2. Install or open the CLI</strong>
+                  <span>flare points at the live app by default, so most users never need a URL flag.</span>
+                  <pre class="code-block">npm install -g @burstflare/flare
+flare auth register --email you@example.com</pre>
                 </div>
                 <div class="step">
                   <strong>3. Create a template release</strong>
-                  <span>Define a template, queue a version, process the build, and promote it.</span>
+                  <span>Create a reusable environment, queue one version, then promote it when it is ready.</span>
                   <pre class="code-block">flare template create node-dev
-flare template upload &lt;templateId&gt; --version 1.0.0 --url http://127.0.0.1:8787</pre>
+flare template upload &lt;templateId&gt; --version 1.0.0
+flare template promote &lt;templateId&gt; &lt;versionId&gt;</pre>
                 </div>
                 <div class="step">
                   <strong>4. Launch and attach</strong>
-                  <span>Start a session, then use Browser Terminal, Preview, Editor, or SSH from one place.</span>
-                  <pre class="code-block">flare session up sandbox --template &lt;templateId&gt; --url http://127.0.0.1:8787
+                  <span>Start a workspace, then use Preview, Editor, Quick Terminal, or SSH from one place.</span>
+                  <pre class="code-block">flare session up sandbox --template &lt;templateId&gt;
 flare ssh &lt;sessionId&gt;</pre>
                 </div>
               </div>
               <p class="mini-note">
-                Tip: if you only need a quick tour, sign in first, create one template, promote one version, and use the Session Launcher
-                plus Browser Terminal cards below.
+                For local testing, pass <code>--url http://127.0.0.1:8787</code>. Everything on this page still works against a local
+                dev stack when you need it.
               </p>
             </div>
           </div>
 
           <div class="card stack">
-            <div class="card-head">
-              <h2>Dashboard Pulse</h2>
-              <p>Live counts for the current workspace so you can tell if the stack is healthy before you start making changes.</p>
-            </div>
-            <div class="list" id="dashboardPulse"></div>
+          <div class="card-head">
+            <h2>Dashboard Pulse</h2>
+            <p>Live counts for the current workspace so you can see what is active before you start inviting people or launching more sessions.</p>
           </div>
+          <div class="list" id="dashboardPulse"></div>
         </div>
+      </div>
 
         <div class="card stack">
           <div class="card-head">
-            <h2>Sign In And Bootstrap</h2>
-            <p>Start here for browser access, passkeys, recovery, and device approval. This is the fastest route into the rest of the dashboard.</p>
+            <h2>Get Started</h2>
+            <p>Start here for sign-in, passkeys, recovery, and device approval. This is the fastest route into the rest of the product.</p>
           </div>
           <div class="row">
             <div>
@@ -624,18 +625,18 @@ flare ssh &lt;sessionId&gt;</pre>
             </div>
           </div>
           <div>
-            <label>Turnstile</label>
-            <div class="turnstile-shell muted" id="turnstileWidget">Turnstile is not configured for this deployment.</div>
+            <label>Verification Challenge</label>
+            <div class="turnstile-shell muted" id="turnstileWidget">The verification challenge loads automatically in the hosted app.</div>
           </div>
           <div>
-            <label for="turnstileToken">Turnstile Token</label>
-            <input id="turnstileToken" type="text" placeholder="Auto-filled when the widget is active; manual fallback otherwise" />
+            <label for="turnstileToken">Verification Token</label>
+            <input id="turnstileToken" type="text" placeholder="Auto-filled when the challenge is active; leave blank unless you are testing locally" />
           </div>
           <div class="row">
             <button id="registerButton">Register</button>
             <button class="secondary" id="loginButton">Login</button>
-            <button class="secondary" id="passkeyLoginButton">Passkey Login</button>
-            <button class="secondary" id="recoverButton">Recover</button>
+            <button class="secondary" id="passkeyLoginButton">Sign In With Passkey</button>
+            <button class="secondary" id="recoverButton">Use Recovery Code</button>
             <button class="secondary" id="logoutButton">Logout</button>
           </div>
           <div>
@@ -659,8 +660,8 @@ flare ssh &lt;sessionId&gt;</pre>
       <section class="grid grid-2">
         <div class="card stack">
           <div class="card-head">
-            <h2>Workspace Control</h2>
-            <p>Rename the active workspace, invite teammates, approve incoming members, and adjust the plan without leaving the page.</p>
+            <h2>Team & Workspace</h2>
+            <p>Rename the active workspace, invite teammates, accept invite codes, and adjust plan limits without leaving the page.</p>
           </div>
           <div>
             <label for="workspaceName">Workspace Name</label>
@@ -698,7 +699,7 @@ flare ssh &lt;sessionId&gt;</pre>
 
         <div class="card stack">
           <div class="card-head">
-            <h2>Auth Sessions</h2>
+            <h2>Access & Devices</h2>
             <p>Review browser and CLI logins, approve device codes, or revoke access without forcing a full account reset.</p>
           </div>
           <div>
@@ -719,8 +720,8 @@ flare ssh &lt;sessionId&gt;</pre>
       <section class="grid grid-3">
         <div class="card stack">
           <div class="card-head">
-            <h2>Templates</h2>
-            <p>Create reusable environments, queue versions, promote releases, and inspect build or storage history from one place.</p>
+            <h2>Template Studio</h2>
+            <p>Create reusable environments, queue versions, promote releases, and inspect build history from one place.</p>
           </div>
           <div>
             <label for="templateName">Template Name</label>
@@ -762,8 +763,8 @@ flare ssh &lt;sessionId&gt;</pre>
           </div>
           <button id="promoteButton">Promote Version</button>
           <div class="surface-note">
-            <strong>Quick Start Shortcut</strong>
-            <span>Create a template, queue one build, press Refresh Builds, then promote the version and inspect it before launching a session.</span>
+            <strong>Release shortcut</strong>
+            <span>Create a template, queue one build, refresh builds, then promote the version before launching a session.</span>
           </div>
           <div class="list" id="templates"></div>
           <div class="output-shell">
@@ -774,8 +775,8 @@ flare ssh &lt;sessionId&gt;</pre>
 
         <div class="card stack">
           <div class="card-head">
-            <h2>Session Launcher</h2>
-            <p>Spin up a workspace from the currently promoted template, then route users into Preview, Editor, Browser Terminal, or SSH.</p>
+            <h2>Launch Workspace</h2>
+            <p>Spin up a workspace from the current template, then route users into Preview, Editor, Quick Terminal, or SSH.</p>
           </div>
           <div class="row">
             <div>
@@ -789,7 +790,7 @@ flare ssh &lt;sessionId&gt;</pre>
           </div>
           <button id="createSessionButton">Create Session</button>
           <div class="surface-note">
-            <strong>Session workflow</strong>
+            <strong>Session flow</strong>
             <span>Create, start, inspect events, then use the quick actions on each card to preview, edit, or attach.</span>
           </div>
           <div class="list" id="sessions"></div>
@@ -797,8 +798,8 @@ flare ssh &lt;sessionId&gt;</pre>
 
         <div class="card stack">
           <div class="card-head">
-            <h2>Browser Terminal</h2>
-            <p>Use the Browser Terminal for lightweight checks and the SSH action on a session card when you need a full shell.</p>
+            <h2>Quick Terminal</h2>
+            <p>Use the in-browser terminal for quick checks, then use the SSH action on a session card when you need a full shell.</p>
           </div>
           <div class="muted" id="terminalStatus">Not connected</div>
           <pre class="terminal" id="terminalOutput">Waiting for a session attach...</pre>
@@ -813,8 +814,8 @@ flare ssh &lt;sessionId&gt;</pre>
       <section class="grid grid-2">
         <div class="card stack">
           <div class="card-head">
-            <h2>Snapshots + Reports</h2>
-            <p>Capture session state, review snapshot content, and keep an eye on usage plus operator-level health from one control area.</p>
+            <h2>Snapshots & Health</h2>
+            <p>Capture session state, review snapshot content, and keep an eye on usage plus workspace health from one control area.</p>
           </div>
           <div class="row">
             <div>
@@ -845,12 +846,12 @@ flare ssh &lt;sessionId&gt;</pre>
 
         <div class="card stack">
           <div class="card-head">
-            <h2>Audit + Releases</h2>
-            <p>Track what changed, which release is active, and what the control plane did on behalf of your workspace.</p>
+            <h2>Releases & Activity</h2>
+            <p>Track what changed, which release is active, and what happened across the workspace.</p>
           </div>
           <div class="surface-note">
-            <strong>Quick Start recap</strong>
-            <span>Register, create a template, promote a version, launch a session, then save a snapshot. Everything you need to verify that flow is in this page.</span>
+            <strong>Daily loop</strong>
+            <span>Sign in, create or update a template, launch a session, then save a snapshot when you want a restorable checkpoint.</span>
           </div>
           <div class="output-shell">
             <pre id="releases">[]</pre>
