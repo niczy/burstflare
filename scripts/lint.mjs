@@ -1,3 +1,5 @@
+// @ts-check
+
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -6,6 +8,10 @@ const ROOT = process.cwd();
 const TARGETS = ["apps", "packages", "scripts", "test"];
 const extensions = new Set([".js", ".mjs"]);
 
+/**
+ * @param {string} dir
+ * @param {string[]} [files]
+ */
 async function walk(dir, files = []) {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
