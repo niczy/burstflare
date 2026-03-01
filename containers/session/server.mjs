@@ -906,23 +906,32 @@ async function waitForPortReady(targetPort, timeoutMs = 3000) {
   throw new Error(`sshd did not become ready on port ${targetPort}`);
 }
 
+function ensureRuntimeHostKey() {
+  const hostKeyPath = "/tmp/burstflare-ssh_host_ed25519_key";
+  if (!existsSync(hostKeyPath)) {
+    const result = spawnSync("/usr/bin/ssh-keygen", ["-t", "ed25519", "-N", "", "-f", hostKeyPath], {
+      stdio: "ignore"
+    });
+    if (result.status !== 0) {
+      throw new Error("Failed to generate the runtime SSH host key");
+    }
+  }
+  return hostKeyPath;
+}
+
 async function ensureSshd() {
   await mkdir("/run/sshd", { recursive: true });
   await mkdir("/var/run/sshd", { recursive: true });
-  spawnSync("/usr/bin/ssh-keygen", ["-A"], {
-    stdio: "ignore"
-  });
   const configPath = "/tmp/burstflare-sshd_config";
   const sftpServer = resolveSftpServerPath();
+  const hostKeyPath = ensureRuntimeHostKey();
   await writeFile(
     configPath,
     [
       `Port ${sshPort}`,
       "ListenAddress 127.0.0.1",
       "Protocol 2",
-      "HostKey /etc/ssh/ssh_host_rsa_key",
-      "HostKey /etc/ssh/ssh_host_ecdsa_key",
-      "HostKey /etc/ssh/ssh_host_ed25519_key",
+      `HostKey ${hostKeyPath}`,
       "PermitRootLogin no",
       "PasswordAuthentication yes",
       "PubkeyAuthentication yes",

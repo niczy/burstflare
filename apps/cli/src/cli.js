@@ -3,6 +3,7 @@ import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { WebSocket as NodeWebSocket } from "ws";
 import {
   buildDoctorReport,
   ensureCommands,
@@ -13,7 +14,7 @@ import {
 const CLI_NAME = "flare";
 const DEFAULT_BASE_URL = "https://burstflare.dev";
 
-function websocketUrlForSsh(baseUrl, sessionId, token) {
+export function websocketUrlForSsh(baseUrl, sessionId, token) {
   const url = new URL(`/runtime/sessions/${sessionId}/ssh`, baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("token", token);
@@ -39,9 +40,11 @@ function toWebSocketBytes(value) {
   return Buffer.from([]);
 }
 
-async function createSshTunnel(sshUrl, options = {}) {
+export async function createSshTunnel(sshUrl, options = {}) {
   const netImpl = options.netImpl || net;
-  const WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket;
+  const WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket || NodeWebSocket;
+  const wsOpenState = WebSocketImpl.OPEN ?? 1;
+  const wsConnectingState = WebSocketImpl.CONNECTING ?? 0;
   if (typeof WebSocketImpl !== "function") {
     throw new Error("WebSocket client support is unavailable in this Node runtime");
   }
@@ -59,22 +62,45 @@ async function createSshTunnel(sshUrl, options = {}) {
       const ws = new WebSocketImpl(sshUrl);
       activeWebSocket = ws;
       ws.binaryType = "arraybuffer";
-
+      let socketClosed = false;
+      let wsOpen = false;
+      const pendingChunks = [];
+      const addListener =
+        typeof ws.addEventListener === "function"
+          ? (eventName, handler) => ws.addEventListener(eventName, handler)
+          : (eventName, handler) =>
+              ws.on(eventName, (...args) => {
+                if (eventName === "message") {
+                  handler({ data: args[0] });
+                  return;
+                }
+                handler(...args);
+              });
       const closeServer = () => {
         if (server.listening) {
           server.close();
         }
       };
 
-      ws.addEventListener("open", () => {
-        socket.on("data", (chunk) => {
-          if (ws.readyState === WebSocketImpl.OPEN) {
-            ws.send(chunk);
-          }
-        });
+      socket.on("data", (chunk) => {
+        if (socketClosed) {
+          return;
+        }
+        if (wsOpen && ws.readyState === wsOpenState) {
+          ws.send(chunk);
+          return;
+        }
+        pendingChunks.push(Buffer.from(chunk));
       });
 
-      ws.addEventListener("message", async (event) => {
+      addListener("open", () => {
+        wsOpen = true;
+        while (pendingChunks.length > 0 && ws.readyState === wsOpenState) {
+          ws.send(pendingChunks.shift());
+        }
+      });
+
+      addListener("message", async (event) => {
         if (!activeSocket || activeSocket.destroyed) {
           return;
         }
@@ -89,14 +115,15 @@ async function createSshTunnel(sshUrl, options = {}) {
         }
       });
 
-      ws.addEventListener("close", () => {
+      addListener("close", () => {
+        wsOpen = false;
         if (activeSocket && !activeSocket.destroyed) {
           activeSocket.end();
         }
         closeServer();
       });
 
-      ws.addEventListener("error", () => {
+      addListener("error", () => {
         if (activeSocket && !activeSocket.destroyed) {
           activeSocket.destroy(new Error("Failed to connect to the BurstFlare SSH tunnel"));
         }
@@ -104,14 +131,16 @@ async function createSshTunnel(sshUrl, options = {}) {
       });
 
       socket.on("close", () => {
-        if (ws.readyState === WebSocketImpl.OPEN || ws.readyState === WebSocketImpl.CONNECTING) {
+        socketClosed = true;
+        if (ws.readyState === wsOpenState || ws.readyState === wsConnectingState) {
           ws.close();
         }
         closeServer();
       });
 
       socket.on("error", () => {
-        if (ws.readyState === WebSocketImpl.OPEN || ws.readyState === WebSocketImpl.CONNECTING) {
+        socketClosed = true;
+        if (ws.readyState === wsOpenState || ws.readyState === wsConnectingState) {
           ws.close();
         }
         closeServer();
@@ -141,7 +170,7 @@ async function createSshTunnel(sshUrl, options = {}) {
           }
           if (
             activeWebSocket &&
-            (activeWebSocket.readyState === WebSocketImpl.OPEN || activeWebSocket.readyState === WebSocketImpl.CONNECTING)
+            (activeWebSocket.readyState === wsOpenState || activeWebSocket.readyState === wsConnectingState)
           ) {
             activeWebSocket.close();
           }

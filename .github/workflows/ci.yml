@@ -17,6 +17,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run ci
+      - run: npm run ssh:smoke
       - run: |
           BURSTFLARE_DATA_FILE=.local/ci-smoke-data.json npm run dev > /tmp/burstflare-dev.log 2>&1 &
           SERVER_PID=$!
