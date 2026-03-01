@@ -1,8 +1,45 @@
+// @ts-check
+
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSshTunnel } from "../apps/cli/src/cli.js";
+
+/**
+ * @typedef {{
+ *   cwd?: string;
+ *   stdio?: import("node:child_process").StdioOptions;
+ * }} CommandOptions
+ */
+
+/**
+ * @typedef {{
+ *   stdout: string;
+ *   stderr: string;
+ * }} CommandResult
+ */
+
+/**
+ * @typedef {Error & {
+ *   code?: number | null;
+ * }} CommandError
+ */
+
+/**
+ * @typedef {{
+ *   method?: string;
+ *   headers?: HeadersInit;
+ *   body?: BodyInit | null;
+ * }} RequestOptions
+ */
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ *   payload?: unknown;
+ * }} HttpRequestError
+ */
 
 function getArg(name) {
   const index = process.argv.indexOf(name);
@@ -22,6 +59,12 @@ function assert(condition, message) {
   }
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {CommandOptions} [options]
+ * @returns {Promise<CommandResult>}
+ */
 async function runCommand(command, args, options = {}) {
   const { cwd, stdio = "pipe" } = options;
   return new Promise((resolve, reject) => {
@@ -52,13 +95,20 @@ async function runCommand(command, args, options = {}) {
         });
         return;
       }
-      const error = new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`);
+      const error = /** @type {CommandError} */ (
+        new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`)
+      );
       error.code = code;
       reject(error);
     });
   });
 }
 
+/**
+ * @param {string} baseUrl
+ * @param {string} pathname
+ * @param {RequestOptions} [options]
+ */
 async function requestJson(baseUrl, pathname, options = {}) {
   const response = await fetch(`${baseUrl}${pathname}`, {
     ...options,
@@ -69,7 +119,9 @@ async function requestJson(baseUrl, pathname, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload.error || `${options.method || "GET"} ${pathname} failed (${response.status})`);
+    const error = /** @type {HttpRequestError} */ (
+      new Error(payload.error || `${options.method || "GET"} ${pathname} failed (${response.status})`)
+    );
     error.status = response.status;
     error.payload = payload;
     throw error;
