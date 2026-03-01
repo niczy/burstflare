@@ -15,10 +15,16 @@
   "include": [
     "apps/**/*.js",
     "apps/**/*.jsx",
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
     "apps/**/*.mjs",
     "packages/**/*.js",
+    "packages/**/*.ts",
+    "packages/**/*.tsx",
     "scripts/**/*.mjs",
+    "scripts/**/*.ts",
     "test/**/*.js",
+    "test/**/*.ts",
     "containers/**/*.mjs",
     "types/**/*.d.ts"
   ],
