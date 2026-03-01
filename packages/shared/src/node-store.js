@@ -1,3 +1,5 @@
+// @ts-check
+
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BaseStore, createDefaultState } from "./store-base.js";
@@ -13,7 +15,7 @@ class FileStore extends BaseStore {
       const raw = await readFile(this.filePath, "utf8");
       return { ...createDefaultState(), ...JSON.parse(raw) };
     } catch (error) {
-      if (error.code === "ENOENT") {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
         return createDefaultState();
       }
       throw error;

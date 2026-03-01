@@ -1,3 +1,5 @@
+// @ts-check
+
 export const LEGACY_TABLE = "_burstflare_state";
 export const LEGACY_STATE_KEY = "global";
 export const META_TABLE = "bf_state_meta";
