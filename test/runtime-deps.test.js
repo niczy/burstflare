@@ -27,9 +27,7 @@ test("runtime dependency detection finds available commands on PATH", async () =
   try {
     await mkdir(toolDir, { recursive: true });
     await writeFile(path.join(toolDir, "ssh"), "#!/bin/sh\nexit 0\n");
-    await writeFile(path.join(toolDir, "wstunnel"), "#!/bin/sh\nexit 0\n");
     await chmod(path.join(toolDir, "ssh"), 0o755);
-    await chmod(path.join(toolDir, "wstunnel"), 0o755);
 
     const missing = listMissingCommands(SSH_RUNTIME_DEPENDENCIES, {
       env: {
@@ -43,7 +41,7 @@ test("runtime dependency detection finds available commands on PATH", async () =
   }
 });
 
-test("install dependency check warns when ssh tools are missing", () => {
+test("install dependency check warns when ssh is missing", () => {
   const stderr = capture();
   const result = runInstallDependencyCheck({
     env: {
@@ -53,12 +51,11 @@ test("install dependency check warns when ssh tools are missing", () => {
     stderr
   });
 
-  assert.deepEqual(result.missing, ["ssh", "wstunnel"]);
+  assert.deepEqual(result.missing, ["ssh"]);
   assert.match(stderr.data, /Missing local dependencies for flare ssh/);
-  assert.match(stderr.data, /Install `wstunnel`/);
   assert.match(stderr.data, /Install an OpenSSH client/);
   assert.match(
-    formatMissingCommandMessage(["ssh", "wstunnel"], { action: "flare ssh" }),
+    formatMissingCommandMessage(["ssh"], { action: "flare ssh" }),
     /Preview and editor commands still work/
   );
 });
@@ -73,10 +70,10 @@ test("doctor report includes summary and per-command hints", () => {
   });
 
   assert.equal(report.ok, false);
-  assert.deepEqual(report.missing, ["ssh", "wstunnel"]);
+  assert.deepEqual(report.missing, ["ssh"]);
   assert.equal(report.dependencies[0].command, "ssh");
   assert.equal(report.dependencies[0].installed, false);
-  assert.match(report.dependencies[1].hints.join("\n"), /Linux:/);
+  assert.match(report.dependencies[0].hints.join("\n"), /OpenSSH client/);
   assert.match(formatDoctorReport(report), /ssh-ready: no/);
   assert.match(formatDoctorReport(report), /summary:/);
 });

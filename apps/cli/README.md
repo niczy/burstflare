@@ -17,7 +17,7 @@ Global install:
 npm install -g @burstflare/flare
 ```
 
-The npm install now checks for the local tools used by `flare ssh` and warns if `wstunnel` or `ssh` is missing.
+The npm install now checks for the local tool used by `flare ssh` and warns if `ssh` is missing.
 
 You can re-check your machine any time with:
 
@@ -62,7 +62,7 @@ flare session up sandbox --template <templateId>
 flare ssh <sessionId>
 ```
 
-`flare ssh` wakes sleeping sessions if needed, then opens the tunnel and SSH session directly. Add `--print` to output the raw command instead.
+`flare ssh` wakes sleeping sessions if needed, then opens the tunnel and SSH session directly. Add `--print` to inspect the tunnel endpoint and local attach details.
 
 ## Common Commands
 

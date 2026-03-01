@@ -1,7 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import path from "node:path";
 
-export const SSH_RUNTIME_DEPENDENCIES = ["ssh", "wstunnel"];
+export const SSH_RUNTIME_DEPENDENCIES = ["ssh"];
 
 function commandCandidates(command, platform, env) {
   if (platform !== "win32") {
@@ -54,25 +54,6 @@ export function formatMissingCommandMessage(missing, { action = "flare ssh" } = 
 }
 
 export function installHints(command, { platform = process.platform } = {}) {
-  if (command === "wstunnel") {
-    if (platform === "darwin") {
-      return [
-        "Install `wstunnel` and make sure it is available on your PATH.",
-        "macOS: `brew install wstunnel`"
-      ];
-    }
-    if (platform === "win32") {
-      return [
-        "Install `wstunnel` and make sure it is available on your PATH.",
-        "Windows: install `wstunnel` with your preferred package manager, then restart the shell."
-      ];
-    }
-    return [
-      "Install `wstunnel` and make sure it is available on your PATH.",
-      "Linux: install `wstunnel` with your distro package manager or from the upstream release binary."
-    ];
-  }
-
   if (command === "ssh") {
     if (platform === "win32") {
       return [
@@ -99,7 +80,7 @@ export function buildDoctorReport({
     return {
       command,
       installed,
-      requiredFor: command === "ssh" || command === "wstunnel" ? ["flare ssh"] : [],
+      requiredFor: ["flare ssh"],
       hints: installed ? [] : installHints(command, { platform })
     };
   });

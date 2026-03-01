@@ -91,9 +91,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     await writeFile(bundlePath, "cli bundle payload");
     await mkdir(toolDir, { recursive: true });
     await writeFile(path.join(toolDir, "ssh"), "#!/bin/sh\nexit 0\n");
-    await writeFile(path.join(toolDir, "wstunnel"), "#!/bin/sh\nexit 0\n");
     await chmod(path.join(toolDir, "ssh"), 0o755);
-    await chmod(path.join(toolDir, "wstunnel"), 0o755);
 
     let code = await runCli(["auth", "register", "--email", "cli@example.com", "--name", "CLI User", "--url", "http://local"], {
       fetchImpl,
@@ -656,8 +654,9 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     stderr.data = "";
 
     let spawned = null;
-    const spawnImpl = (shell, args, options) => {
-      spawned = { shell, args, options };
+    let tunnelClosed = false;
+    const spawnImpl = (command, args, options) => {
+      spawned = { command, args, options };
       return {
         on(event, handler) {
           if (event === "exit") {
@@ -667,6 +666,14 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
         }
       };
     };
+    const createSshTunnelImpl = async (sshUrl) => ({
+      host: "127.0.0.1",
+      port: 4123,
+      sshUrl,
+      async close() {
+        tunnelClosed = true;
+      }
+    });
 
     code = await runCli(["ssh", sessionId, "--url", "http://local"], {
       fetchImpl,
@@ -676,15 +683,24 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       env: {
         PATH: toolDir
       },
-      spawnImpl
+      spawnImpl,
+      createSshTunnelImpl
     });
     assert.equal(code, 0);
     assert.equal(stdout.data, "");
     assert.equal(stderr.data, "");
-    assert.equal(spawned.shell, "/bin/sh");
-    assert.match(spawned.args[1], /wstunnel client/);
-    assert.match(spawned.args[1], /ssh -p 2222 dev@127\.0\.0\.1/);
+    assert.equal(spawned.command, "ssh");
+    assert.deepEqual(spawned.args, [
+      "-o",
+      "StrictHostKeyChecking=no",
+      "-o",
+      "UserKnownHostsFile=/dev/null",
+      "-p",
+      "4123",
+      "dev@127.0.0.1"
+    ]);
     assert.equal(spawned.options.stdio, "inherit");
+    assert.equal(tunnelClosed, true);
 
     stdout.data = "";
     stderr.data = "";
@@ -709,8 +725,10 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       configPath
     });
     assert.equal(code, 0);
-    assert.match(stdout.data, /wstunnel client/);
-    assert.match(stdout.data, /ssh -p 2222 dev@127\.0\.0\.1/);
+    const printedSsh = JSON.parse(stdout.data.trim());
+    assert.match(printedSsh.sshUrl, new RegExp(`^ws://local/runtime/sessions/${sessionId}/ssh\\?token=runtime_`));
+    assert.equal(printedSsh.sshUser, "dev");
+    assert.match(printedSsh.localCommand, /<local-port>/);
     assert.equal(stderr.data, "");
 
     stdout.data = "";
@@ -733,7 +751,6 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 1);
     assert.equal(missingSpawned, false);
     assert.match(stderr.data, /Missing local dependencies for flare ssh/);
-    assert.match(stderr.data, /wstunnel/);
     assert.match(stderr.data, /ssh/);
 
     stdout.data = "";
@@ -944,7 +961,7 @@ test("cli doctor reports missing local ssh dependencies", async () => {
   assert.equal(code, 1);
   assert.match(stdout.data, /flare doctor/);
   assert.match(stdout.data, /ssh-ready: no/);
-  assert.match(stdout.data, /wstunnel: missing/);
+  assert.match(stdout.data, /ssh: missing/);
   assert.match(stdout.data, /summary:/);
   assert.equal(stderr.data, "");
 });

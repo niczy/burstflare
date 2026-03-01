@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +12,148 @@ import {
 
 const CLI_NAME = "flare";
 const DEFAULT_BASE_URL = "https://burstflare.dev";
+
+function websocketUrlForSsh(baseUrl, sessionId, token) {
+  const url = new URL(`/runtime/sessions/${sessionId}/ssh`, baseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
+function toWebSocketBytes(value) {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return Buffer.from(value, "utf8");
+  }
+  if (value instanceof ArrayBuffer) {
+    return Buffer.from(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    return Buffer.from([]);
+  }
+  return Buffer.from([]);
+}
+
+async function createSshTunnel(sshUrl, options = {}) {
+  const netImpl = options.netImpl || net;
+  const WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket;
+  if (typeof WebSocketImpl !== "function") {
+    throw new Error("WebSocket client support is unavailable in this Node runtime");
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let activeSocket = null;
+    let activeWebSocket = null;
+    const server = netImpl.createServer((socket) => {
+      if (activeSocket) {
+        socket.end();
+        return;
+      }
+      activeSocket = socket;
+      const ws = new WebSocketImpl(sshUrl);
+      activeWebSocket = ws;
+      ws.binaryType = "arraybuffer";
+
+      const closeServer = () => {
+        if (server.listening) {
+          server.close();
+        }
+      };
+
+      ws.addEventListener("open", () => {
+        socket.on("data", (chunk) => {
+          if (ws.readyState === WebSocketImpl.OPEN) {
+            ws.send(chunk);
+          }
+        });
+      });
+
+      ws.addEventListener("message", async (event) => {
+        if (!activeSocket || activeSocket.destroyed) {
+          return;
+        }
+        if (typeof Blob !== "undefined" && event.data instanceof Blob) {
+          const arrayBuffer = await event.data.arrayBuffer();
+          activeSocket.write(Buffer.from(arrayBuffer));
+          return;
+        }
+        const chunk = toWebSocketBytes(event.data);
+        if (chunk) {
+          activeSocket.write(chunk);
+        }
+      });
+
+      ws.addEventListener("close", () => {
+        if (activeSocket && !activeSocket.destroyed) {
+          activeSocket.end();
+        }
+        closeServer();
+      });
+
+      ws.addEventListener("error", () => {
+        if (activeSocket && !activeSocket.destroyed) {
+          activeSocket.destroy(new Error("Failed to connect to the BurstFlare SSH tunnel"));
+        }
+        closeServer();
+      });
+
+      socket.on("close", () => {
+        if (ws.readyState === WebSocketImpl.OPEN || ws.readyState === WebSocketImpl.CONNECTING) {
+          ws.close();
+        }
+        closeServer();
+      });
+
+      socket.on("error", () => {
+        if (ws.readyState === WebSocketImpl.OPEN || ws.readyState === WebSocketImpl.CONNECTING) {
+          ws.close();
+        }
+        closeServer();
+      });
+    });
+
+    server.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      const address = server.address();
+      resolve({
+        host: "127.0.0.1",
+        port: typeof address === "object" && address ? address.port : 0,
+        async close() {
+          if (activeSocket && !activeSocket.destroyed) {
+            activeSocket.destroy();
+          }
+          if (
+            activeWebSocket &&
+            (activeWebSocket.readyState === WebSocketImpl.OPEN || activeWebSocket.readyState === WebSocketImpl.CONNECTING)
+          ) {
+            activeWebSocket.close();
+          }
+          if (!server.listening) {
+            return;
+          }
+          await new Promise((resolveClose) => server.close(resolveClose));
+        }
+      });
+    });
+  });
+}
 
 function parseArgs(argv) {
   const positionals = [];
@@ -261,6 +404,7 @@ function helpText() {
 export async function runCli(argv, dependencies = {}) {
   const fetchImpl = dependencies.fetchImpl || fetch;
   const spawnImpl = dependencies.spawnImpl || spawn;
+  const createSshTunnelImpl = dependencies.createSshTunnelImpl || createSshTunnel;
   const stdout = dependencies.stdout || process.stdout;
   const stderr = dependencies.stderr || process.stderr;
   const env = dependencies.env || process.env;
@@ -467,11 +611,10 @@ export async function runCli(argv, dependencies = {}) {
     }
   }
 
-  async function runInteractiveCommand(commandLine) {
-    const shell = "/bin/sh";
+  async function runInteractiveCommand(command, args) {
     await new Promise((resolve, reject) => {
       let settled = false;
-      const child = spawnImpl(shell, ["-lc", commandLine], {
+      const child = spawnImpl(command, args, {
         stdio: "inherit"
       });
 
@@ -499,6 +642,18 @@ export async function runCli(argv, dependencies = {}) {
         reject(error);
       });
     });
+  }
+
+  function buildSshAttachInfo(sessionId, data) {
+    const sshUrl = websocketUrlForSsh(baseUrl, sessionId, data.token);
+    return {
+      sshUrl,
+      sshUser: data.sshUser || "dev",
+      sshPassword: data.sshPassword || "",
+      localCommand:
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p <local-port> dev@127.0.0.1",
+      note: `Run \`flare ssh ${sessionId}\` to open the local tunnel automatically.`
+    };
   }
 
   try {
@@ -1493,16 +1648,30 @@ export async function runCli(argv, dependencies = {}) {
     if (command === "ssh") {
       const sessionId = subcommand;
       const data = await ensureSessionRunningForSsh(sessionId);
+      const sshAttach = buildSshAttachInfo(sessionId, data);
       if (options.print) {
-        print(stdout, data.sshCommand);
+        print(stdout, JSON.stringify(sshAttach, null, 2));
         return 0;
       }
       ensureCommands(SSH_RUNTIME_DEPENDENCIES, {
         env,
         action: "flare ssh"
       });
-      await runInteractiveCommand(data.sshCommand);
-      return 0;
+      const tunnel = await createSshTunnelImpl(sshAttach.sshUrl);
+      try {
+        await runInteractiveCommand("ssh", [
+          "-o",
+          "StrictHostKeyChecking=no",
+          "-o",
+          "UserKnownHostsFile=/dev/null",
+          "-p",
+          String(tunnel.port),
+          `${sshAttach.sshUser}@${tunnel.host}`
+        ]);
+        return 0;
+      } finally {
+        await tunnel.close().catch(() => {});
+      }
     }
 
     throw new Error("Unknown command");
