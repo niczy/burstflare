@@ -1,8 +1,39 @@
 {
   "name": "@burstflare/flare",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Cloudflare-native CLI for managing BurstFlare workspaces, templates, and runtime sessions.",
+  "license": "UNLICENSED",
   "type": "module",
+  "homepage": "https://github.com/niczy/burstflare#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/niczy/burstflare.git",
+    "directory": "apps/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/niczy/burstflare/issues"
+  },
+  "keywords": [
+    "burstflare",
+    "flare",
+    "cloudflare",
+    "cli",
+    "workspaces",
+    "containers"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "preferGlobal": true,
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
-    "flare": "./bin/flare.js"
+    "flare": "bin/flare.js"
   }
 }
