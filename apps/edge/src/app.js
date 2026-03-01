@@ -13,6 +13,7 @@ import {
 } from "../../../packages/shared/src/utils.js";
 
 const CSRF_COOKIE = "burstflare_csrf";
+const REQUEST_ID_HEADER = "x-burstflare-request-id";
 const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
 const localWebAuthnChallenges = new Map();
 
@@ -24,19 +25,140 @@ function tokenFromRequest(request, sessionCookieName) {
   return readCookie(request.headers.get("cookie"), sessionCookieName);
 }
 
+function requestIdFromRequest(request) {
+  return request.headers.get(REQUEST_ID_HEADER) || globalThis.crypto.randomUUID();
+}
+
+function errorCodeForStatus(status) {
+  switch (status) {
+    case 400:
+      return "BAD_REQUEST";
+    case 401:
+      return "UNAUTHORIZED";
+    case 403:
+      return "FORBIDDEN";
+    case 404:
+      return "NOT_FOUND";
+    case 409:
+      return "CONFLICT";
+    case 413:
+      return "PAYLOAD_TOO_LARGE";
+    case 426:
+      return "UPGRADE_REQUIRED";
+    case 429:
+      return "RATE_LIMITED";
+    case 500:
+      return "INTERNAL_ERROR";
+    case 501:
+      return "NOT_IMPLEMENTED";
+    case 502:
+      return "BAD_GATEWAY";
+    case 503:
+      return "SERVICE_UNAVAILABLE";
+    default:
+      return status >= 500 ? "INTERNAL_ERROR" : "REQUEST_FAILED";
+  }
+}
+
+function normalizeThrownError(error) {
+  if (error instanceof SyntaxError && !error.status) {
+    const next = new Error("Invalid JSON request body");
+    next.status = 400;
+    next.code = "INVALID_JSON";
+    return next;
+  }
+  return error;
+}
+
+function buildErrorPayload(request, status, payload = {}) {
+  const url = new URL(request.url);
+  return {
+    ...payload,
+    status: payload.status || status,
+    code: payload.code || errorCodeForStatus(status),
+    requestId: payload.requestId || requestIdFromRequest(request),
+    method: payload.method || request.method,
+    path: payload.path || url.pathname
+  };
+}
+
+function buildErrorResponse(request, error) {
+  const normalized = normalizeThrownError(error);
+  const status = normalized?.status || 500;
+  const exposeMessage = status >= 400 && status < 500;
+  const payload = buildErrorPayload(request, status, {
+    error: exposeMessage ? normalized?.message || "Request failed" : "Internal server error",
+    code: normalized?.code
+  });
+  if (exposeMessage && normalized?.details !== undefined) {
+    payload.details = normalized.details;
+  }
+  if (exposeMessage && normalized?.hint) {
+    payload.hint = normalized.hint;
+  }
+  if (!exposeMessage) {
+    console.error(
+      `[${payload.requestId}] ${request.method} ${payload.path}`,
+      normalized?.stack || normalized?.message || normalized
+    );
+  }
+  return toJson(payload, {
+    status,
+    headers: {
+      [REQUEST_ID_HEADER]: payload.requestId
+    }
+  });
+}
+
+async function normalizeErrorResponse(request, response) {
+  if (!(response instanceof Response) || response.status < 400) {
+    return response;
+  }
+  const requestId = requestIdFromRequest(request);
+  const headers = new Headers(response.headers);
+  headers.set(REQUEST_ID_HEADER, requestId);
+  const contentType = headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+  }
+  let payload = null;
+  try {
+    payload = await response.clone().json();
+  } catch (_error) {}
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || !payload.error) {
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+  }
+  return toJson(buildErrorPayload(request, response.status, payload), {
+    status: response.status,
+    headers
+  });
+}
+
 function withErrorHandling(handler) {
   return async (request, params = {}) => {
     try {
       return await handler(request, params);
     } catch (error) {
-      return toJson(
-        {
-          error: error.message || "Internal error"
-        },
-        { status: error.status || 500 }
-      );
+      return buildErrorResponse(request, error);
     }
   };
+}
+
+function attachRequestId(request) {
+  if (request.headers.get(REQUEST_ID_HEADER)) {
+    return request;
+  }
+  const headers = new Headers(request.headers);
+  headers.set(REQUEST_ID_HEADER, globalThis.crypto.randomUUID());
+  return new Request(request, { headers });
 }
 
 function matchRoute(method, pathname, pattern) {
@@ -2663,21 +2785,23 @@ export function createApp(options = {}) {
 
   return {
     async fetch(request) {
-      const url = new URL(request.url);
+      const requestWithId = attachRequestId(request);
+      const url = new URL(requestWithId.url);
       for (const route of routes) {
-        if (route.method !== request.method) {
+        if (route.method !== requestWithId.method) {
           continue;
         }
         const match = matchRoute(route.method, url.pathname, route.pattern);
         if (!match) {
           continue;
         }
-        return route.handler(request, match.params);
+        const response = await route.handler(requestWithId, match.params);
+        return normalizeErrorResponse(requestWithId, response);
       }
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/runtime/")) {
-        return notFound();
+        return normalizeErrorResponse(requestWithId, notFound());
       }
-      return badRequest("Route not found");
+      return normalizeErrorResponse(requestWithId, badRequest("Route not found"));
     }
   };
 }

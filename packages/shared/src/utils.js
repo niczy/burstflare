@@ -26,12 +26,11 @@ export function parseJson(input) {
 }
 
 export function toJson(data, init = {}) {
+  const headers = new Headers(init.headers || undefined);
+  headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify(data, null, 2), {
     ...init,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      ...(init.headers || {})
-    }
+    headers
   });
 }
 
