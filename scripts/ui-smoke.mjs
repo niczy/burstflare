@@ -15,12 +15,23 @@ async function requestText(baseUrl, path) {
   return text;
 }
 
+async function waitForShell(baseUrl) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    try {
+      return await requestText(baseUrl, "/");
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  throw lastError || new Error("UI shell did not become ready");
+}
+
 async function main() {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
 
-  const html = await requestText(baseUrl, "/");
-  const css = await requestText(baseUrl, "/styles.css");
-  const appJs = await requestText(baseUrl, "/app.js");
+  const html = await waitForShell(baseUrl);
 
   const requiredHtml = [
     "BurstFlare",
@@ -28,7 +39,8 @@ async function main() {
     "Workspace",
     "Sessions",
     "Snapshots",
-    "Terminal"
+    "Terminal",
+    "type=\"module\""
   ];
   for (const marker of requiredHtml) {
     if (!html.includes(marker)) {
@@ -36,32 +48,11 @@ async function main() {
     }
   }
 
-  const requiredCss = [".hero", ".grid", ".card", ".terminal"];
-  for (const marker of requiredCss) {
-    if (!css.includes(marker)) {
-      throw new Error(`Stylesheet is missing ${marker}`);
-    }
-  }
-
-  const requiredJs = [
-    "renderDashboardPulse",
-    "data-editor",
-    "openTerminal",
-    "logoutAllButton"
-  ];
-  for (const marker of requiredJs) {
-    if (!appJs.includes(marker)) {
-      throw new Error(`App bundle is missing ${marker}`);
-    }
-  }
-
   process.stdout.write(
     `${JSON.stringify(
       {
         baseUrl,
-        htmlChecked: requiredHtml.length,
-        cssChecked: requiredCss.length,
-        jsChecked: requiredJs.length
+        htmlChecked: requiredHtml.length
       },
       null,
       2

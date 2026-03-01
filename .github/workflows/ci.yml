@@ -13,13 +13,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run ci
       - run: npm run ssh:smoke
       - run: |
-          BURSTFLARE_DATA_FILE=.local/ci-smoke-data.json npm run dev > /tmp/burstflare-dev.log 2>&1 &
+          BURSTFLARE_DATA_FILE=.local/ci-smoke-data.json npm run dev:edge > /tmp/burstflare-dev.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID' EXIT
           npm run smoke -- --base-url http://127.0.0.1:8787
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: |
           node --input-type=module -e "const response = await fetch(process.env.BURSTFLARE_DEPLOYED_URL + '/api/health'); if (!response.ok) { throw new Error('Health check failed (' + response.status + ')'); } const payload = await response.json(); if (!payload.ok) { throw new Error('Health payload was not ok'); }"
           node scripts/ui-smoke.mjs --base-url \"$BURSTFLARE_DEPLOYED_URL\"

@@ -1,4 +1,3 @@
-import { html, appJs, styles } from "../../web/src/assets.js";
 import { createBurstFlareService } from "../../../packages/shared/src/service.js";
 import { createCloudflareStateStore } from "../../../packages/shared/src/cloudflare-store.js";
 import { createMemoryStore } from "../../../packages/shared/src/memory-store.js";
@@ -16,6 +15,7 @@ const CSRF_COOKIE = "burstflare_csrf";
 const REQUEST_ID_HEADER = "x-burstflare-request-id";
 const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
 const localWebAuthnChallenges = new Map();
+let defaultFrontendHandlerPromise = null;
 
 function tokenFromRequest(request, sessionCookieName) {
   const authHeader = request.headers.get("authorization");
@@ -29,15 +29,11 @@ function requestIdFromRequest(request) {
   return request.headers.get(REQUEST_ID_HEADER) || globalThis.crypto.randomUUID();
 }
 
-function normalizeOrigin(value) {
-  if (!value) {
-    return "";
+async function loadDefaultFrontendHandler() {
+  if (!defaultFrontendHandlerPromise) {
+    defaultFrontendHandlerPromise = import("../../web/dist/server/ssr/index.js").then((module) => module.default);
   }
-  try {
-    return new URL(String(value)).origin;
-  } catch (_error) {
-    return "";
-  }
+  return defaultFrontendHandlerPromise;
 }
 
 function errorCodeForStatus(status) {
@@ -1310,7 +1306,8 @@ export function createApp(options = {}) {
   const rateLimiter = createRateLimiter(options);
   const turnstile = createTurnstileVerifier(options);
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
-  const frontendOrigin = normalizeOrigin(options.FRONTEND_ORIGIN || options.frontendOrigin);
+  const frontendHandler = options.frontendHandler || null;
+  const getFrontendAssetResponse = options.getFrontendAssetResponse || null;
 
   function hasContainerBinding() {
     return hasRuntimeBinding(options);
@@ -1588,57 +1585,33 @@ export function createApp(options = {}) {
     return sshCommand.replace("ws://localhost:8787", `wss://${host}`);
   }
 
-  function renderShellHtml() {
-    const turnstileScript = options.TURNSTILE_SITE_KEY
-      ? '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>'
-      : "";
-    return html.replace("__BURSTFLARE_TURNSTILE_SCRIPT__", turnstileScript);
-  }
-
-  function renderShellJs() {
-    return appJs.replace("__BURSTFLARE_TURNSTILE_SITE_KEY__", JSON.stringify(String(options.TURNSTILE_SITE_KEY || "")));
-  }
-
   function isFrontendPath(pathname) {
     return pathname !== "/device" && !pathname.startsWith("/api/") && !pathname.startsWith("/runtime/");
   }
 
-  async function proxyFrontendRequest(request) {
-    if (!frontendOrigin || !["GET", "HEAD"].includes(request.method)) {
+  async function renderFrontendRequest(request) {
+    if (!["GET", "HEAD"].includes(request.method)) {
       return null;
     }
     const url = new URL(request.url);
-    const target = new URL(`${url.pathname}${url.search}`, frontendOrigin);
-    const headers = new Headers(request.headers);
-    headers.delete("host");
-    try {
-      return await fetch(target, {
-        method: request.method,
-        headers,
-        redirect: "manual"
-      });
-    } catch (_error) {
-      return null;
+    if (url.pathname.startsWith("/assets/")) {
+      if (typeof getFrontendAssetResponse === "function") {
+        const response = await getFrontendAssetResponse(request);
+        if (response) {
+          return response;
+        }
+      }
+      return notFound();
     }
-  }
 
-  function legacyFrontendResponse(pathname) {
-    if (pathname === "/") {
-      return new Response(renderShellHtml(), {
-        headers: { "content-type": "text/html; charset=utf-8" }
-      });
+    const activeFrontendHandler = frontendHandler || (await loadDefaultFrontendHandler());
+    if (!activeFrontendHandler || typeof activeFrontendHandler.fetch !== "function") {
+      const error = new Error("Frontend handler is unavailable");
+      error.status = 503;
+      error.code = "FRONTEND_UNAVAILABLE";
+      throw error;
     }
-    if (pathname === "/app.js") {
-      return new Response(renderShellJs(), {
-        headers: { "content-type": "application/javascript; charset=utf-8" }
-      });
-    }
-    if (pathname === "/styles.css") {
-      return new Response(styles, {
-        headers: { "content-type": "text/css; charset=utf-8" }
-      });
-    }
-    return notFound();
+    return activeFrontendHandler.fetch(request);
   }
 
   function createRuntimeSshBridge(sessionId) {
@@ -3194,7 +3167,16 @@ export function createApp(options = {}) {
         return normalizeErrorResponse(requestWithId, response);
       }
       if (isFrontendPath(url.pathname)) {
-        const frontendResponse = (await proxyFrontendRequest(requestWithId)) || legacyFrontendResponse(url.pathname);
+        const frontendResponse = await renderFrontendRequest(requestWithId);
+        if (!frontendResponse) {
+          return normalizeErrorResponse(
+            requestWithId,
+            new Response("Frontend route is unavailable for this request.", {
+              status: 502,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            })
+          );
+        }
         return normalizeErrorResponse(requestWithId, frontendResponse);
       }
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/runtime/")) {

@@ -298,6 +298,12 @@ function createRuntimeOptions(env) {
   return {
     ...env,
     containersEnabled: Boolean(env?.SESSION_CONTAINER),
+    async getFrontendAssetResponse(request) {
+      if (!env?.ASSETS || !["GET", "HEAD"].includes(request.method)) {
+        return null;
+      }
+      return env.ASSETS.fetch(request);
+    },
     getSessionContainer(sessionId) {
       if (!env?.SESSION_CONTAINER) {
         return null;

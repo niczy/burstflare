@@ -69,19 +69,15 @@ npm install
 npm run dev
 ```
 
-3. Start the vinext frontend in a second terminal:
-
-```bash
-npm run dev:web
-```
-
-4. Open:
+3. Open:
 
 ```text
 http://127.0.0.1:8787
 ```
 
-5. Point the CLI at local only when you are testing against the local stack:
+`npm run dev` builds the current vinext web bundle, then starts the edge server and serves the web app from the same local process.
+
+4. Point the CLI at local only when you are testing against the local stack:
 
 ```bash
 flare auth register --email you@example.com --url http://127.0.0.1:8787

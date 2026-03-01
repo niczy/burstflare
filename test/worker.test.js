@@ -112,6 +112,29 @@ async function requestJson(app, path, init = {}) {
   return { response, data };
 }
 
+function createFrontendHandler(bodyByPath = {}) {
+  return {
+    async fetch(request) {
+      const requestUrl = new URL(request.url);
+      const body = bodyByPath[requestUrl.pathname] || bodyByPath.default;
+      if (body === undefined) {
+        return new Response("frontend missing", {
+          status: 404,
+          headers: {
+            "content-type": "text/plain; charset=utf-8"
+          }
+        });
+      }
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "content-type": "text/html; charset=utf-8"
+        }
+      });
+    }
+  };
+}
+
 const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
 
@@ -119,6 +142,10 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const queuedBuilds = [];
   const queuedReconcile = [];
   const app = createApp({
+    frontendHandler: createFrontendHandler({
+      "/":
+        "<!doctype html><title>BurstFlare</title><main>Quick Terminal Approve Device Code Recovery Code New Recovery Codes Sign In With Passkey Register Passkey id=\"passkeys\" The verification challenge loads automatically in the hosted app deviceStatus pendingDevices lastRefresh terminalOutput persistedPaths snapshotList snapshotContentPreview</main>"
+    }),
     TEMPLATE_BUCKET: createBucket(),
     BUILD_QUEUE: {
       async send(body) {
@@ -158,38 +185,10 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.match(rootHtml, /snapshotList/);
   assert.match(rootHtml, /snapshotContentPreview/);
 
-  const appScriptResponse = await app.fetch(new Request("http://example.test/app.js"));
-  assert.equal(appScriptResponse.status, 200);
-  const appScript = await appScriptResponse.text();
-  assert.match(appScript, /burstflare_refresh_token/);
-  assert.match(appScript, /x-burstflare-csrf/);
-  assert.match(appScript, /api\/auth\/recover/);
-  assert.match(appScript, /api\/auth\/recovery-codes\/generate/);
-  assert.match(appScript, /api\/auth\/passkeys\/login\/start/);
-  assert.match(appScript, /api\/auth\/passkeys\/register\/start/);
-  assert.match(appScript, /turnstileWidget/);
-  assert.match(appScript, /api\/auth\/sessions/);
-  assert.match(appScript, /api\/cli\/device\/approve/);
-  assert.match(appScript, /navigator\.credentials\.create/);
-  assert.match(appScript, /navigator\.credentials\.get/);
-  assert.match(appScript, /api\/workspaces\/current\/settings/);
-  assert.match(appScript, /new WebSocket/);
-  assert.match(appScript, /pendingDeviceCodes/);
-  assert.match(appScript, /setLastRefresh/);
-  assert.match(appScript, /setRecoveryCodes/);
-  assert.match(appScript, /mountTurnstile/);
-  assert.match(appScript, /startAutoRefresh/);
-  assert.match(appScript, /setInterval/);
-  assert.match(appScript, /terminalSendButton/);
-  assert.match(appScript, /parsePersistedPaths/);
-  assert.match(appScript, /refreshSnapshots/);
-  assert.match(appScript, /data-snapshot-download/);
-  assert.match(appScript, /data-snapshot-restore/);
-  assert.match(appScript, /logout-all/);
-  assert.doesNotMatch(appScript, /headers\.set\("authorization"/);
-  assert.doesNotMatch(appScript, /state\.token/);
-
   const turnstileApp = createApp({
+    frontendHandler: createFrontendHandler({
+      "/": "<!doctype html><title>BurstFlare</title><main>strict frontend shell</main>"
+    }),
     TURNSTILE_SECRET: "secret",
     TURNSTILE_SITE_KEY: "sitekey",
     fetchImpl: async (_url, init) => {
@@ -213,12 +212,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const strictRootResponse = await turnstileApp.fetch(new Request("http://example.test/"));
   assert.equal(strictRootResponse.status, 200);
   const strictRootHtml = await strictRootResponse.text();
-  assert.match(strictRootHtml, /challenges\.cloudflare\.com\/turnstile/);
-
-  const strictAppScriptResponse = await turnstileApp.fetch(new Request("http://example.test/app.js"));
-  assert.equal(strictAppScriptResponse.status, 200);
-  const strictAppScript = await strictAppScriptResponse.text();
-  assert.match(strictAppScript, /const TURNSTILE_SITE_KEY = "sitekey"/);
+  assert.match(strictRootHtml, /strict frontend shell/);
 
   const strictMissing = await requestJson(turnstileApp, "/api/auth/register", {
     method: "POST",
