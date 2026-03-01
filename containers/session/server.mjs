@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -24,6 +24,7 @@ const runtimeState = {
   lastLifecycle: null,
   files: new Map()
 };
+let runtimeUserIdentity = null;
 
 function fromBase64(value) {
   return Buffer.from(String(value || ""), "base64");
@@ -227,6 +228,33 @@ function normalizeAuthorizedKeys(values) {
   return normalized;
 }
 
+function getRuntimeUserIdentity() {
+  if (runtimeUserIdentity !== null) {
+    return runtimeUserIdentity;
+  }
+  const uidResult = spawnSync("id", ["-u", "dev"], {
+    encoding: "utf8"
+  });
+  const gidResult = spawnSync("id", ["-g", "dev"], {
+    encoding: "utf8"
+  });
+  if (uidResult.status !== 0 || gidResult.status !== 0) {
+    runtimeUserIdentity = false;
+    return null;
+  }
+  const uid = Number.parseInt(String(uidResult.stdout || "").trim(), 10);
+  const gid = Number.parseInt(String(gidResult.stdout || "").trim(), 10);
+  if (!Number.isInteger(uid) || !Number.isInteger(gid)) {
+    runtimeUserIdentity = false;
+    return null;
+  }
+  runtimeUserIdentity = {
+    uid,
+    gid
+  };
+  return runtimeUserIdentity;
+}
+
 function applyAuthorizedKeys(values) {
   const keys = normalizeAuthorizedKeys(values);
   runtimeState.sshAuthorizedKeys = keys;
@@ -238,6 +266,11 @@ function applyAuthorizedKeys(values) {
     chmodSync(sshDir, 0o700);
     writeFileSync(authorizedKeysPath, body, "utf8");
     chmodSync(authorizedKeysPath, 0o600);
+    const identity = getRuntimeUserIdentity();
+    if (identity) {
+      chownSync(sshDir, identity.uid, identity.gid);
+      chownSync(authorizedKeysPath, identity.uid, identity.gid);
+    }
   } catch (_error) {}
   runtimeState.files.set(authorizedKeysPath, body);
   return keys;
