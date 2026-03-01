@@ -1,3 +1,5 @@
+// @ts-check
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -12,6 +14,12 @@ import {
   SSH_RUNTIME_DEPENDENCIES
 } from "../apps/cli/src/runtime-deps.js";
 
+/**
+ * @returns {{
+ *   data: string;
+ *   write(chunk: string): void;
+ * }}
+ */
 function capture() {
   return {
     data: "",
