@@ -1,3 +1,5 @@
+// @ts-check
+
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -50,7 +52,7 @@ async function getFrontendAssetResponse(request) {
       }
     });
   } catch (error) {
-    if (error.code === "ENOENT") {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
       return null;
     }
     throw error;
@@ -68,6 +70,25 @@ function readRequestBody(request) {
   });
 }
 
+/**
+ * @param {http.IncomingHttpHeaders} nodeHeaders
+ */
+function headersFromNode(nodeHeaders) {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(nodeHeaders)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        headers.append(key, entry);
+      }
+      continue;
+    }
+    if (typeof value === "string") {
+      headers.set(key, value);
+    }
+  }
+  return headers;
+}
+
 const server = http.createServer(async (req, res) => {
   const body =
     req.method === "GET" || req.method === "HEAD" || req.method === "DELETE"
@@ -75,7 +96,7 @@ const server = http.createServer(async (req, res) => {
       : await readRequestBody(req);
   const request = new Request(`http://${req.headers.host}${req.url}`, {
     method: req.method,
-    headers: req.headers,
+    headers: headersFromNode(req.headers),
     body
   });
 
@@ -90,18 +111,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     Readable.fromWeb(response.body).on("error", (error) => {
+      const typedError = /** @type {Error} */ (error);
       if (!res.headersSent) {
         res.statusCode = 500;
         res.setHeader("content-type", "application/json; charset=utf-8");
-        res.end(JSON.stringify({ error: error.message }));
+        res.end(JSON.stringify({ error: typedError.message }));
         return;
       }
-      res.destroy(error);
+      res.destroy(typedError);
     }).pipe(res);
   } catch (error) {
+    const typedError = /** @type {Error} */ (error);
     res.statusCode = 500;
     res.setHeader("content-type", "application/json; charset=utf-8");
-    res.end(JSON.stringify({ error: error.message }));
+    res.end(JSON.stringify({ error: typedError.message }));
   }
 });
 
