@@ -1520,7 +1520,7 @@ function renderTemplateInspector(template) {
     });
   }
 
-  byId("templateInspector").textContent = lines.join('\n');
+  byId("templateInspector").textContent = lines.join("\\n");
 }
 
 function renderSessions(sessions) {
