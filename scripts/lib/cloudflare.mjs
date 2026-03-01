@@ -1,8 +1,25 @@
+// @ts-check
+
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getRequiredEnv, loadEnv, mergeEnv, slugifyDomain } from "./env.mjs";
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
+
+/**
+ * @typedef {{
+ *   method?: string;
+ *   body?: unknown;
+ *   headers?: Record<string, string>;
+ * }} ApiRequestOptions
+ */
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ *   payload?: unknown;
+ * }} CloudflareRequestError
+ */
 
 function normalizeEnvironment(value = "production") {
   const normalized = String(value || "production").trim().toLowerCase();
@@ -16,6 +33,10 @@ function getStateFileForEnvironment(environment) {
   return environment === "production" ? ".local/cloudflare-state.json" : `.local/cloudflare-state.${environment}.json`;
 }
 
+/**
+ * @param {string} url
+ * @param {RequestInit} [init]
+ */
 async function requestJson(url, init) {
   const response = await fetch(url, init);
   const data = await response.json().catch(() => ({}));
@@ -24,7 +45,7 @@ async function requestJson(url, init) {
       data?.errors?.map((item) => item.message).filter(Boolean).join("; ") ||
       data?.messages?.join("; ") ||
       `Cloudflare API request failed (${response.status})`;
-    const error = new Error(message);
+    const error = /** @type {CloudflareRequestError} */ (new Error(message));
     error.status = response.status;
     error.payload = data;
     throw error;
@@ -53,7 +74,12 @@ export async function loadCloudflareConfig() {
 }
 
 export function createCloudflareClient(config) {
+  /**
+   * @param {string} pathname
+   * @param {ApiRequestOptions} [options]
+   */
   async function api(pathname, { method = "GET", body, headers = {} } = {}) {
+    /** @type {RequestInit & { headers: Record<string, string> }} */
     const init = {
       method,
       headers: {
@@ -168,7 +194,7 @@ export async function readProvisionState(filePath = ".local/cloudflare-state.jso
     const content = await readFile(absolute, "utf8");
     return JSON.parse(content);
   } catch (error) {
-    if (error.code === "ENOENT") {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
       return null;
     }
     throw error;
