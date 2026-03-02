@@ -1,17 +1,15 @@
-// @ts-check
-
-export function clone(value) {
+export function clone<T>(value: T): T {
   if (typeof structuredClone === "function") {
     return structuredClone(value);
   }
-  return JSON.parse(JSON.stringify(value));
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
-export function createId(prefix) {
+export function createId(prefix: string): string {
   return `${prefix}_${globalThis.crypto.randomUUID()}`;
 }
 
-export function defaultNameFromEmail(email) {
+export function defaultNameFromEmail(email: string): string {
   const local = email.split("@")[0] || "user";
   return local
     .split(/[._-]+/)
@@ -20,14 +18,14 @@ export function defaultNameFromEmail(email) {
     .join(" ") || "User";
 }
 
-export function parseJson(input) {
+export function parseJson(input: string | null | undefined): any {
   if (!input) {
     return {};
   }
   return JSON.parse(input);
 }
 
-export function toJson(data, init = {}) {
+export function toJson(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers || undefined);
   headers.set("content-type", "application/json; charset=utf-8");
   return new Response(JSON.stringify(data, null, 2), {
@@ -36,7 +34,7 @@ export function toJson(data, init = {}) {
   });
 }
 
-export function unauthorized(message = "Unauthorized") {
+export function unauthorized(message = "Unauthorized"): Response {
   return new Response(JSON.stringify({ error: message }), {
     status: 401,
     headers: {
@@ -45,7 +43,7 @@ export function unauthorized(message = "Unauthorized") {
   });
 }
 
-export function badRequest(message) {
+export function badRequest(message: string): Response {
   return new Response(JSON.stringify({ error: message }), {
     status: 400,
     headers: {
@@ -54,7 +52,7 @@ export function badRequest(message) {
   });
 }
 
-export function notFound(message = "Not found") {
+export function notFound(message = "Not found"): Response {
   return new Response(JSON.stringify({ error: message }), {
     status: 404,
     headers: {
@@ -63,7 +61,14 @@ export function notFound(message = "Not found") {
   });
 }
 
-export function cookie(name, value, options = {}) {
+type CookieOptions = {
+  path?: string;
+  httpOnly?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+  maxAge?: number;
+};
+
+export function cookie(name: string, value: string, options: CookieOptions = {}): string {
   const parts = [`${name}=${encodeURIComponent(value)}`];
   parts.push(`Path=${options.path || "/"}`);
   if (options.httpOnly !== false) {
@@ -80,7 +85,7 @@ export function cookie(name, value, options = {}) {
   return parts.join("; ");
 }
 
-export function readCookie(header, name) {
+export function readCookie(header: string | null, name: string): string | null {
   if (!header) {
     return null;
   }

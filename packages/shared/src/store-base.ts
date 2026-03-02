@@ -1,20 +1,14 @@
-// @ts-check
-
 import { clone } from "./utils.js";
 
-/**
- * @typedef {{
- *   collections?: string[];
- * }} TransactionOptions
- */
+type TransactionOptions = {
+  collections?: string[];
+};
 
-/**
- * @typedef {{
- *   load(): Promise<any>;
- *   save(nextState: any, previousState?: any, options?: TransactionOptions): Promise<void>;
- *   loadCollections?: (collections: string[]) => Promise<any>;
- * }} TransactionStore
- */
+type TransactionStore = {
+  load(): Promise<any>;
+  save(nextState: any, previousState?: any, options?: TransactionOptions): Promise<void>;
+  loadCollections?: (collections: string[]) => Promise<any>;
+};
 
 export function createDefaultState() {
   return {
@@ -40,12 +34,8 @@ export function createDefaultState() {
 export class BaseStore {
   #queue = Promise.resolve();
 
-  /**
-   * @param {(draft: any) => any | Promise<any>} work
-   * @param {TransactionOptions} [options]
-   */
-  #runTransaction(work, options = {}) {
-    const store = /** @type {TransactionStore} */ (/** @type {unknown} */ (this));
+  #runTransaction<T>(work: (draft: any) => T | Promise<T>, options: TransactionOptions = {}): Promise<T> {
+    const store = this as unknown as TransactionStore;
     const next = this.#queue.then(async () => {
       const useScopedLoad =
         Array.isArray(options.collections) &&
@@ -64,15 +54,11 @@ export class BaseStore {
     return next;
   }
 
-  transact(work) {
+  transact<T>(work: (draft: any) => T | Promise<T>): Promise<T> {
     return this.#runTransaction(work);
   }
 
-  /**
-   * @param {string[]} collections
-   * @param {(draft: any) => any | Promise<any>} work
-   */
-  transactCollections(collections, work) {
+  transactCollections<T>(collections: string[], work: (draft: any) => T | Promise<T>): Promise<T> {
     return this.#runTransaction(work, { collections });
   }
 }
