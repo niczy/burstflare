@@ -1,15 +1,12 @@
-// @ts-check
-
 import path from "node:path";
-import { loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
+import { type CloudflareConfig, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
 
-/**
- * @typedef {Error & {
- *   payload?: unknown;
- * }} CloudflareScriptError
- */
+interface CloudflareScriptError extends Error {
+  payload?: unknown;
+}
 
-function renderWrangler(state, config) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderWrangler(state: any, config: CloudflareConfig): string {
   const { resources } = state;
   const containerImage = config.containerImage || "./containers/session/Dockerfile";
   const dataFile =
@@ -111,7 +108,7 @@ crons = ["*/15 * * * *"]`);
   return `${lines.join("\n\n")}\n`;
 }
 
-async function main() {
+async function main(): Promise<void> {
   const config = await loadCloudflareConfig();
   const state = await readProvisionState(config.stateFile);
   if (!state) {
@@ -121,8 +118,8 @@ async function main() {
   process.stdout.write(output);
 }
 
-main().catch((error) => {
-  const typedError = /** @type {CloudflareScriptError} */ (error);
+main().catch((error: unknown) => {
+  const typedError = error as CloudflareScriptError;
   process.stderr.write(`${typedError.message}\n`);
   process.exit(1);
 });

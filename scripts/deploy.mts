@@ -55,8 +55,8 @@ async function main(): Promise<void> {
   // 3. Generate wrangler config
   step("Generating wrangler config", () => {
     const toml = run(
-      "node",
-      ["scripts/cloudflare-generate-wrangler.mjs"],
+      "npx",
+      ["tsx", "scripts/cloudflare-generate-wrangler.mts"],
       { captureStdout: true }
     );
     const outPath = path.join(root, "wrangler.generated.toml");
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   // 5. Smoke test
   if (!skipSmoke) {
     step(`Running smoke tests against ${baseUrl}`, () => {
-      run("node", ["scripts/smoke.mjs", "--base-url", baseUrl]);
+      run("npx", ["tsx", "scripts/smoke.mts", "--base-url", baseUrl]);
     });
   } else {
     process.stdout.write("\n▸ Skipping smoke tests (--skip-smoke)\n");

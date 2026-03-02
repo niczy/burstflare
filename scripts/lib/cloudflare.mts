@@ -1,27 +1,26 @@
-// @ts-check
-
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getRequiredEnv, loadEnv, mergeEnv, slugifyDomain } from "./env.mjs";
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
 
-/**
- * @typedef {{
- *   method?: string;
- *   body?: unknown;
- *   headers?: Record<string, string>;
- * }} ApiRequestOptions
- */
+interface ApiRequestOptions {
+  method?: string;
+  body?: unknown;
+  headers?: Record<string, string>;
+}
 
-/**
- * @typedef {Error & {
- *   status?: number;
- *   payload?: unknown;
- * }} CloudflareRequestError
- */
+interface CloudflareRequestError extends Error {
+  status?: number;
+  payload?: unknown;
+}
 
-function normalizeEnvironment(value = "production") {
+export type CloudflareConfig = Awaited<ReturnType<typeof loadCloudflareConfig>>;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ApiResult = any;
+
+function normalizeEnvironment(value = "production"): string {
   const normalized = String(value || "production").trim().toLowerCase();
   if (!["production", "staging"].includes(normalized)) {
     throw new Error(`Unsupported Cloudflare environment: ${value}`);
@@ -29,23 +28,19 @@ function normalizeEnvironment(value = "production") {
   return normalized;
 }
 
-function getStateFileForEnvironment(environment) {
+function getStateFileForEnvironment(environment: string): string {
   return environment === "production" ? ".local/cloudflare-state.json" : `.local/cloudflare-state.${environment}.json`;
 }
 
-/**
- * @param {string} url
- * @param {RequestInit} [init]
- */
-async function requestJson(url, init) {
+async function requestJson(url: string, init?: RequestInit): Promise<ApiResult> {
   const response = await fetch(url, init);
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
     const message =
-      data?.errors?.map((item) => item.message).filter(Boolean).join("; ") ||
+      data?.errors?.map((item: { message?: string }) => item.message).filter(Boolean).join("; ") ||
       data?.messages?.join("; ") ||
       `Cloudflare API request failed (${response.status})`;
-    const error = /** @type {CloudflareRequestError} */ (new Error(message));
+    const error = new Error(message) as CloudflareRequestError;
     error.status = response.status;
     error.payload = data;
     throw error;
@@ -73,14 +68,9 @@ export async function loadCloudflareConfig() {
   };
 }
 
-export function createCloudflareClient(config) {
-  /**
-   * @param {string} pathname
-   * @param {ApiRequestOptions} [options]
-   */
-  async function api(pathname, { method = "GET", body, headers = {} } = {}) {
-    /** @type {RequestInit & { headers: Record<string, string> }} */
-    const init = {
+export function createCloudflareClient(config: CloudflareConfig) {
+  async function api(pathname: string, { method = "GET", body, headers = {} }: ApiRequestOptions = {}): Promise<ApiResult> {
+    const init: RequestInit & { headers: Record<string, string> } = {
       method,
       headers: {
         Authorization: `Bearer ${config.apiToken}`,
@@ -105,13 +95,10 @@ export function createCloudflareClient(config) {
       return Array.isArray(data.result) ? data.result : [];
     },
 
-    async createD1Database(name) {
+    async createD1Database(name: string) {
       const data = await api(`/accounts/${config.accountId}/d1/database`, {
         method: "POST",
-        body: {
-          name,
-          primary_location_hint: "wnam"
-        }
+        body: { name, primary_location_hint: "wnam" }
       });
       return data.result;
     },
@@ -121,7 +108,7 @@ export function createCloudflareClient(config) {
       return Array.isArray(data.result) ? data.result : [];
     },
 
-    async createKvNamespace(title) {
+    async createKvNamespace(title: string) {
       const data = await api(`/accounts/${config.accountId}/storage/kv/namespaces`, {
         method: "POST",
         body: { title }
@@ -134,7 +121,7 @@ export function createCloudflareClient(config) {
       return Array.isArray(data.result?.buckets) ? data.result.buckets : [];
     },
 
-    async createR2Bucket(name) {
+    async createR2Bucket(name: string) {
       const data = await api(`/accounts/${config.accountId}/r2/buckets`, {
         method: "POST",
         body: { name }
@@ -147,7 +134,7 @@ export function createCloudflareClient(config) {
       return Array.isArray(data.result) ? data.result : [];
     },
 
-    async createQueue(queueName) {
+    async createQueue(queueName: string) {
       const data = await api(`/accounts/${config.accountId}/queues`, {
         method: "POST",
         body: { queue_name: queueName }
@@ -155,20 +142,17 @@ export function createCloudflareClient(config) {
       return data.result;
     },
 
-    async d1Query(databaseId, sql, params = []) {
+    async d1Query(databaseId: string, sql: string, params: unknown[] = []) {
       const data = await api(`/accounts/${config.accountId}/d1/database/${databaseId}/query`, {
         method: "POST",
-        body: {
-          sql,
-          params
-        }
+        body: { sql, params }
       });
       return data.result;
     }
   };
 }
 
-export function desiredResourceNames(config) {
+export function desiredResourceNames(config: CloudflareConfig) {
   const prefix = config.environment === "production" ? config.slug : `${config.slug}-${config.environment}`;
   return {
     d1: config.environment === "production" ? `${prefix}-prod` : `${prefix}-db`,
@@ -188,20 +172,20 @@ export function desiredResourceNames(config) {
   };
 }
 
-export async function readProvisionState(filePath = ".local/cloudflare-state.json") {
+export async function readProvisionState(filePath = ".local/cloudflare-state.json"): Promise<ApiResult | null> {
   const absolute = path.resolve(process.cwd(), filePath);
   try {
     const content = await readFile(absolute, "utf8");
     return JSON.parse(content);
   } catch (error) {
-    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
     }
     throw error;
   }
 }
 
-export async function writeProvisionState(state, filePath = ".local/cloudflare-state.json") {
+export async function writeProvisionState(state: unknown, filePath = ".local/cloudflare-state.json"): Promise<void> {
   const absolute = path.resolve(process.cwd(), filePath);
   await mkdir(path.dirname(absolute), { recursive: true });
   await writeFile(absolute, JSON.stringify(state, null, 2));

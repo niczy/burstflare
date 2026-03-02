@@ -1,6 +1,15 @@
-// @ts-check
+interface RequestOptions {
+  method?: string;
+  headers?: HeadersInit;
+  body?: BodyInit | null;
+}
 
-function getArg(name) {
+interface HttpRequestError extends Error {
+  status?: number;
+  body?: unknown;
+}
+
+function getArg(name: string): string | null {
   const index = process.argv.indexOf(name);
   if (index === -1 || index === process.argv.length - 1) {
     return null;
@@ -8,38 +17,19 @@ function getArg(name) {
   return process.argv[index + 1];
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getTurnstileToken() {
+function getTurnstileToken(): string | null {
   return getArg("--turnstile-token") || process.env.BURSTFLARE_TURNSTILE_TOKEN || process.env.TURNSTILE_TOKEN || null;
 }
 
 const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare-smoke";
 
-/**
- * @typedef {{
- *   method?: string;
- *   headers?: HeadersInit;
- *   body?: BodyInit | null;
- * }} RequestOptions
- */
-
-/**
- * @typedef {Error & {
- *   status?: number;
- *   body?: unknown;
- * }} HttpRequestError
- */
-
-/**
- * @param {string} baseUrl
- * @param {string} path
- * @param {RequestOptions} [options]
- */
-async function requestJson(baseUrl, path, options = {}) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function requestJson(baseUrl: string, path: string, options: RequestOptions = {}): Promise<any> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
@@ -49,7 +39,7 @@ async function requestJson(baseUrl, path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = /** @type {HttpRequestError} */ (new Error(data.error || `${options.method || "GET"} ${path} failed`));
+    const error = new Error(data.error || `${options.method || "GET"} ${path} failed`) as HttpRequestError;
     error.status = response.status;
     error.body = data;
     throw error;
@@ -57,12 +47,7 @@ async function requestJson(baseUrl, path, options = {}) {
   return data;
 }
 
-/**
- * @param {string} baseUrl
- * @param {string} path
- * @param {RequestOptions} [options]
- */
-async function requestText(baseUrl, path, options = {}) {
+async function requestText(baseUrl: string, path: string, options: RequestOptions = {}): Promise<string> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
@@ -71,7 +56,7 @@ async function requestText(baseUrl, path, options = {}) {
   });
   const text = await response.text();
   if (!response.ok) {
-    const error = /** @type {HttpRequestError} */ (new Error(`${options.method || "GET"} ${path} failed`));
+    const error = new Error(`${options.method || "GET"} ${path} failed`) as HttpRequestError;
     error.status = response.status;
     error.body = text;
     throw error;
@@ -79,8 +64,9 @@ async function requestText(baseUrl, path, options = {}) {
   return text;
 }
 
-async function waitForHealthy(baseUrl) {
-  let lastError = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForHealthy(baseUrl: string): Promise<any> {
+  let lastError: unknown = null;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       const health = await requestJson(baseUrl, "/api/health");
@@ -95,14 +81,16 @@ async function waitForHealthy(baseUrl) {
   throw lastError || new Error("Health check did not become ready");
 }
 
-async function getBuildById(baseUrl, headers, buildId) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getBuildById(baseUrl: string, headers: HeadersInit, buildId: string): Promise<any> {
   const payload = await requestJson(baseUrl, "/api/template-builds", {
     headers
   });
   return payload.builds.find((entry) => entry.id === buildId) || null;
 }
 
-async function waitForBuildReady(baseUrl, headers, buildId) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForBuildReady(baseUrl: string, headers: HeadersInit, buildId: string): Promise<any> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const build = await getBuildById(baseUrl, headers, buildId);
     if (build?.status === "succeeded") {
@@ -135,7 +123,7 @@ async function waitForBuildReady(baseUrl, headers, buildId) {
   throw new Error(`Build ${buildId} did not become ready (last status: ${build?.status || "missing"})`);
 }
 
-async function main() {
+async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
   const turnstileToken = getTurnstileToken();
   const health = await waitForHealthy(baseUrl);

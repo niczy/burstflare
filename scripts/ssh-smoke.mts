@@ -1,7 +1,5 @@
-// @ts-check
-
 import { generateKeyPairSync } from "node:crypto";
-import { spawn } from "node:child_process";
+import { type StdioOptions, spawn } from "node:child_process";
 import http from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import net from "node:net";
@@ -14,33 +12,27 @@ import ssh2 from "ssh2";
 
 const { Client: SshClient, Server: SshServer } = ssh2;
 
-/**
- * @typedef {{
- *   cwd?: string;
- *   stdio?: import("node:child_process").StdioOptions;
- * }} CommandOptions
- */
+interface CommandOptions {
+  cwd?: string;
+  stdio?: StdioOptions;
+}
 
-/**
- * @typedef {{
- *   stdout: string;
- *   stderr: string;
- * }} CommandResult
- */
+interface CommandResult {
+  stdout: string;
+  stderr: string;
+}
 
-/**
- * @typedef {Error & {
- *   code?: number | null;
- * }} CommandError
- */
+interface CommandError extends Error {
+  code?: number | null;
+}
 
-function assert(condition, message) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
 }
 
-async function listenOnRandomPort(server, host = "127.0.0.1") {
+async function listenOnRandomPort(server: net.Server | InstanceType<typeof SshServer>, host = "127.0.0.1"): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, host, () => {
@@ -51,27 +43,21 @@ async function listenOnRandomPort(server, host = "127.0.0.1") {
   });
 }
 
-async function closeServer(server) {
+async function closeServer(server: net.Server | InstanceType<typeof SshServer> | null): Promise<void> {
   if (!server) {
     return;
   }
-  await new Promise((resolve) => server.close(() => resolve()));
+  await new Promise<void>((resolve) => server!.close(() => resolve()));
 }
 
-async function reservePort(host = "127.0.0.1") {
+async function reservePort(host = "127.0.0.1"): Promise<number> {
   const server = net.createServer();
   const port = await listenOnRandomPort(server, host);
   await closeServer(server);
   return port;
 }
 
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {CommandOptions} [options]
- * @returns {Promise<CommandResult>}
- */
-async function runCommand(command, args, options = {}) {
+async function runCommand(command: string, args: string[], options: CommandOptions = {}): Promise<CommandResult> {
   const { cwd, stdio = "pipe" } = options;
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -101,16 +87,14 @@ async function runCommand(command, args, options = {}) {
         });
         return;
       }
-      const error = /** @type {CommandError} */ (
-        new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`)
-      );
+      const error = new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`) as CommandError;
       error.code = code;
       reject(error);
     });
   });
 }
 
-async function isDockerAvailable() {
+async function isDockerAvailable(): Promise<boolean> {
   try {
     await runCommand("docker", ["version", "--format", "{{.Server.Version}}"]);
     return true;
@@ -119,9 +103,10 @@ async function isDockerAvailable() {
   }
 }
 
-async function waitForHttpJson(url, timeoutMs = 20000) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForHttpJson(url: string, timeoutMs = 20000): Promise<any> {
   const deadline = Date.now() + timeoutMs;
-  let lastError = null;
+  let lastError: unknown = null;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url);
@@ -184,7 +169,7 @@ function createSmokeSshServer() {
   );
 }
 
-function createWebSocketProxyServer(targetPort) {
+function createWebSocketProxyServer(targetPort: number) {
   const webSocketServer = new WebSocketServer({ noServer: true });
   const server = http.createServer((req, res) => {
     if (req.url === "/health") {
@@ -244,12 +229,12 @@ function createWebSocketProxyServer(targetPort) {
   return { server, webSocketServer };
 }
 
-async function runSshCommand(port, auth = {}) {
+async function runSshCommand(port: number, auth: Record<string, unknown> = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const client = new SshClient();
     let settled = false;
 
-    const finish = (error, value) => {
+    const finish = (error: Error | null, value?: string) => {
       if (settled) {
         return;
       }
@@ -259,7 +244,7 @@ async function runSshCommand(port, auth = {}) {
         reject(error);
         return;
       }
-      resolve(value);
+      resolve(value!);
     };
 
     client
@@ -314,7 +299,7 @@ async function runContainerSshSmoke() {
   const imageName = "burstflare-session-smoke";
   const runtimePort = await reservePort();
   const keyPath = path.join(tempDir, "id_ed25519");
-  let tunnel = null;
+  let tunnel: Awaited<ReturnType<typeof createSshTunnel>> | null = null;
 
   try {
     await runCommand("docker", ["build", "-t", imageName, "containers/session"], {
@@ -390,12 +375,12 @@ async function runContainerSshSmoke() {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const sshServer = createSmokeSshServer();
   const sshPort = await listenOnRandomPort(sshServer);
   const { server: proxyServer, webSocketServer } = createWebSocketProxyServer(sshPort);
   const runtimePort = await listenOnRandomPort(proxyServer);
-  let tunnel = null;
+  let tunnel: Awaited<ReturnType<typeof createSshTunnel>> | null = null;
 
   try {
     const health = await fetch(`http://127.0.0.1:${runtimePort}/health`).then((response) => response.json());

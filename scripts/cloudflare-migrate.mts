@@ -1,16 +1,15 @@
-// @ts-check
-
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createCloudflareClient, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
 
-/**
- * @typedef {Error & {
- *   payload?: unknown;
- * }} CloudflareScriptError
- */
+interface CloudflareScriptError extends Error {
+  payload?: unknown;
+}
 
-function flattenResults(result) {
+type CloudflareClient = ReturnType<typeof createCloudflareClient>;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function flattenResults(result: any): any[] {
   if (Array.isArray(result)) {
     return result;
   }
@@ -20,7 +19,7 @@ function flattenResults(result) {
   return [result];
 }
 
-async function ensureMigrationTable(client, databaseId) {
+async function ensureMigrationTable(client: CloudflareClient, databaseId: string): Promise<void> {
   await client.d1Query(
     databaseId,
     `
@@ -32,13 +31,13 @@ async function ensureMigrationTable(client, databaseId) {
   );
 }
 
-async function fetchAppliedMigrations(client, databaseId) {
+async function fetchAppliedMigrations(client: CloudflareClient, databaseId: string): Promise<Set<string>> {
   const result = await client.d1Query(databaseId, "SELECT name FROM _burstflare_migrations ORDER BY name ASC;");
   const rows = flattenResults(result).flatMap((entry) => entry.results || []);
   return new Set(rows.map((row) => row.name));
 }
 
-async function applyMigration(client, databaseId, name, sql) {
+async function applyMigration(client: CloudflareClient, databaseId: string, name: string, sql: string): Promise<void> {
   await client.d1Query(databaseId, sql);
   await client.d1Query(
     databaseId,
@@ -47,7 +46,7 @@ async function applyMigration(client, databaseId, name, sql) {
   );
 }
 
-async function main() {
+async function main(): Promise<void> {
   const config = await loadCloudflareConfig();
   const state = await readProvisionState(config.stateFile);
   if (!state?.resources?.d1?.id) {
@@ -62,8 +61,8 @@ async function main() {
 
   await ensureMigrationTable(client, databaseId);
   const applied = await fetchAppliedMigrations(client, databaseId);
-  const appliedNow = [];
-  const skipped = [];
+  const appliedNow: string[] = [];
+  const skipped: string[] = [];
 
   for (const fileName of migrationFiles) {
     if (applied.has(fileName)) {
@@ -88,8 +87,8 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  const typedError = /** @type {CloudflareScriptError} */ (error);
+main().catch((error: unknown) => {
+  const typedError = error as CloudflareScriptError;
   process.stderr.write(`${typedError.message}\n`);
   if (typedError.payload) {
     process.stderr.write(`${JSON.stringify(typedError.payload, null, 2)}\n`);

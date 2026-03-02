@@ -1,5 +1,3 @@
-// @ts-check
-
 import {
   createCloudflareClient,
   desiredResourceNames,
@@ -7,48 +5,28 @@ import {
   writeProvisionState
 } from "./lib/cloudflare.mjs";
 
-/**
- * @typedef {Error & {
- *   payload?: unknown;
- * }} CloudflareScriptError
- */
+interface CloudflareScriptError extends Error {
+  payload?: unknown;
+}
 
-/**
- * @template T
- * @typedef {{
- *   resource: T;
- *   created: boolean;
- * }} EnsureByNameResult
- */
+interface EnsureByNameResult<T> {
+  resource: T;
+  created: boolean;
+}
 
-/**
- * @template T
- * @typedef {{
-  *   ok: true;
-  *   label: string;
- *   value: T;
- * } | {
- *   ok: false;
- *   label: string;
- *   error: string;
- *   payload: unknown;
- * }} AttemptResult
- */
+type AttemptResult<T> =
+  | { ok: true; label: string; value: T }
+  | { ok: false; label: string; error: string; payload: unknown };
 
-/**
- * @typedef {Extract<AttemptResult<unknown>, { ok: false }>} FailedAttempt
- */
+type FailedAttempt = Extract<AttemptResult<unknown>, { ok: false }>;
 
-/**
- * @template {Record<string, unknown>} T
- * @template {keyof T} K
- * @param {T[]} items
- * @param {K} field
- * @param {T[K]} name
- * @param {(name: T[K]) => Promise<T>} create
- * @returns {Promise<EnsureByNameResult<T>>}
- */
-async function ensureByName(items, field, name, create) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function ensureByName<T extends Record<string, any>, K extends keyof T>(
+  items: T[],
+  field: K,
+  name: T[K],
+  create: (name: T[K]) => Promise<T>
+): Promise<EnsureByNameResult<T>> {
   const existing = items.find((item) => item[field] === name);
   if (existing) {
     return { resource: existing, created: false };
@@ -57,17 +35,11 @@ async function ensureByName(items, field, name, create) {
   return { resource, created: true };
 }
 
-/**
- * @template T
- * @param {string} label
- * @param {() => Promise<T>} work
- * @returns {Promise<AttemptResult<T>>}
- */
-async function attempt(label, work) {
+async function attempt<T>(label: string, work: () => Promise<T>): Promise<AttemptResult<T>> {
   try {
     return { ok: true, label, value: await work() };
   } catch (error) {
-    const typedError = /** @type {CloudflareScriptError} */ (error);
+    const typedError = error as CloudflareScriptError;
     return {
       ok: false,
       label,
@@ -77,7 +49,7 @@ async function attempt(label, work) {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const config = await loadCloudflareConfig();
   const names = desiredResourceNames(config);
   const client = createCloudflareClient(config);
@@ -95,8 +67,7 @@ async function main() {
     client.createKvNamespace(title)
   );
 
-  /** @type {FailedAttempt[]} */
-  const r2Errors = [];
+  const r2Errors: FailedAttempt[] = [];
   let r2Templates = null;
   let r2Snapshots = null;
   let r2Builds = null;
@@ -130,20 +101,19 @@ async function main() {
         if (buildsAttempt.ok) {
           r2Builds = buildsAttempt.value;
         } else {
-          r2Errors.push(/** @type {FailedAttempt} */ (buildsAttempt));
+          r2Errors.push(buildsAttempt as FailedAttempt);
         }
       } else {
-        r2Errors.push(/** @type {FailedAttempt} */ (snapshotsAttempt));
+        r2Errors.push(snapshotsAttempt as FailedAttempt);
       }
     } else {
-      r2Errors.push(/** @type {FailedAttempt} */ (templatesAttempt));
+      r2Errors.push(templatesAttempt as FailedAttempt);
     }
   } else {
-    r2Errors.push(/** @type {FailedAttempt} */ (r2ListAttempt));
+    r2Errors.push(r2ListAttempt as FailedAttempt);
   }
 
-  /** @type {FailedAttempt[]} */
-  const queueErrors = [];
+  const queueErrors: FailedAttempt[] = [];
   let queueBuilds = null;
   let queueReconcile = null;
   if (queueListAttempt.ok) {
@@ -164,13 +134,13 @@ async function main() {
       if (reconcileAttempt.ok) {
         queueReconcile = reconcileAttempt.value;
       } else {
-        queueErrors.push(/** @type {FailedAttempt} */ (reconcileAttempt));
+        queueErrors.push(reconcileAttempt as FailedAttempt);
       }
     } else {
-      queueErrors.push(/** @type {FailedAttempt} */ (buildsAttempt));
+      queueErrors.push(buildsAttempt as FailedAttempt);
     }
   } else {
-    queueErrors.push(/** @type {FailedAttempt} */ (queueListAttempt));
+    queueErrors.push(queueListAttempt as FailedAttempt);
   }
 
   const state = {
@@ -255,8 +225,8 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  const typedError = /** @type {CloudflareScriptError} */ (error);
+main().catch((error: unknown) => {
+  const typedError = error as CloudflareScriptError;
   process.stderr.write(`${typedError.message}\n`);
   if (typedError.payload) {
     process.stderr.write(`${JSON.stringify(typedError.payload, null, 2)}\n`);

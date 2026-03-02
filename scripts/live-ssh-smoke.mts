@@ -1,47 +1,35 @@
-// @ts-check
-
-import { spawn } from "node:child_process";
+import { type StdioOptions, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSshTunnel } from "../apps/cli/src/cli.js";
 
-/**
- * @typedef {{
- *   cwd?: string;
- *   stdio?: import("node:child_process").StdioOptions;
- * }} CommandOptions
- */
+interface CommandOptions {
+  cwd?: string;
+  stdio?: StdioOptions;
+}
 
-/**
- * @typedef {{
- *   stdout: string;
- *   stderr: string;
- * }} CommandResult
- */
+interface CommandResult {
+  stdout: string;
+  stderr: string;
+}
 
-/**
- * @typedef {Error & {
- *   code?: number | null;
- * }} CommandError
- */
+interface CommandError extends Error {
+  code?: number | null;
+}
 
-/**
- * @typedef {{
- *   method?: string;
- *   headers?: HeadersInit;
- *   body?: BodyInit | null;
- * }} RequestOptions
- */
+interface RequestOptions {
+  method?: string;
+  headers?: HeadersInit;
+  body?: BodyInit | null;
+}
 
-/**
- * @typedef {Error & {
- *   status?: number;
- *   payload?: unknown;
- * }} HttpRequestError
- */
+interface HttpRequestError extends Error {
+  status?: number;
+  payload?: unknown;
+}
 
-function getArg(name) {
+function getArg(name: string): string | null {
   const index = process.argv.indexOf(name);
   if (index === -1 || index === process.argv.length - 1) {
     return null;
@@ -49,23 +37,17 @@ function getArg(name) {
   return process.argv[index + 1];
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function assert(condition, message) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
 }
 
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {CommandOptions} [options]
- * @returns {Promise<CommandResult>}
- */
-async function runCommand(command, args, options = {}) {
+async function runCommand(command: string, args: string[], options: CommandOptions = {}): Promise<CommandResult> {
   const { cwd, stdio = "pipe" } = options;
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -95,21 +77,15 @@ async function runCommand(command, args, options = {}) {
         });
         return;
       }
-      const error = /** @type {CommandError} */ (
-        new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`)
-      );
+      const error = new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`) as CommandError;
       error.code = code;
       reject(error);
     });
   });
 }
 
-/**
- * @param {string} baseUrl
- * @param {string} pathname
- * @param {RequestOptions} [options]
- */
-async function requestJson(baseUrl, pathname, options = {}) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function requestJson(baseUrl: string, pathname: string, options: RequestOptions = {}): Promise<any> {
   const response = await fetch(`${baseUrl}${pathname}`, {
     ...options,
     headers: {
@@ -119,9 +95,7 @@ async function requestJson(baseUrl, pathname, options = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = /** @type {HttpRequestError} */ (
-      new Error(payload.error || `${options.method || "GET"} ${pathname} failed (${response.status})`)
-    );
+    const error = new Error(payload.error || `${options.method || "GET"} ${pathname} failed (${response.status})`) as HttpRequestError;
     error.status = response.status;
     error.payload = payload;
     throw error;
@@ -129,7 +103,7 @@ async function requestJson(baseUrl, pathname, options = {}) {
   return payload;
 }
 
-async function resolveAccessToken(baseUrl, explicitToken, refreshToken) {
+async function resolveAccessToken(baseUrl: string, explicitToken: string, refreshToken: string): Promise<string | null> {
   if (explicitToken) {
     return explicitToken;
   }
@@ -145,9 +119,10 @@ async function resolveAccessToken(baseUrl, explicitToken, refreshToken) {
   return refreshed.token || null;
 }
 
-async function authedRequestJson(baseUrl, pathname, token, refreshToken, options = {}) {
-  const headers = {
-    ...(options.headers || {})
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function authedRequestJson(baseUrl: string, pathname: string, token: string | null, refreshToken: string, options: RequestOptions = {}): Promise<any> {
+  const headers: Record<string, string> = {
+    ...((options.headers as Record<string, string>) || {})
   };
   if (token) {
     headers.authorization = `Bearer ${token}`;
@@ -159,7 +134,7 @@ async function authedRequestJson(baseUrl, pathname, token, refreshToken, options
       headers
     });
   } catch (error) {
-    if (error.status !== 401 || !refreshToken) {
+    if ((error as HttpRequestError).status !== 401 || !refreshToken) {
       throw error;
     }
     const rotated = await requestJson(baseUrl, "/api/auth/refresh", {
@@ -182,8 +157,9 @@ async function authedRequestJson(baseUrl, pathname, token, refreshToken, options
   }
 }
 
-async function waitForHealthy(baseUrl) {
-  let lastError = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForHealthy(baseUrl: string): Promise<any> {
+  let lastError: unknown = null;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       const health = await requestJson(baseUrl, "/api/health");
@@ -198,7 +174,7 @@ async function waitForHealthy(baseUrl) {
   throw lastError || new Error("Health check did not become ready");
 }
 
-async function main() {
+async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "https://burstflare.dev";
   const templateId = getArg("--template-id") || process.env.BURSTFLARE_LIVE_SMOKE_TEMPLATE_ID || "";
   const providedToken = getArg("--token") || process.env.BURSTFLARE_LIVE_SMOKE_TOKEN || "";
@@ -226,8 +202,8 @@ async function main() {
   const tempDir = await mkdtemp(join(tmpdir(), "burstflare-live-ssh-"));
   const keyPath = join(tempDir, "id_ed25519");
   const sessionName = `live-ssh-smoke-${Date.now().toString(36)}`;
-  let sessionId = null;
-  let tunnel = null;
+  let sessionId: string | null = null;
+  let tunnel: Awaited<ReturnType<typeof createSshTunnel>> | null = null;
 
   try {
     await runCommand("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", keyPath], {
