@@ -1,6 +1,4 @@
-// @ts-check
-
-export const styles = `
+export const styles: string = `
 :root {
   color-scheme: light;
   --bg: #f2eee8;
@@ -849,7 +847,7 @@ button.secondary {
 }
 `;
 
-export const html = `<!doctype html>
+export const html: string = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -1213,7 +1211,7 @@ flare ssh &lt;sessionId&gt;</pre>
   </body>
 </html>`;
 
-export const appJs = `
+export const appJs: string = `
 const TURNSTILE_SITE_KEY = __BURSTFLARE_TURNSTILE_SITE_KEY__;
 
 const state = {
