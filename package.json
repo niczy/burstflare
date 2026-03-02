@@ -25,7 +25,7 @@
     "cf:verify:staging": "CLOUDFLARE_ENVIRONMENT=staging node scripts/cloudflare-verify.mjs",
     "dev:edge": "node apps/edge/src/dev-server.js",
     "dev:web": "npm run dev --workspace @burstflare/web",
-    "dev": "node scripts/dev.mjs",
+    "dev": "tsx scripts/dev.mts",
     "lint": "node scripts/lint.mjs",
     "npm:cli:smoke": "node scripts/npm-cli-smoke.mjs",
     "release:validate": "node scripts/release-validate.mjs",
