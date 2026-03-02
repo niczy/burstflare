@@ -1,24 +1,18 @@
-// @ts-check
-
 import { accessSync, constants } from "node:fs";
 import path from "node:path";
 
-/**
- * @typedef {Error & {
- *   status?: number;
- *   missingCommands?: string[];
- * }} CommandDependencyError
- */
+interface CommandDependencyError extends Error {
+  status?: number;
+  missingCommands?: string[];
+}
 
-/**
- * @typedef {{
- *   write(chunk: string): void;
- * }} WritableOutput
- */
+interface WritableOutput {
+  write(chunk: string): void;
+}
 
 export const SSH_RUNTIME_DEPENDENCIES = ["ssh", "ssh-keygen"];
 
-function commandCandidates(command, platform, env) {
+function commandCandidates(command: string, platform: string, env: NodeJS.ProcessEnv): string[] {
   if (platform !== "win32") {
     return [command];
   }
@@ -34,7 +28,7 @@ function commandCandidates(command, platform, env) {
   return [command, ...extensions.map((extension) => `${command}${extension.toLowerCase()}`)];
 }
 
-function canExecute(filePath, platform) {
+function canExecute(filePath: string, platform: string): boolean {
   try {
     accessSync(filePath, platform === "win32" ? constants.F_OK : constants.X_OK);
     return true;
@@ -43,7 +37,7 @@ function canExecute(filePath, platform) {
   }
 }
 
-export function hasCommand(command, { env = process.env, platform = process.platform } = {}) {
+export function hasCommand(command: string, { env = process.env, platform = process.platform }: { env?: NodeJS.ProcessEnv; platform?: string } = {}): boolean {
   const searchPath = env.PATH || "";
   if (!searchPath) {
     return false;
@@ -55,11 +49,11 @@ export function hasCommand(command, { env = process.env, platform = process.plat
     .some((directory) => candidates.some((candidate) => canExecute(path.join(directory, candidate), platform)));
 }
 
-export function listMissingCommands(commands, options = {}) {
+export function listMissingCommands(commands: string[], options: { env?: NodeJS.ProcessEnv; platform?: string } = {}): string[] {
   return commands.filter((command) => !hasCommand(command, options));
 }
 
-export function formatMissingCommandMessage(missing, { action = "flare ssh" } = {}) {
+export function formatMissingCommandMessage(missing: string[], { action = "flare ssh" }: { action?: string } = {}): string {
   const lines = [
     `[flare] Missing local dependencies for ${action}: ${missing.join(", ")}.`,
     ...missing.flatMap((command) => installHints(command)),
@@ -68,7 +62,7 @@ export function formatMissingCommandMessage(missing, { action = "flare ssh" } = 
   return lines.filter(Boolean).join("\n");
 }
 
-export function installHints(command, { platform = process.platform } = {}) {
+export function installHints(command: string, { platform = process.platform }: { platform?: string } = {}): string[] {
   if (command === "ssh") {
     if (platform === "win32") {
       return [
@@ -96,12 +90,33 @@ export function installHints(command, { platform = process.platform } = {}) {
   return [`Install \`${command}\` and make sure it is available on your PATH.`];
 }
 
+interface DependencyEntry {
+  command: string;
+  installed: boolean;
+  requiredFor: string[];
+  hints: string[];
+}
+
+interface DoctorReport {
+  ok: boolean;
+  platform: string;
+  nodeVersion: string;
+  dependencies: DependencyEntry[];
+  missing: string[];
+  summary: string;
+}
+
 export function buildDoctorReport({
   env = process.env,
   platform = process.platform,
   nodeVersion = process.version,
   commands = SSH_RUNTIME_DEPENDENCIES
-} = {}) {
+}: {
+  env?: NodeJS.ProcessEnv;
+  platform?: string;
+  nodeVersion?: string;
+  commands?: string[];
+} = {}): DoctorReport {
   const dependencies = commands.map((command) => {
     const installed = hasCommand(command, { env, platform });
     return {
@@ -126,7 +141,7 @@ export function buildDoctorReport({
   };
 }
 
-export function formatDoctorReport(report) {
+export function formatDoctorReport(report: DoctorReport): string {
   const lines = [
     `flare doctor`,
     `platform: ${report.platform}`,
@@ -144,31 +159,28 @@ export function formatDoctorReport(report) {
   return lines.join("\n");
 }
 
-export function ensureCommands(commands, options = {}) {
+export function ensureCommands(commands: string[], options: { env?: NodeJS.ProcessEnv; platform?: string; action?: string } = {}): string[] {
   const missing = listMissingCommands(commands, options);
   if (!missing.length) {
     return [];
   }
-  const error = /** @type {CommandDependencyError} */ (new Error(formatMissingCommandMessage(missing, options)));
+  const error = new Error(formatMissingCommandMessage(missing, options)) as CommandDependencyError;
   error.status = 127;
   error.missingCommands = missing;
   throw error;
 }
 
-/**
- * @param {{
- *   stderr?: WritableOutput;
- *   commands?: string[];
- *   env?: NodeJS.ProcessEnv;
- *   platform?: NodeJS.Platform;
- *   nodeVersion?: string;
- * }} [options]
- */
 export function runInstallDependencyCheck({
-  stderr = process.stderr,
+  stderr = process.stderr as WritableOutput,
   commands = SSH_RUNTIME_DEPENDENCIES,
   ...options
-} = {}) {
+}: {
+  stderr?: WritableOutput;
+  commands?: string[];
+  env?: NodeJS.ProcessEnv;
+  platform?: string;
+  nodeVersion?: string;
+} = {}): DoctorReport {
   const report = buildDoctorReport({
     ...options,
     commands
@@ -177,6 +189,6 @@ export function runInstallDependencyCheck({
   if (!missing.length) {
     return report;
   }
-  stderr.write(`${formatMissingCommandMessage(missing, { ...options, action: "flare ssh" })}\n`);
+  stderr.write(`${formatMissingCommandMessage(missing, { action: "flare ssh" })}\n`);
   return report;
 }

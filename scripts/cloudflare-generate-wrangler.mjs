@@ -29,7 +29,7 @@ function renderWrangler(state, config) {
     vars.push(`TURNSTILE_SECRET = "${config.turnstileSecret}"`);
   }
   const lines = [`name = "${config.workerName}"
-main = "apps/edge/src/worker.js"
+main = "apps/edge/src/worker.ts"
 compatibility_date = "2026-02-27"
 compatibility_flags = ["nodejs_compat"]
 

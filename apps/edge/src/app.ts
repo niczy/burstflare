@@ -1,4 +1,3 @@
-// @ts-check
 
 import {
   createBurstFlareService,
@@ -17,38 +16,32 @@ const CSRF_COOKIE = "burstflare_csrf";
 const REQUEST_ID_HEADER = "x-burstflare-request-id";
 const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
 const localWebAuthnChallenges = new Map();
-/**
- * @typedef {{
- *   fetch(request: Request): Promise<Response> | Response;
- * }} FrontendHandler
- */
 
-/**
- * @typedef {Error & {
- *   status?: number;
- *   code?: string;
- *   details?: unknown;
- *   hint?: string;
- * }} AppError
- */
+interface FrontendHandler {
+  fetch(request: Request): Promise<Response> | Response;
+}
 
-/**
- * @typedef {Record<string, any> & {
- *   status?: number;
- *   code?: string;
- *   requestId?: string;
- *   method?: string;
- *   path?: string;
- *   details?: unknown;
- *   hint?: string;
- *   error?: string;
- * }} ErrorResponsePayload
- */
+interface AppError extends Error {
+  status?: number;
+  code?: string;
+  details?: unknown;
+  hint?: string;
+}
 
-/** @type {Promise<FrontendHandler | null> | null} */
-let defaultFrontendHandlerPromise = null;
+type ErrorResponsePayload = Record<string, any> & {
+  status?: number;
+  code?: string;
+  requestId?: string;
+  method?: string;
+  path?: string;
+  details?: unknown;
+  hint?: string;
+  error?: string;
+};
 
-function tokenFromRequest(request, sessionCookieName) {
+let defaultFrontendHandlerPromise: Promise<FrontendHandler | null> | null = null;
+
+function tokenFromRequest(request: Request, sessionCookieName: string): string | null {
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     return authHeader.slice("Bearer ".length);
@@ -56,18 +49,18 @@ function tokenFromRequest(request, sessionCookieName) {
   return readCookie(request.headers.get("cookie"), sessionCookieName);
 }
 
-function requestIdFromRequest(request) {
+function requestIdFromRequest(request: Request): string {
   return request.headers.get(REQUEST_ID_HEADER) || globalThis.crypto.randomUUID();
 }
 
-async function loadDefaultFrontendHandler() {
+async function loadDefaultFrontendHandler(): Promise<FrontendHandler | null> {
   if (!defaultFrontendHandlerPromise) {
     defaultFrontendHandlerPromise = import("../../web/dist/server/ssr/index.js").then((module) => module.default);
   }
   return defaultFrontendHandlerPromise;
 }
 
-function errorCodeForStatus(status) {
+function errorCodeForStatus(status: number): string {
   switch (status) {
     case 400:
       return "BAD_REQUEST";
@@ -98,22 +91,16 @@ function errorCodeForStatus(status) {
   }
 }
 
-function normalizeThrownError(error) {
-  if (error instanceof SyntaxError && !(/** @type {AppError} */ (error)).status) {
+function normalizeThrownError(error: unknown): AppError {
+  if (error instanceof SyntaxError && !(error as AppError).status) {
     const next = createHttpError("Invalid JSON request body", 400);
     next.code = "INVALID_JSON";
     return next;
   }
-  return /** @type {AppError} */ (error);
+  return error as AppError;
 }
 
-/**
- * @param {Request} request
- * @param {number} status
- * @param {ErrorResponsePayload} [payload]
- * @returns {ErrorResponsePayload}
- */
-function buildErrorPayload(request, status, payload = {}) {
+function buildErrorPayload(request: Request, status: number, payload: ErrorResponsePayload = {}): ErrorResponsePayload {
   const url = new URL(request.url);
   return {
     ...payload,
@@ -125,7 +112,7 @@ function buildErrorPayload(request, status, payload = {}) {
   };
 }
 
-function buildErrorResponse(request, error) {
+function buildErrorResponse(request: Request, error: unknown): Response {
   const normalized = normalizeThrownError(error);
   const status = normalized?.status || 500;
   const exposeMessage = status >= 400 && status < 500;
@@ -153,7 +140,7 @@ function buildErrorResponse(request, error) {
   });
 }
 
-async function normalizeErrorResponse(request, response) {
+async function normalizeErrorResponse(request: Request, response: unknown): Promise<unknown> {
   if (!(response instanceof Response) || response.status < 400) {
     return response;
   }
@@ -185,8 +172,8 @@ async function normalizeErrorResponse(request, response) {
   });
 }
 
-function withErrorHandling(handler) {
-  return async (request, params = {}) => {
+function withErrorHandling(handler: (request: Request, params?: Record<string, string>) => Promise<Response>) {
+  return async (request: Request, params: Record<string, string> = {}): Promise<Response> => {
     try {
       return await handler(request, params);
     } catch (error) {
@@ -195,7 +182,7 @@ function withErrorHandling(handler) {
   };
 }
 
-function attachRequestId(request) {
+function attachRequestId(request: Request): Request {
   if (request.headers.get(REQUEST_ID_HEADER)) {
     return request;
   }
@@ -204,13 +191,13 @@ function attachRequestId(request) {
   return new Request(request, { headers });
 }
 
-function matchRoute(method, pathname, pattern) {
+function matchRoute(method: string, pathname: string, pattern: string): { method: string; params: Record<string, string> } | null {
   const routeParts = pattern.split("/").filter(Boolean);
   const pathParts = pathname.split("/").filter(Boolean);
   if (routeParts.length !== pathParts.length) {
     return null;
   }
-  const params = {};
+  const params: Record<string, string> = {};
   for (let index = 0; index < routeParts.length; index += 1) {
     const routePart = routeParts[index];
     const pathPart = pathParts[index];
@@ -225,7 +212,7 @@ function matchRoute(method, pathname, pattern) {
   return { method, params };
 }
 
-function requireToken(request, service) {
+function requireToken(request: Request, service: any): string | null {
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     return authHeader.slice("Bearer ".length);
@@ -245,7 +232,7 @@ function requireToken(request, service) {
   return token;
 }
 
-async function readEditorRequestAuth(request, service) {
+async function readEditorRequestAuth(request: Request, service: any): Promise<{ token: string; bodyText: string | null } | null> {
   const authHeader = request.headers.get("authorization");
   const bodyText = request.method === "POST" ? await request.text() : null;
   if (authHeader?.startsWith("Bearer ")) {
@@ -276,11 +263,11 @@ async function readEditorRequestAuth(request, service) {
   };
 }
 
-function createCsrfToken() {
+function createCsrfToken(): string {
   return globalThis.crypto.randomUUID();
 }
 
-function toJsonWithCookies(data, cookies, init = {}) {
+function toJsonWithCookies(data: unknown, cookies: string[], init: ResponseInit = {}): Response {
   const response = toJson(data, init);
   for (const value of cookies) {
     response.headers.append("set-cookie", value);
@@ -289,33 +276,33 @@ function toJsonWithCookies(data, cookies, init = {}) {
 }
 
 /**
- * @param {WebSocket} socket
+ * @param socket
  */
-function webSocketUpgradeResponse(socket) {
+function webSocketUpgradeResponse(socket: WebSocket): Response {
   return new Response(
     null,
-    /** @type {ResponseInit & { webSocket: WebSocket }} */ ({
+    ({
       status: 101,
       webSocket: socket
-    })
+    }) as ResponseInit & { webSocket: WebSocket }
   );
 }
 
-function authCookies(service, token, csrfToken) {
+function authCookies(service: any, token: string, csrfToken: string): string[] {
   return [
     cookie(service.sessionCookieName, token, { maxAge: 60 * 60 * 24 * 7 }),
     cookie(CSRF_COOKIE, csrfToken, { maxAge: 60 * 60 * 24 * 7, httpOnly: false })
   ];
 }
 
-function clearAuthCookies(service) {
+function clearAuthCookies(service: any): string[] {
   return [
     cookie(service.sessionCookieName, "", { maxAge: 0 }),
     cookie(CSRF_COOKIE, "", { maxAge: 0, httpOnly: false })
   ];
 }
 
-function devicePage(code) {
+function devicePage(code: string | null): string {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -358,13 +345,13 @@ function devicePage(code) {
 </html>`;
 }
 
-function createObjectStore(options) {
+function createObjectStore(options: any): any {
   if (!options.TEMPLATE_BUCKET && !options.BUILD_BUCKET && !options.SNAPSHOT_BUCKET) {
     return null;
   }
 
   return {
-    async putTemplateVersionBundle({ templateVersion, body, contentType }) {
+    async putTemplateVersionBundle({ templateVersion, body, contentType }: { templateVersion: any; body: any; contentType: string }) {
       if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
         return null;
       }
@@ -374,7 +361,7 @@ function createObjectStore(options) {
       return { key: templateVersion.bundleKey };
     },
 
-    async getTemplateVersionBundle({ templateVersion }) {
+    async getTemplateVersionBundle({ templateVersion }: { templateVersion: any }) {
       if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
         return null;
       }
@@ -389,7 +376,7 @@ function createObjectStore(options) {
       };
     },
 
-    async deleteTemplateVersionBundle({ templateVersion }) {
+    async deleteTemplateVersionBundle({ templateVersion }: { templateVersion: any }) {
       if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
         return null;
       }
@@ -397,7 +384,7 @@ function createObjectStore(options) {
       return { key: templateVersion.bundleKey };
     },
 
-    async putBuildLog({ templateVersion, log }) {
+    async putBuildLog({ templateVersion, log }: { templateVersion: any; log: any }) {
       if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
         return null;
       }
@@ -407,7 +394,7 @@ function createObjectStore(options) {
       return { key: templateVersion.buildLogKey };
     },
 
-    async getBuildLog({ templateVersion }) {
+    async getBuildLog({ templateVersion }: { templateVersion: any }) {
       if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
         return null;
       }
@@ -422,7 +409,7 @@ function createObjectStore(options) {
       };
     },
 
-    async deleteBuildLog({ templateVersion }) {
+    async deleteBuildLog({ templateVersion }: { templateVersion: any }) {
       if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
         return null;
       }
@@ -430,7 +417,7 @@ function createObjectStore(options) {
       return { key: templateVersion.buildLogKey };
     },
 
-    async putBuildArtifact({ build, artifact }) {
+    async putBuildArtifact({ build, artifact }: { build: any; artifact: any }) {
       if (!options.BUILD_BUCKET || !build.artifactKey) {
         return null;
       }
@@ -440,7 +427,7 @@ function createObjectStore(options) {
       return { key: build.artifactKey };
     },
 
-    async getBuildArtifact({ build }) {
+    async getBuildArtifact({ build }: { build: any }) {
       if (!options.BUILD_BUCKET || !build.artifactKey) {
         return null;
       }
@@ -455,7 +442,7 @@ function createObjectStore(options) {
       };
     },
 
-    async deleteBuildArtifact({ build }) {
+    async deleteBuildArtifact({ build }: { build: any }) {
       if (!options.BUILD_BUCKET || !build.artifactKey) {
         return null;
       }
@@ -463,7 +450,7 @@ function createObjectStore(options) {
       return { key: build.artifactKey };
     },
 
-    async putSnapshot({ snapshot, body, contentType }) {
+    async putSnapshot({ snapshot, body, contentType }: { snapshot: any; body: any; contentType: string }) {
       if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
         return null;
       }
@@ -473,7 +460,7 @@ function createObjectStore(options) {
       return { key: snapshot.objectKey };
     },
 
-    async getSnapshot({ snapshot }) {
+    async getSnapshot({ snapshot }: { snapshot: any }) {
       if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
         return null;
       }
@@ -488,7 +475,7 @@ function createObjectStore(options) {
       };
     },
 
-    async deleteSnapshot({ snapshot }) {
+    async deleteSnapshot({ snapshot }: { snapshot: any }) {
       if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
         return null;
       }
@@ -498,13 +485,13 @@ function createObjectStore(options) {
   };
 }
 
-function createTurnstileVerifier(options) {
+function createTurnstileVerifier(options: any): { enabled: boolean; verify(token: unknown, remoteIp: unknown): Promise<void> } {
   const secret = options.TURNSTILE_SECRET || "";
   const fetchImpl = options.fetchImpl || globalThis.fetch;
 
   return {
     enabled: Boolean(secret),
-    async verify(token, remoteIp) {
+    async verify(token: unknown, remoteIp: unknown): Promise<void> {
       if (!secret) {
         return;
       }
@@ -515,8 +502,8 @@ function createTurnstileVerifier(options) {
         method: "POST",
         body: new URLSearchParams({
           secret,
-          response: token,
-          ...(remoteIp ? { remoteip: remoteIp } : {})
+          response: token as string,
+          ...(remoteIp ? { remoteip: remoteIp as string } : {})
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -527,15 +514,8 @@ function createTurnstileVerifier(options) {
   };
 }
 
-/**
- * @param {string} message
- * @param {number} status
- * @param {unknown} [details]
- * @param {Partial<AppError>} [extras]
- * @returns {AppError}
- */
-function createHttpError(message, status, details = null, extras = {}) {
-  const error = /** @type {AppError} */ (new Error(message));
+function createHttpError(message: string, status: number, details: unknown = null, extras: Partial<AppError> = {}): AppError {
+  const error = new Error(message) as AppError;
   error.status = status;
   if (details && typeof details === "object" && !Array.isArray(details)) {
     error.details = details;
@@ -544,7 +524,7 @@ function createHttpError(message, status, details = null, extras = {}) {
   return error;
 }
 
-function readUsdRate(options, key, fallback) {
+function readUsdRate(options: any, key: string, fallback: number): number {
   const raw = options[key];
   if (raw === undefined || raw === null || raw === "") {
     return fallback;
@@ -556,7 +536,7 @@ function readUsdRate(options, key, fallback) {
   return value;
 }
 
-function createBillingCatalog(options) {
+function createBillingCatalog(options: any): { currency: string; runtimeMinuteUsd: number; snapshotUsd: number; templateBuildUsd: number } {
   return {
     currency: "usd",
     runtimeMinuteUsd: readUsdRate(options, "BILLING_RATE_RUNTIME_MINUTE_USD", 0.03),
@@ -565,7 +545,7 @@ function createBillingCatalog(options) {
   };
 }
 
-function usdToMinorUnits(amountUsd) {
+function usdToMinorUnits(amountUsd: unknown): number {
   const cents = Math.round(Number(amountUsd || 0) * 100);
   if (!Number.isFinite(cents) || cents < 0) {
     throw createHttpError("Invalid billing amount", 500);
@@ -573,7 +553,7 @@ function usdToMinorUnits(amountUsd) {
   return cents;
 }
 
-async function postStripeForm(options, pathname, form) {
+async function postStripeForm(options: any, pathname: string, form: URLSearchParams): Promise<any> {
   const secretKey = options.STRIPE_SECRET_KEY || "";
   if (!secretKey) {
     throw createHttpError("Stripe billing is not configured", 501);
@@ -599,7 +579,7 @@ async function postStripeForm(options, pathname, form) {
   return data;
 }
 
-async function ensureStripeCustomer(options, { user, workspace, billing }) {
+async function ensureStripeCustomer(options: any, { user, workspace, billing }: { user: any; workspace: any; billing: any }): Promise<string> {
   if (billing?.customerId) {
     return billing.customerId;
   }
@@ -617,7 +597,7 @@ async function ensureStripeCustomer(options, { user, workspace, billing }) {
   return data.id;
 }
 
-function createStripeBillingProvider(options) {
+function createStripeBillingProvider(options: any): any {
   if (options.billing) {
     return options.billing;
   }
@@ -628,7 +608,7 @@ function createStripeBillingProvider(options) {
   return {
     providerName: "stripe",
 
-    async createCheckoutSession({ user, workspace, billing, successUrl, cancelUrl }) {
+    async createCheckoutSession({ user, workspace, billing, successUrl, cancelUrl }: { user: any; workspace: any; billing: any; successUrl: string; cancelUrl: string }) {
       const customerId = await ensureStripeCustomer(options, {
         user,
         workspace,
@@ -657,7 +637,7 @@ function createStripeBillingProvider(options) {
       };
     },
 
-    async createPortalSession({ billing, returnUrl }) {
+    async createPortalSession({ billing, returnUrl }: { billing: any; returnUrl: string }) {
       const form = new URLSearchParams();
       form.set("customer", billing.customerId);
       form.set("return_url", returnUrl);
@@ -669,7 +649,7 @@ function createStripeBillingProvider(options) {
       };
     },
 
-    async createUsageInvoice({ workspace, billing, pricing }) {
+    async createUsageInvoice({ workspace, billing, pricing }: { workspace: any; billing: any; pricing: any }) {
       const currency = pricing?.currency || "usd";
       for (const lineItem of pricing?.lineItems || []) {
         if (!lineItem?.quantity || !lineItem?.unitAmountUsd) {
@@ -706,8 +686,8 @@ function createStripeBillingProvider(options) {
   };
 }
 
-function parseStripeSignatureHeader(header) {
-  const parsed = {
+function parseStripeSignatureHeader(header: unknown): { timestamp: string | null; signatures: string[] } {
+  const parsed: { timestamp: string | null; signatures: string[] } = {
     timestamp: null,
     signatures: []
   };
@@ -730,13 +710,13 @@ function parseStripeSignatureHeader(header) {
   return parsed;
 }
 
-function hexFromBuffer(value) {
+function hexFromBuffer(value: ArrayBuffer): string {
   return Array.from(new Uint8Array(value))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
 
-function timingSafeEqual(left, right) {
+function timingSafeEqual(left: unknown, right: unknown): boolean {
   if (typeof left !== "string" || typeof right !== "string" || left.length !== right.length) {
     return false;
   }
@@ -747,7 +727,7 @@ function timingSafeEqual(left, right) {
   return mismatch === 0;
 }
 
-async function verifyStripeWebhookSignature(payload, signatureHeader, secret, toleranceSeconds = 300) {
+async function verifyStripeWebhookSignature(payload: string, signatureHeader: string | null, secret: string, toleranceSeconds: number = 300): Promise<void> {
   if (!secret) {
     throw createHttpError("Stripe webhook is not configured", 501);
   }
@@ -787,7 +767,7 @@ async function verifyStripeWebhookSignature(payload, signatureHeader, secret, to
   }
 }
 
-async function parseStripeWebhookEvent(request, options) {
+async function parseStripeWebhookEvent(request: Request, options: any): Promise<any> {
   const payload = await request.text();
   await verifyStripeWebhookSignature(payload, request.headers.get("stripe-signature"), options.STRIPE_WEBHOOK_SECRET || "");
   try {
@@ -797,14 +777,14 @@ async function parseStripeWebhookEvent(request, options) {
   }
 }
 
-function createJobQueue(options) {
+function createJobQueue(options: any): any {
   if (!options.BUILD_QUEUE && !options.RECONCILE_QUEUE && !options.BUILD_WORKFLOW) {
     return null;
   }
 
   return {
     buildStrategy: options.BUILD_WORKFLOW ? "workflow" : options.BUILD_QUEUE ? "queue" : null,
-    async enqueueBuild(buildId) {
+    async enqueueBuild(buildId: string) {
       const dispatchedAt = new Date().toISOString();
       if (options.BUILD_WORKFLOW && typeof options.BUILD_WORKFLOW.create === "function") {
         const instanceId = `bwf_${buildId}_${globalThis.crypto.randomUUID()}`;
@@ -856,12 +836,12 @@ function createJobQueue(options) {
   };
 }
 
-function createRateLimiter(options) {
+function createRateLimiter(options: any): any {
   const storage = options.AUTH_KV || options.CACHE_KV || null;
   const local = new Map();
 
   return {
-    async consume(scope, identity, limit, windowSeconds) {
+    async consume(scope: string, identity: string | null, limit: number, windowSeconds: number) {
       const safeIdentity = identity || "anonymous";
       const now = Date.now();
       const windowMs = windowSeconds * 1000;
@@ -908,7 +888,7 @@ function createRateLimiter(options) {
   };
 }
 
-function toBytes(value) {
+function toBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) {
     return value;
   }
@@ -924,7 +904,7 @@ function toBytes(value) {
   return new Uint8Array();
 }
 
-function toBase64Url(value) {
+function toBase64Url(value: unknown): string {
   const bytes = toBytes(value);
   let binary = "";
   for (const byte of bytes) {
@@ -933,7 +913,7 @@ function toBase64Url(value) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function toBase64(value) {
+function toBase64(value: unknown): string {
   const bytes = toBytes(value);
   let binary = "";
   for (const byte of bytes) {
@@ -942,7 +922,7 @@ function toBase64(value) {
   return btoa(binary);
 }
 
-function fromBase64Url(value) {
+function fromBase64Url(value: unknown): Uint8Array {
   const input = String(value || "");
   const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
@@ -954,12 +934,12 @@ function fromBase64Url(value) {
   return bytes;
 }
 
-function createChallenge() {
+function createChallenge(): string {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
   return toBase64Url(bytes);
 }
 
-function concatBytes(...parts) {
+function concatBytes(...parts: unknown[]): Uint8Array {
   const arrays = parts.map((value) => toBytes(value));
   const total = arrays.reduce((sum, entry) => sum + entry.byteLength, 0);
   const combined = new Uint8Array(total);
@@ -971,7 +951,7 @@ function concatBytes(...parts) {
   return combined;
 }
 
-function readUint32(value, offset) {
+function readUint32(value: unknown, offset: number): number | null {
   const bytes = toBytes(value);
   if (bytes.byteLength < offset + 4) {
     return null;
@@ -979,14 +959,14 @@ function readUint32(value, offset) {
   return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
 }
 
-function createWebAuthnChallengeStore(options) {
+function createWebAuthnChallengeStore(options: any): any {
   const storage = options.AUTH_KV || options.CACHE_KV || null;
 
-  function keyOf(id) {
+  function keyOf(id: string): string {
     return `webauthn:challenge:${id}`;
   }
 
-  function pruneLocal() {
+  function pruneLocal(): void {
     const now = Date.now();
     for (const [key, value] of localWebAuthnChallenges.entries()) {
       if (!value || value.expiresAt <= now) {
@@ -996,7 +976,7 @@ function createWebAuthnChallengeStore(options) {
   }
 
   return {
-    async create(payload, ttlSeconds = WEBAUTHN_CHALLENGE_TTL_SECONDS) {
+    async create(payload: any, ttlSeconds: number = WEBAUTHN_CHALLENGE_TTL_SECONDS) {
       const id = `wac_${globalThis.crypto.randomUUID()}`;
       const record = {
         ...payload,
@@ -1014,7 +994,7 @@ function createWebAuthnChallengeStore(options) {
       return record;
     },
 
-    async consume(id) {
+    async consume(id: string | null) {
       if (!id) {
         return null;
       }
@@ -1038,15 +1018,15 @@ function createWebAuthnChallengeStore(options) {
   };
 }
 
-function getRequestOrigin(request) {
+function getRequestOrigin(request: Request): string {
   return new URL(request.url).origin;
 }
 
-function getRequestRpId(request) {
+function getRequestRpId(request: Request): string {
   return new URL(request.url).hostname;
 }
 
-function parseClientData(clientDataValue) {
+function parseClientData(clientDataValue: unknown): { clientDataJSON: Uint8Array; parsed: any } {
   const clientDataJSON = fromBase64Url(clientDataValue);
   const parsed = JSON.parse(new TextDecoder().decode(clientDataJSON));
   return {
@@ -1055,7 +1035,7 @@ function parseClientData(clientDataValue) {
   };
 }
 
-function verifyClientData(clientDataValue, expected) {
+function verifyClientData(clientDataValue: unknown, expected: { type: string; challenge: string; origin: string }): { clientDataJSON: Uint8Array; parsed: any } {
   const { clientDataJSON, parsed } = parseClientData(clientDataValue);
   if (parsed.type !== expected.type) {
     throw createHttpError("Passkey client data type mismatch", 401);
@@ -1072,12 +1052,12 @@ function verifyClientData(clientDataValue, expected) {
   };
 }
 
-function importPasskeyKey(publicKey, algorithm) {
+function importPasskeyKey(publicKey: unknown, algorithm: number): Promise<CryptoKey> {
   const spki = fromBase64Url(publicKey);
   if (algorithm === -7) {
     return globalThis.crypto.subtle.importKey(
       "spki",
-      spki,
+      spki as BufferSource,
       {
         name: "ECDSA",
         namedCurve: "P-256"
@@ -1089,7 +1069,7 @@ function importPasskeyKey(publicKey, algorithm) {
   if (algorithm === -257) {
     return globalThis.crypto.subtle.importKey(
       "spki",
-      spki,
+      spki as BufferSource,
       {
         name: "RSASSA-PKCS1-v1_5",
         hash: "SHA-256"
@@ -1101,7 +1081,7 @@ function importPasskeyKey(publicKey, algorithm) {
   throw createHttpError("Unsupported passkey algorithm", 400);
 }
 
-async function verifyPasskeyAssertion(assertion, expected, passkey) {
+async function verifyPasskeyAssertion(assertion: any, expected: { challenge: string; origin: string }, passkey: any): Promise<{ signCount: number | null }> {
   const { clientDataJSON } = verifyClientData(assertion.response?.clientDataJSON, {
     challenge: expected.challenge,
     origin: expected.origin,
@@ -1110,7 +1090,7 @@ async function verifyPasskeyAssertion(assertion, expected, passkey) {
 
   const authenticatorData = fromBase64Url(assertion.response?.authenticatorData);
   const signature = fromBase64Url(assertion.response?.signature);
-  const clientDataHash = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", clientDataJSON));
+  const clientDataHash = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", clientDataJSON as BufferSource));
   const verificationData = concatBytes(authenticatorData, clientDataHash);
   const key = await importPasskeyKey(passkey.publicKey, passkey.algorithm);
   const verifyOptions =
@@ -1122,7 +1102,7 @@ async function verifyPasskeyAssertion(assertion, expected, passkey) {
       : {
           name: "RSASSA-PKCS1-v1_5"
         };
-  const valid = await globalThis.crypto.subtle.verify(verifyOptions, key, signature, verificationData);
+  const valid = await globalThis.crypto.subtle.verify(verifyOptions, key, signature as BufferSource, verificationData as BufferSource);
   if (!valid) {
     throw createHttpError("Passkey assertion invalid", 401);
   }
@@ -1131,7 +1111,7 @@ async function verifyPasskeyAssertion(assertion, expected, passkey) {
   };
 }
 
-function requestIdentity(request) {
+function requestIdentity(request: Request): string {
   const cfIp = request.headers.get("cf-connecting-ip");
   if (cfIp) {
     return cfIp.trim();
@@ -1143,7 +1123,7 @@ function requestIdentity(request) {
   return "anonymous";
 }
 
-export function createWorkerService(options = {}) {
+export function createWorkerService(options: any = {}): any {
   if (options.service) {
     return options.service;
   }
@@ -1156,11 +1136,11 @@ export function createWorkerService(options = {}) {
   });
 }
 
-function hasRuntimeBinding(options = {}) {
+function hasRuntimeBinding(options: any = {}): boolean {
   return Boolean(options.containersEnabled && typeof options.getSessionContainer === "function");
 }
 
-async function readContainerRuntimeState(container) {
+async function readContainerRuntimeState(container: any): Promise<any> {
   if (!container) {
     return null;
   }
@@ -1178,7 +1158,7 @@ async function readContainerRuntimeState(container) {
   return null;
 }
 
-function createContainerControlRequest(pathname, payload) {
+function createContainerControlRequest(pathname: string, payload: unknown): Request {
   return new Request(`http://runtime.internal${pathname}`, {
     method: "POST",
     headers: {
@@ -1188,7 +1168,7 @@ function createContainerControlRequest(pathname, payload) {
   });
 }
 
-async function applyRuntimeBootstrapToContainer(container, session, runtimeSecrets = null) {
+async function applyRuntimeBootstrapToContainer(container: any, session: any, runtimeSecrets: any = null): Promise<any> {
   if (!container || !session) {
     return null;
   }
@@ -1235,7 +1215,7 @@ async function applyRuntimeBootstrapToContainer(container, session, runtimeSecre
   return result;
 }
 
-async function emitRuntimeLifecycleHook(container, sessionId, phase, reason = "", { writeRuntimeFile = false } = {}) {
+async function emitRuntimeLifecycleHook(container: any, sessionId: string | null, phase: string, reason: string = "", { writeRuntimeFile = false } = {}): Promise<any> {
   if (!container || !sessionId || !phase) {
     return null;
   }
@@ -1265,7 +1245,7 @@ async function emitRuntimeLifecycleHook(container, sessionId, phase, reason = ""
   return result;
 }
 
-async function stopContainerRuntime(container, reason = "reconcile", sessionId = null) {
+async function stopContainerRuntime(container: any, reason: string = "reconcile", sessionId: string | null = null): Promise<any> {
   if (!container) {
     return null;
   }
@@ -1281,7 +1261,7 @@ async function stopContainerRuntime(container, reason = "reconcile", sessionId =
   return readContainerRuntimeState(container);
 }
 
-export async function runReconcile(options = {}) {
+export async function runReconcile(options: any = {}): Promise<any> {
   const service = createWorkerService(options);
   let runtimeSleptSessions = 0;
 
@@ -1308,7 +1288,7 @@ export async function runReconcile(options = {}) {
   };
 }
 
-export async function handleScheduled(controller, options = {}) {
+export async function handleScheduled(controller: any, options: any = {}): Promise<void> {
   if (options.RECONCILE_QUEUE) {
     await options.RECONCILE_QUEUE.send({
       type: "reconcile",
@@ -1320,7 +1300,7 @@ export async function handleScheduled(controller, options = {}) {
   await runReconcile(options);
 }
 
-export async function handleQueueBatch(batch, options = {}) {
+export async function handleQueueBatch(batch: any, options: any = {}): Promise<void> {
   const service = createWorkerService(options);
   for (const message of batch.messages) {
     const body = message.body || {};
@@ -1339,7 +1319,7 @@ export async function handleQueueBatch(batch, options = {}) {
   }
 }
 
-export function createApp(options = {}) {
+export function createApp(options: any = {}): { fetch(request: Request): Promise<Response> } {
   const service = createWorkerService(options);
   const jobs = createJobQueue(options);
   const rateLimiter = createRateLimiter(options);
@@ -1348,18 +1328,18 @@ export function createApp(options = {}) {
   const frontendHandler = options.frontendHandler || null;
   const getFrontendAssetResponse = options.getFrontendAssetResponse || null;
 
-  function hasContainerBinding() {
+  function hasContainerBinding(): boolean {
     return hasRuntimeBinding(options);
   }
 
-  function getSessionContainer(sessionId) {
+  function getSessionContainer(sessionId: string): any {
     if (!hasContainerBinding()) {
       return null;
     }
     return options.getSessionContainer(sessionId);
   }
 
-  async function startSessionContainer(sessionId) {
+  async function startSessionContainer(sessionId: string): Promise<any> {
     const container = getSessionContainer(sessionId);
     if (!container) {
       return null;
@@ -1370,12 +1350,12 @@ export function createApp(options = {}) {
     return container;
   }
 
-  async function getSessionRuntimeState(sessionId) {
+  async function getSessionRuntimeState(sessionId: string): Promise<any> {
     const container = getSessionContainer(sessionId);
     return readContainerRuntimeState(container);
   }
 
-  async function syncSessionRuntime(action, session) {
+  async function syncSessionRuntime(action: string, session: any): Promise<any> {
     const container = getSessionContainer(session.id);
     if (!container) {
       return null;
@@ -1426,7 +1406,7 @@ export function createApp(options = {}) {
     return getSessionRuntimeState(session.id);
   }
 
-  async function transitionSession(token, sessionId, action) {
+  async function transitionSession(token: string, sessionId: string, action: string): Promise<any> {
     if (!hasContainerBinding()) {
       if (action === "start") {
         return service.startSession(token, sessionId);
@@ -1443,7 +1423,7 @@ export function createApp(options = {}) {
       throw new Error(`Unsupported session action: ${action}`);
     }
 
-    const result = await service.transitionSessionWithRuntime(token, sessionId, action, (session) => syncSessionRuntime(action, session));
+    const result = await service.transitionSessionWithRuntime(token, sessionId, action, (session: any) => syncSessionRuntime(action, session));
     if (
       ["start", "restart"].includes(action) &&
       result.session.state === "running" &&
@@ -1462,16 +1442,16 @@ export function createApp(options = {}) {
     return result;
   }
 
-  function quickName(prefix) {
+  function quickName(prefix: string): string {
     const seed = globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 8);
     return `${prefix}-${seed}`;
   }
 
-  async function waitForTemplateBuildSuccess(token, buildId, maxAttempts = 30) {
+  async function waitForTemplateBuildSuccess(token: string, buildId: string, maxAttempts = 30): Promise<any> {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       await service.processTemplateBuilds(token).catch(() => {});
       const builds = await service.listTemplateBuilds(token);
-      const build = builds.builds.find((entry) => entry.id === buildId);
+      const build = builds.builds.find((entry: any) => entry.id === buildId);
       if (build?.status === "succeeded") {
         return build;
       }
@@ -1483,12 +1463,12 @@ export function createApp(options = {}) {
     throw createHttpError(`Template build ${buildId} did not complete in time`, 504);
   }
 
-  async function attachRuntimeToSession(session) {
+  async function attachRuntimeToSession(session: any): Promise<any> {
     const runtime = await getSessionRuntimeState(session.id);
     return runtime ? { ...session, runtime } : session;
   }
 
-  function createPreviewRequest(request, sessionId) {
+  function createPreviewRequest(request: Request, sessionId: string): Request {
     const url = new URL(request.url);
     url.pathname = "/";
     url.search = "";
@@ -1496,7 +1476,7 @@ export function createApp(options = {}) {
     return new Request(url.toString(), request);
   }
 
-  function createRuntimeSshRequest(request, sessionId) {
+  function createRuntimeSshRequest(request: Request, sessionId: string): Request {
     const url = new URL(request.url);
     url.pathname = "/ssh";
     url.search = "";
@@ -1504,7 +1484,7 @@ export function createApp(options = {}) {
     return new Request(url.toString(), request);
   }
 
-  function createRuntimeTerminalRequest(request, sessionId) {
+  function createRuntimeTerminalRequest(request: Request, sessionId: string): Request {
     const url = new URL(request.url);
     url.pathname = "/shell";
     url.search = "";
@@ -1512,7 +1492,7 @@ export function createApp(options = {}) {
     return new Request(url.toString(), request);
   }
 
-  function createRuntimeEditorRequest(request, session, bodyText = null) {
+  function createRuntimeEditorRequest(request: Request, session: any, bodyText: string | null = null): Request {
     const source = new URL(request.url);
     const url = new URL(request.url);
     url.pathname = "/editor";
@@ -1541,7 +1521,7 @@ export function createApp(options = {}) {
     });
   }
 
-  function createSnapshotRestoreRequest(session, snapshotId, snapshot, content) {
+  function createSnapshotRestoreRequest(session: any, snapshotId: string, snapshot: any, content: any): Request {
     const url = new URL("http://runtime.internal/snapshot/restore");
     url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
@@ -1561,7 +1541,7 @@ export function createApp(options = {}) {
     });
   }
 
-  function createSnapshotExportRequest(session) {
+  function createSnapshotExportRequest(session: any): Request {
     const url = new URL("http://runtime.internal/snapshot/export");
     url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
@@ -1576,7 +1556,7 @@ export function createApp(options = {}) {
     });
   }
 
-  async function applySnapshotContentToRuntime(session, snapshotId, snapshot, content) {
+  async function applySnapshotContentToRuntime(session: any, snapshotId: string, snapshot: any, content: any): Promise<any> {
     const container = getSessionContainer(session.id);
     if (!container || typeof container.fetch !== "function") {
       return null;
@@ -1594,12 +1574,12 @@ export function createApp(options = {}) {
     };
   }
 
-  async function applySnapshotToRuntime(token, session, snapshotId, snapshot) {
+  async function applySnapshotToRuntime(token: string, session: any, snapshotId: string, snapshot: any): Promise<any> {
     const content = await service.getSnapshotContent(token, session.id, snapshotId);
     return applySnapshotContentToRuntime(session, snapshotId, snapshot, content);
   }
 
-  async function applyRuntimeSnapshotHydration(token, session, { runtimeToken = false } = {}) {
+  async function applyRuntimeSnapshotHydration(token: string, session: any, { runtimeToken = false } = {}): Promise<any> {
     if (!session?.lastRestoredSnapshotId) {
       return null;
     }
@@ -1617,7 +1597,7 @@ export function createApp(options = {}) {
     );
   }
 
-  async function captureSnapshotFromRuntime(session) {
+  async function captureSnapshotFromRuntime(session: any): Promise<any> {
     const container = getSessionContainer(session.id);
     if (!container || typeof container.fetch !== "function") {
       return null;
@@ -1635,17 +1615,17 @@ export function createApp(options = {}) {
     };
   }
 
-  function rewriteSshCommand(request, sshCommand) {
+  function rewriteSshCommand(request: Request, sshCommand: string): string {
     const url = new URL(request.url);
     const host = url.host;
     return sshCommand.replace("ws://localhost:8787", `wss://${host}`);
   }
 
-  function isFrontendPath(pathname) {
+  function isFrontendPath(pathname: string): boolean {
     return pathname !== "/device" && !pathname.startsWith("/api/") && !pathname.startsWith("/runtime/");
   }
 
-  async function renderFrontendRequest(request) {
+  async function renderFrontendRequest(request: Request): Promise<Response | null> {
     if (!["GET", "HEAD"].includes(request.method)) {
       return null;
     }
@@ -1669,19 +1649,19 @@ export function createApp(options = {}) {
     return activeFrontendHandler.fetch(request);
   }
 
-  function createRuntimeSshBridge(sessionId) {
+  function createRuntimeSshBridge(sessionId: string): { client: WebSocket; server: WebSocket } | null {
     if (typeof options.createWebSocketPair === "function") {
       return options.createWebSocketPair(sessionId);
     }
-    if (typeof globalThis.WebSocketPair !== "function") {
+    if (typeof (globalThis as any).WebSocketPair !== "function") {
       return null;
     }
-    const pair = new globalThis.WebSocketPair();
+    const pair = new (globalThis as any).WebSocketPair();
     const client = pair[0];
     const server = pair[1];
     server.accept();
     server.send(`BurstFlare SSH bridge attached to ${sessionId}`);
-    server.addEventListener("message", (event) => {
+    server.addEventListener("message", (event: MessageEvent) => {
       if (event.data === "__burstflare_close__") {
         server.close(1000, "Closed by client");
         return;
@@ -1691,7 +1671,7 @@ export function createApp(options = {}) {
     return { client, server };
   }
 
-  function appendResponseHeaders(response, extraHeaders) {
+  function appendResponseHeaders(response: unknown, extraHeaders: Record<string, string>): unknown {
     if (!(response instanceof Response)) {
       return response;
     }
@@ -1717,8 +1697,8 @@ export function createApp(options = {}) {
     }
   }
 
-  function withRateLimit(config, handler) {
-    return async (request, params = {}) => {
+  function withRateLimit(config: { scope: string; limit: number; windowSeconds: number; identity?: (request: Request, params?: Record<string, string>) => string }, handler: (request: Request, params?: Record<string, string>) => Promise<Response>) {
+    return async (request: Request, params: Record<string, string> = {}): Promise<Response> => {
       const identity = config.identity ? config.identity(request, params) : requestIdentity(request);
       const result = await rateLimiter.consume(config.scope, identity, config.limit, config.windowSeconds);
       if (!result.ok) {
@@ -1741,18 +1721,18 @@ export function createApp(options = {}) {
         "x-burstflare-rate-limit-limit": String(result.limit),
         "x-burstflare-rate-limit-remaining": String(result.remaining),
         "x-burstflare-rate-limit-reset": new Date(result.resetAt).toISOString()
-      });
+      }) as Response;
     };
   }
 
-  async function verifyTurnstile(request, body) {
+  async function verifyTurnstile(request: Request, body: any): Promise<void> {
     if (!turnstile.enabled) {
       return;
     }
     await turnstile.verify(body.turnstileToken || request.headers.get("cf-turnstile-response"), requestIdentity(request));
   }
 
-  async function beginPasskeyRegistration(request, token) {
+  async function beginPasskeyRegistration(request: Request, token: string): Promise<any> {
     const registration = await service.beginPasskeyRegistration(token);
     const challenge = createChallenge();
     const challengeRecord = await webAuthnChallenges.create({
@@ -1774,7 +1754,7 @@ export function createApp(options = {}) {
           displayName: registration.user.name
         },
         timeoutMs: 60_000,
-        excludeCredentialIds: registration.passkeys.map((entry) => entry.id),
+        excludeCredentialIds: registration.passkeys.map((entry: any) => entry.id),
         pubKeyCredParams: [
           { type: "public-key", alg: -7 },
           { type: "public-key", alg: -257 }
@@ -1784,7 +1764,7 @@ export function createApp(options = {}) {
     };
   }
 
-  async function finishPasskeyRegistration(request, token, body) {
+  async function finishPasskeyRegistration(request: Request, token: string, body: any): Promise<any> {
     const challenge = await webAuthnChallenges.consume(body.challengeId);
     if (!challenge || challenge.kind !== "passkey-register") {
       throw createHttpError("Passkey registration challenge not found", 400);
@@ -1807,7 +1787,7 @@ export function createApp(options = {}) {
     });
   }
 
-  async function beginPasskeyLogin(request, body) {
+  async function beginPasskeyLogin(request: Request, body: any): Promise<any> {
     await verifyTurnstile(request, body);
     const login = await service.beginPasskeyLogin(body);
     const challenge = createChallenge();
@@ -1818,7 +1798,7 @@ export function createApp(options = {}) {
       challenge,
       origin: getRequestOrigin(request),
       rpId: getRequestRpId(request),
-      credentialIds: login.passkeys.map((entry) => entry.id)
+      credentialIds: login.passkeys.map((entry: any) => entry.id)
     });
     return {
       challengeId: challengeRecord.id,
@@ -1827,12 +1807,12 @@ export function createApp(options = {}) {
         rpId: challengeRecord.rpId,
         timeoutMs: 60_000,
         userVerification: "preferred",
-        allowCredentialIds: login.passkeys.map((entry) => entry.id)
+        allowCredentialIds: login.passkeys.map((entry: any) => entry.id)
       }
     };
   }
 
-  async function finishPasskeyLogin(body) {
+  async function finishPasskeyLogin(body: any): Promise<any> {
     const challenge = await webAuthnChallenges.consume(body.challengeId);
     if (!challenge || challenge.kind !== "passkey-login") {
       throw createHttpError("Passkey login challenge not found", 400);
@@ -1861,7 +1841,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/device",
-      handler: (request) => {
+      handler: (request: Request) => {
         const url = new URL(request.url);
         return new Response(devicePage(url.searchParams.get("code")), {
           headers: { "content-type": "text/html; charset=utf-8" }
@@ -2086,7 +2066,7 @@ export function createApp(options = {}) {
     {
       method: "DELETE",
       pattern: "/api/auth/sessions/:authSessionId",
-      handler: withErrorHandling(async (request, { authSessionId }) => {
+      handler: withErrorHandling(async (request, { authSessionId }: { authSessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2143,7 +2123,7 @@ export function createApp(options = {}) {
     {
       method: "DELETE",
       pattern: "/api/auth/passkeys/:credentialId",
-      handler: withErrorHandling(async (request, { credentialId }) => {
+      handler: withErrorHandling(async (request, { credentialId }: { credentialId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2244,7 +2224,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/workspaces/current/members/:userId/role",
-      handler: withErrorHandling(async (request, { userId }) => {
+      handler: withErrorHandling(async (request, { userId }: { userId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2337,7 +2317,7 @@ export function createApp(options = {}) {
     {
       method: "DELETE",
       pattern: "/api/workspaces/current/secrets/:name",
-      handler: withErrorHandling(async (request, { name }) => {
+      handler: withErrorHandling(async (request, { name }: { name: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2395,7 +2375,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/templates/:templateId",
-      handler: withErrorHandling(async (request, { templateId }) => {
+      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2406,7 +2386,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/templates/:templateId/versions",
-      handler: withErrorHandling(async (request, { templateId }) => {
+      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2425,7 +2405,7 @@ export function createApp(options = {}) {
           windowSeconds: 60,
           identity: (request) => request.headers.get("authorization") || requestIdentity(request)
         },
-        withErrorHandling(async (request, { templateId, versionId }) => {
+        withErrorHandling(async (request, { templateId, versionId }: { templateId: string; versionId: string }) => {
           const token = requireToken(request, service);
           if (!token) {
             return unauthorized();
@@ -2442,7 +2422,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/templates/:templateId/versions/:versionId/bundle/upload",
-      handler: withErrorHandling(async (request, { templateId, versionId }) => {
+      handler: withErrorHandling(async (request, { templateId, versionId }: { templateId: string; versionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2461,7 +2441,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/templates/:templateId/versions/:versionId/bundle",
-      handler: withErrorHandling(async (request, { templateId, versionId }) => {
+      handler: withErrorHandling(async (request, { templateId, versionId }: { templateId: string; versionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2479,7 +2459,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/templates/:templateId/promote",
-      handler: withErrorHandling(async (request, { templateId }) => {
+      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2491,7 +2471,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/templates/:templateId/rollback",
-      handler: withErrorHandling(async (request, { templateId }) => {
+      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2503,7 +2483,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/templates/:templateId/archive",
-      handler: withErrorHandling(async (request, { templateId }) => {
+      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2514,7 +2494,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/templates/:templateId/restore",
-      handler: withErrorHandling(async (request, { templateId }) => {
+      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2525,7 +2505,7 @@ export function createApp(options = {}) {
     {
       method: "DELETE",
       pattern: "/api/templates/:templateId",
-      handler: withErrorHandling(async (request, { templateId }) => {
+      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2558,7 +2538,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/template-builds/:buildId/log",
-      handler: withErrorHandling(async (request, { buildId }) => {
+      handler: withErrorHandling(async (request, { buildId }: { buildId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2574,7 +2554,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/template-builds/:buildId/artifact",
-      handler: withErrorHandling(async (request, { buildId }) => {
+      handler: withErrorHandling(async (request, { buildId }: { buildId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2590,7 +2570,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/template-builds/:buildId/retry",
-      handler: withErrorHandling(async (request, { buildId }) => {
+      handler: withErrorHandling(async (request, { buildId }: { buildId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2619,7 +2599,7 @@ export function createApp(options = {}) {
         }
         const result = await service.listSessions(token);
         return toJson({
-          sessions: await Promise.all(result.sessions.map((session) => attachRuntimeToSession(session)))
+          sessions: await Promise.all(result.sessions.map((session: any) => attachRuntimeToSession(session)))
         });
       })
     },
@@ -2704,7 +2684,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/sessions/:sessionId",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2719,7 +2699,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/sessions/:sessionId/events",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2730,7 +2710,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/sessions/:sessionId/start",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2741,7 +2721,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/sessions/:sessionId/stop",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2752,7 +2732,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/sessions/:sessionId/restart",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2763,7 +2743,7 @@ export function createApp(options = {}) {
     {
       method: "DELETE",
       pattern: "/api/sessions/:sessionId",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2774,7 +2754,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/sessions/:sessionId/snapshots",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2785,7 +2765,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/sessions/:sessionId/snapshots",
-      handler: withErrorHandling(async (request, { sessionId }) => {
+      handler: withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2810,7 +2790,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/content/upload",
-      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }: { sessionId: string; snapshotId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2829,7 +2809,7 @@ export function createApp(options = {}) {
     {
       method: "PUT",
       pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/content",
-      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }: { sessionId: string; snapshotId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2845,7 +2825,7 @@ export function createApp(options = {}) {
     {
       method: "GET",
       pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/content",
-      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }: { sessionId: string; snapshotId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2863,7 +2843,7 @@ export function createApp(options = {}) {
     {
       method: "POST",
       pattern: "/api/sessions/:sessionId/snapshots/:snapshotId/restore",
-      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }: { sessionId: string; snapshotId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2881,7 +2861,7 @@ export function createApp(options = {}) {
     {
       method: "DELETE",
       pattern: "/api/sessions/:sessionId/snapshots/:snapshotId",
-      handler: withErrorHandling(async (request, { sessionId, snapshotId }) => {
+      handler: withErrorHandling(async (request, { sessionId, snapshotId }: { sessionId: string; snapshotId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
@@ -2898,7 +2878,7 @@ export function createApp(options = {}) {
           limit: 16,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { uploadGrantId }) => {
+        withErrorHandling(async (request, { uploadGrantId }: { uploadGrantId: string }) => {
           return toJson(
             await service.consumeUploadGrant(uploadGrantId, {
               body: await request.arrayBuffer(),
@@ -2917,7 +2897,7 @@ export function createApp(options = {}) {
           limit: 24,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { sessionId }) => {
+        withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const token = requireToken(request, service);
           if (!token) {
             return unauthorized();
@@ -2936,7 +2916,7 @@ export function createApp(options = {}) {
           limit: 12,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { sessionId }) => {
+        withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const token = requireToken(request, service);
           if (!token) {
             return unauthorized();
@@ -3088,7 +3068,7 @@ export function createApp(options = {}) {
           limit: 30,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { sessionId }) => {
+        withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const token = requireToken(request, service);
           if (!token) {
             return unauthorized();
@@ -3119,7 +3099,7 @@ export function createApp(options = {}) {
           limit: 60,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { sessionId }) => {
+        withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const auth = await readEditorRequestAuth(request, service);
           if (!auth?.token) {
             return unauthorized();
@@ -3150,7 +3130,7 @@ export function createApp(options = {}) {
           limit: 60,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { sessionId }) => {
+        withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const auth = await readEditorRequestAuth(request, service);
           if (!auth?.token) {
             return unauthorized();
@@ -3181,7 +3161,7 @@ export function createApp(options = {}) {
           limit: 20,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { sessionId }) => {
+        withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const url = new URL(request.url);
           const token = url.searchParams.get("token");
           if (!token) {
@@ -3223,7 +3203,7 @@ export function createApp(options = {}) {
           limit: 12,
           windowSeconds: 60
         },
-        withErrorHandling(async (request, { sessionId }) => {
+        withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const url = new URL(request.url);
           const token = url.searchParams.get("token");
           if (!token) {
@@ -3259,7 +3239,7 @@ export function createApp(options = {}) {
   ];
 
   return {
-    async fetch(request) {
+    async fetch(request: Request): Promise<Response> {
       const requestWithId = attachRequestId(request);
       const url = new URL(requestWithId.url);
       for (const route of routes) {
@@ -3271,7 +3251,7 @@ export function createApp(options = {}) {
           continue;
         }
         const response = await route.handler(requestWithId, match.params);
-        return normalizeErrorResponse(requestWithId, response);
+        return normalizeErrorResponse(requestWithId, response) as Promise<Response>;
       }
       if (isFrontendPath(url.pathname)) {
         const frontendResponse = await renderFrontendRequest(requestWithId);
@@ -3282,14 +3262,14 @@ export function createApp(options = {}) {
               status: 502,
               headers: { "content-type": "text/plain; charset=utf-8" }
             })
-          );
+          ) as Promise<Response>;
         }
-        return normalizeErrorResponse(requestWithId, frontendResponse);
+        return normalizeErrorResponse(requestWithId, frontendResponse) as Promise<Response>;
       }
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/runtime/")) {
-        return normalizeErrorResponse(requestWithId, notFound());
+        return normalizeErrorResponse(requestWithId, notFound()) as Promise<Response>;
       }
-      return normalizeErrorResponse(requestWithId, badRequest("Route not found"));
+      return normalizeErrorResponse(requestWithId, badRequest("Route not found")) as Promise<Response>;
     }
   };
 }
