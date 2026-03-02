@@ -1,10 +1,8 @@
-// @ts-check
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp, createWorkerService, handleQueueBatch, handleScheduled, runReconcile } from "../apps/edge/src/app.js";
 
-function toBytes(value) {
+function toBytes(value: Uint8Array | ArrayBuffer | string | unknown): Uint8Array {
   if (value instanceof Uint8Array) {
     return value.slice();
   }
@@ -18,19 +16,19 @@ function toBytes(value) {
 }
 
 function createBucket() {
-  const values = new Map();
+  const values = new Map<string, { body: Uint8Array; contentType: string }>();
 
   return {
-    async put(key, value, options = {}) {
+    async put(key: string, value: Uint8Array | ArrayBuffer | string | unknown, options: { httpMetadata?: { contentType?: string } } = {}) {
       values.set(key, {
         body: toBytes(value),
         contentType: options.httpMetadata?.contentType || "application/octet-stream"
       });
     },
-    async delete(key) {
+    async delete(key: string) {
       values.delete(key);
     },
-    async get(key) {
+    async get(key: string) {
       const entry = values.get(key);
       if (!entry) {
         return null;
@@ -49,7 +47,7 @@ function createBucket() {
   };
 }
 
-function bytesToBase64Url(value) {
+function bytesToBase64Url(value: Uint8Array | ArrayBuffer | string | unknown): string {
   const bytes = toBytes(value);
   let binary = "";
   for (const byte of bytes) {
@@ -58,7 +56,7 @@ function bytesToBase64Url(value) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function base64UrlToBytes(value) {
+function base64UrlToBytes(value: unknown): Uint8Array {
   const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
   const binary = atob(padded);
@@ -69,7 +67,7 @@ function base64UrlToBytes(value) {
   return bytes;
 }
 
-function concatBytes(...parts) {
+function concatBytes(...parts: Array<Uint8Array | ArrayBuffer | string | unknown>): Uint8Array {
   const arrays = parts.map((value) => toBytes(value));
   const total = arrays.reduce((sum, entry) => sum + entry.byteLength, 0);
   const merged = new Uint8Array(total);
@@ -81,7 +79,7 @@ function concatBytes(...parts) {
   return merged;
 }
 
-async function signStripePayload(secret, payload, timestamp = Math.floor(Date.now() / 1000)) {
+async function signStripePayload(secret: string, payload: string, timestamp = Math.floor(Date.now() / 1000)): Promise<string> {
   const key = await globalThis.crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
@@ -103,7 +101,7 @@ async function signStripePayload(secret, payload, timestamp = Math.floor(Date.no
   return `t=${timestamp},v1=${signature}`;
 }
 
-async function requestJson(app, path, init = {}) {
+async function requestJson(app: { fetch: (req: Request) => Promise<Response> }, path: string, init: RequestInit = {}) {
   const url = path.startsWith("http://") || path.startsWith("https://") ? path : `http://example.test${path}`;
   const response = await app.fetch(
     new Request(url, {
@@ -114,9 +112,9 @@ async function requestJson(app, path, init = {}) {
   return { response, data };
 }
 
-function createFrontendHandler(bodyByPath = {}) {
+function createFrontendHandler(bodyByPath: Record<string, string> = {}) {
   return {
-    async fetch(request) {
+    async fetch(request: Request) {
       const requestUrl = new URL(request.url);
       const body = bodyByPath[requestUrl.pathname] || bodyByPath.default;
       if (body === undefined) {
@@ -141,8 +139,8 @@ const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
 
 test("worker serves invite flow, bundle upload, build logs, session events, and runtime validation", async () => {
-  const queuedBuilds = [];
-  const queuedReconcile = [];
+  const queuedBuilds: unknown[] = [];
+  const queuedReconcile: unknown[] = [];
   const app = createApp({
     frontendHandler: createFrontendHandler({
       "/":
@@ -150,12 +148,12 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     }),
     TEMPLATE_BUCKET: createBucket(),
     BUILD_QUEUE: {
-      async send(body) {
+      async send(body: unknown) {
         queuedBuilds.push(body);
       }
     },
     RECONCILE_QUEUE: {
-      async send(body) {
+      async send(body: unknown) {
         queuedReconcile.push(body);
       }
     },
@@ -193,8 +191,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     }),
     TURNSTILE_SECRET: "secret",
     TURNSTILE_SITE_KEY: "sitekey",
-    fetchImpl: async (_url, init) => {
-      const params = new URLSearchParams(init.body);
+    fetchImpl: async (_url: string, init: RequestInit) => {
+      const params = new URLSearchParams(init.body as string);
       const success = params.get("response") === "valid-turnstile";
       return new Response(
         JSON.stringify(success ? { success: true } : { success: false, "error-codes": ["invalid-input-response"] }),
@@ -354,7 +352,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
       hash: "SHA-256"
     },
     passkeyKeyPair.privateKey,
-    concatBytes(passkeyAuthenticatorData, passkeyLoginClientHash)
+    concatBytes(passkeyAuthenticatorData, passkeyLoginClientHash) as BufferSource
   );
 
   const passkeyLoginFinish = await requestJson(app, "/api/auth/passkeys/login/finish", {
@@ -487,9 +485,9 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(version.data.build.status, "queued");
   assert.deepEqual(version.data.templateVersion.manifest.persistedPaths, ["/workspace"]);
   assert.equal(queuedBuilds.length, 1);
-  assert.equal(queuedBuilds[0].type, "build");
-  assert.equal(queuedBuilds[0].buildId, version.data.build.id);
-  assert.match(queuedBuilds[0].dispatchedAt, /\d{4}-\d{2}-\d{2}T/);
+  assert.equal((queuedBuilds[0] as any).type, "build");
+  assert.equal((queuedBuilds[0] as any).buildId, version.data.build.id);
+  assert.match((queuedBuilds[0] as any).dispatchedAt, /\d{4}-\d{2}-\d{2}T/);
 
   const invalidVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
     method: "POST",
@@ -636,7 +634,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const allBuilds = await requestJson(app, "/api/template-builds", {
     headers: ownerHeaders
   });
-  const deadLetterBuild = allBuilds.data.builds.find((entry) => entry.id === failingVersion.data.build.id);
+  const deadLetterBuild = allBuilds.data.builds.find((entry: any) => entry.id === failingVersion.data.build.id);
   assert.equal(deadLetterBuild.status, "dead_lettered");
   assert.equal(deadLetterBuild.attempts, 3);
 
@@ -717,7 +715,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerHeaders
   });
   assert.equal(
-    templateList.data.templates.some((entry) => entry.id === disposableTemplateId),
+    templateList.data.templates.some((entry: any) => entry.id === disposableTemplateId),
     false
   );
 
@@ -1016,8 +1014,8 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerSecondHeaders
   });
   assert.equal(ownerSessions.response.status, 200);
-  assert.ok(ownerSessions.data.sessions.some((entry) => entry.id === owner.data.authSessionId));
-  assert.ok(ownerSessions.data.sessions.some((entry) => entry.current));
+  assert.ok(ownerSessions.data.sessions.some((entry: any) => entry.id === owner.data.authSessionId));
+  assert.ok(ownerSessions.data.sessions.some((entry: any) => entry.current));
 
   const ownerSessionRevoked = await requestJson(app, `/api/auth/sessions/${owner.data.authSessionId}`, {
     method: "DELETE",
@@ -1120,7 +1118,7 @@ test("worker records workspace membership edge cases in the audit log", async ()
     headers: ownerHeaders
   });
   assert.equal(members.response.status, 200);
-  const teammateMembership = members.data.members.find((entry) => entry.userId === teammate.data.user.id);
+  const teammateMembership = members.data.members.find((entry: any) => entry.userId === teammate.data.user.id);
   assert.ok(teammateMembership);
 
   const reaffirmedRole = await requestJson(app, `/api/workspaces/current/members/${teammate.data.user.id}/role`, {
@@ -1141,31 +1139,31 @@ test("worker records workspace membership edge cases in the audit log", async ()
     headers: ownerHeaders
   });
   assert.equal(audit.response.status, 200);
-  assert.ok(audit.data.audit.some((entry) => entry.action === "workspace.invite_rejected_existing_member"));
-  assert.ok(audit.data.audit.some((entry) => entry.action === "workspace.invite_rejected_duplicate"));
+  assert.ok(audit.data.audit.some((entry: any) => entry.action === "workspace.invite_rejected_existing_member"));
+  assert.ok(audit.data.audit.some((entry: any) => entry.action === "workspace.invite_rejected_duplicate"));
   assert.ok(
     audit.data.audit.some(
-      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
+      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
     )
   );
   assert.ok(
     audit.data.audit.some(
-      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
+      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
     )
   );
-  assert.ok(audit.data.audit.some((entry) => entry.action === "workspace.member_role_reaffirmed"));
-  const roleAudit = audit.data.audit.find((entry) => entry.action === "workspace.member_role_updated");
+  assert.ok(audit.data.audit.some((entry: any) => entry.action === "workspace.member_role_reaffirmed"));
+  const roleAudit = audit.data.audit.find((entry: any) => entry.action === "workspace.member_role_updated");
   assert.equal(roleAudit.details.previousRole, "member");
   assert.equal(roleAudit.details.role, "admin");
 });
 
 test("worker scheduled handler enqueues reconcile jobs", async () => {
-  const messages = [];
+  const messages: unknown[] = [];
   await handleScheduled(
     { cron: "*/15 * * * *" },
     {
       RECONCILE_QUEUE: {
-        async send(body) {
+        async send(body: unknown) {
           messages.push(body);
         }
       }
@@ -1220,7 +1218,7 @@ test("worker queue consumer processes queued builds with the shared service stat
   );
 
   const builds = await service.listTemplateBuilds(owner.token);
-  const processedBuild = builds.builds.find((entry) => entry.id === version.build.id);
+  const processedBuild = builds.builds.find((entry: any) => entry.id === version.build.id);
   assert.ok(processedBuild);
   assert.equal(processedBuild.status, "succeeded");
   assert.equal(processedBuild.executionSource, "queue");
@@ -1539,7 +1537,7 @@ test("worker secures runtime routes and redacts workspace secrets", async () => 
     headers: ownerHeaders
   });
   assert.equal(listedSecrets.response.status, 200);
-  assert.deepEqual(listedSecrets.data.secrets.map((entry) => entry.name), ["API_TOKEN"]);
+  assert.deepEqual(listedSecrets.data.secrets.map((entry: any) => entry.name), ["API_TOKEN"]);
   assert.equal("value" in listedSecrets.data.secrets[0], false);
 
   const template = await requestJson(app, "/api/templates", {
@@ -1611,7 +1609,7 @@ test("worker secures runtime routes and redacts workspace secrets", async () => 
   });
   assert.equal(attackerPreview.response.status, 404);
 
-  let rateLimited = null;
+  let rateLimited: Awaited<ReturnType<typeof requestJson>> | null = null;
   for (let attempt = 0; attempt < 13; attempt += 1) {
     const response = await requestJson(app, `/api/sessions/${session.data.session.id}/ssh-token`, {
       method: "POST",
@@ -1619,8 +1617,8 @@ test("worker secures runtime routes and redacts workspace secrets", async () => 
     });
     rateLimited = response;
   }
-  assert.equal(rateLimited.response.status, 429);
-  assert.equal(rateLimited.response.headers.get("x-burstflare-rate-limit-limit"), "12");
+  assert.equal(rateLimited!.response.status, 429);
+  assert.equal(rateLimited!.response.headers.get("x-burstflare-rate-limit-limit"), "12");
 
   const exported = await requestJson(app, "/api/admin/export", {
     headers: ownerHeaders
@@ -1655,13 +1653,13 @@ test("runtime-aware reconcile stops running sessions and persists runtime state"
   });
   await service.startSession(owner.token, created.session.id);
 
-  const stopped = [];
+  const stopped: Array<{ sessionId: string; reason: string }> = [];
   const reconciled = await runReconcile({
     service,
     containersEnabled: true,
-    getSessionContainer(sessionId) {
+    getSessionContainer(sessionId: string) {
       return {
-        async stopRuntime(reason) {
+        async stopRuntime(reason: string) {
           stopped.push({
             sessionId,
             reason
@@ -1689,7 +1687,13 @@ test("runtime-aware reconcile stops running sessions and persists runtime state"
 });
 
 test("worker proxies runtime SSH websocket upgrades into the session container", async () => {
-  const forwarded = {
+  const forwarded: {
+    started: number;
+    sessionId: string | null;
+    path: string | null;
+    requestSessionId: string | null;
+    upgrade: string | null;
+  } = {
     started: 0,
     sessionId: null,
     path: null,
@@ -1700,13 +1704,13 @@ test("worker proxies runtime SSH websocket upgrades into the session container",
   const app = createApp({
     service,
     containersEnabled: true,
-    getSessionContainer(sessionId) {
+    getSessionContainer(sessionId: string) {
       forwarded.sessionId = sessionId;
       return {
         async startAndWaitForPorts() {
           forwarded.started += 1;
         },
-        async fetch(request) {
+        async fetch(request: Request) {
           const url = new URL(request.url);
           forwarded.path = url.pathname;
           forwarded.requestSessionId = url.searchParams.get("sessionId");
@@ -1768,7 +1772,13 @@ test("worker proxies runtime SSH websocket upgrades into the session container",
 });
 
 test("worker proxies browser terminal websocket upgrades into the session container shell route", async () => {
-  const forwarded = {
+  const forwarded: {
+    started: number;
+    sessionId: string | null;
+    path: string | null;
+    requestSessionId: string | null;
+    upgrade: string | null;
+  } = {
     started: 0,
     sessionId: null,
     path: null,
@@ -1779,13 +1789,13 @@ test("worker proxies browser terminal websocket upgrades into the session contai
   const app = createApp({
     service,
     containersEnabled: true,
-    getSessionContainer(sessionId) {
+    getSessionContainer(sessionId: string) {
       forwarded.sessionId = sessionId;
       return {
         async startAndWaitForPorts() {
           forwarded.started += 1;
         },
-        async fetch(request) {
+        async fetch(request: Request) {
           const url = new URL(request.url);
           forwarded.path = url.pathname;
           forwarded.requestSessionId = url.searchParams.get("sessionId");
@@ -1847,7 +1857,16 @@ test("worker proxies browser terminal websocket upgrades into the session contai
 });
 
 test("worker proxies browser editor requests into the session container editor route", async () => {
-  const forwarded = {
+  const forwarded: {
+    started: number;
+    sessionId: string | null;
+    path: string | null;
+    requestSessionId: string | null;
+    requestedPath: string | null;
+    persistedPaths: string[];
+    method: string | null;
+    bodyText: string | null;
+  } = {
     started: 0,
     sessionId: null,
     path: null,
@@ -1861,13 +1880,13 @@ test("worker proxies browser editor requests into the session container editor r
   const app = createApp({
     service,
     containersEnabled: true,
-    getSessionContainer(sessionId) {
+    getSessionContainer(sessionId: string) {
       forwarded.sessionId = sessionId;
       return {
         async startAndWaitForPorts() {
           forwarded.started += 1;
         },
-        async fetch(request) {
+        async fetch(request: Request) {
           const url = new URL(request.url);
           forwarded.path = url.pathname;
           forwarded.requestSessionId = url.searchParams.get("sessionId");
@@ -1950,7 +1969,10 @@ test("worker proxies browser editor requests into the session container editor r
 });
 
 test("worker bootstraps runtime containers on start and records lifecycle hooks on stop", async () => {
-  const forwarded = {
+  const forwarded: {
+    bootstrap: any;
+    lifecycle: any;
+  } = {
     bootstrap: null,
     lifecycle: null
   };
@@ -1960,7 +1982,7 @@ test("worker bootstraps runtime containers on start and records lifecycle hooks 
     containersEnabled: true,
     getSessionContainer() {
       return {
-        async startRuntime({ sessionId }) {
+        async startRuntime({ sessionId }: { sessionId: string }) {
           return {
             sessionId,
             desiredState: "running",
@@ -1979,7 +2001,7 @@ test("worker bootstraps runtime containers on start and records lifecycle hooks 
             operationId: "op-stop"
           };
         },
-        async fetch(request) {
+        async fetch(request: Request) {
           const url = new URL(request.url);
           const payload = JSON.parse(await request.text());
           if (url.pathname === "/runtime/bootstrap") {
@@ -2051,8 +2073,18 @@ test("worker bootstraps runtime containers on start and records lifecycle hooks 
 });
 
 test("worker coordinates session lifecycle through the session container durable object", async () => {
-  const calls = [];
-  let runtime = {
+  const calls: string[] = [];
+  let runtime: {
+    desiredState: string;
+    status: string;
+    runtimeState: string;
+    bootCount: number;
+    version: number;
+    operationId: string | null;
+    sessionId?: string;
+    lastCommand?: string;
+    lastStopReason?: string;
+  } = {
     desiredState: "stopped",
     status: "idle",
     runtimeState: "stopped",
@@ -2067,7 +2099,7 @@ test("worker coordinates session lifecycle through the session container durable
     containersEnabled: true,
     getSessionContainer() {
       return {
-        async startRuntime({ sessionId }) {
+        async startRuntime({ sessionId }: { sessionId: string }) {
           runtime = {
             ...runtime,
             sessionId,
@@ -2082,7 +2114,7 @@ test("worker coordinates session lifecycle through the session container durable
           calls.push(`start:${sessionId}`);
           return runtime;
         },
-        async stopRuntime(reason) {
+        async stopRuntime(reason: string) {
           runtime = {
             ...runtime,
             desiredState: "sleeping",
@@ -2096,7 +2128,7 @@ test("worker coordinates session lifecycle through the session container durable
           calls.push(`stop:${reason}`);
           return runtime;
         },
-        async restartRuntime({ sessionId }) {
+        async restartRuntime({ sessionId }: { sessionId: string }) {
           runtime = {
             ...runtime,
             sessionId,
@@ -2184,7 +2216,7 @@ test("worker coordinates session lifecycle through the session container durable
     headers: authHeaders
   });
   assert.equal(listed.response.status, 200);
-  const listedSession = listed.data.sessions.find((entry) => entry.id === sessionId);
+  const listedSession = listed.data.sessions.find((entry: any) => entry.id === sessionId);
   assert.equal(listedSession.runtime.status, "running");
 
   const stopped = await requestJson(app, `/api/sessions/${sessionId}/stop`, {
@@ -2244,11 +2276,11 @@ test("worker exposes workflow-backed build dispatch", async () => {
   assert.equal(health.data.runtime.workflowEnabled, true);
   assert.equal(health.data.runtime.buildDispatchMode, "workflow");
 
-  const workflowRuns = [];
+  const workflowRuns: any[] = [];
   const service = createWorkerService({
     BUILD_WORKFLOW_NAME: "burstflare-builds",
     BUILD_WORKFLOW: {
-      async create(payload) {
+      async create(payload: any) {
         workflowRuns.push(payload);
         return {
           id: payload.id
@@ -2291,8 +2323,14 @@ test("worker exposes workflow-backed build dispatch", async () => {
 });
 
 test("worker replays restored snapshots into the container runtime on session start", async () => {
-  const appliedRestores = [];
-  let runtime = {
+  const appliedRestores: any[] = [];
+  let runtime: {
+    desiredState: string;
+    status: string;
+    runtimeState: string;
+    bootCount: number;
+    sessionId?: string;
+  } = {
     desiredState: "stopped",
     status: "idle",
     runtimeState: "stopped",
@@ -2305,7 +2343,7 @@ test("worker replays restored snapshots into the container runtime on session st
     containersEnabled: true,
     getSessionContainer() {
       return {
-        async startRuntime({ sessionId }) {
+        async startRuntime({ sessionId }: { sessionId: string }) {
           runtime = {
             ...runtime,
             sessionId,
@@ -2319,7 +2357,7 @@ test("worker replays restored snapshots into the container runtime on session st
         async getRuntimeState() {
           return runtime;
         },
-        async fetch(request) {
+        async fetch(request: Request) {
           const url = new URL(request.url);
           if (url.pathname === "/snapshot/restore") {
             const payload = JSON.parse(await request.text());
@@ -2424,8 +2462,14 @@ test("worker auto-captures snapshot content from a running container", async () 
     null,
     2
   );
-  const exportRequests = [];
-  let runtime = {
+  const exportRequests: any[] = [];
+  let runtime: {
+    desiredState: string;
+    status: string;
+    runtimeState: string;
+    bootCount: number;
+    sessionId?: string;
+  } = {
     desiredState: "stopped",
     status: "idle",
     runtimeState: "stopped",
@@ -2438,7 +2482,7 @@ test("worker auto-captures snapshot content from a running container", async () 
     containersEnabled: true,
     getSessionContainer() {
       return {
-        async startRuntime({ sessionId }) {
+        async startRuntime({ sessionId }: { sessionId: string }) {
           runtime = {
             ...runtime,
             sessionId,
@@ -2452,7 +2496,7 @@ test("worker auto-captures snapshot content from a running container", async () 
         async getRuntimeState() {
           return runtime;
         },
-        async fetch(request) {
+        async fetch(request: Request) {
           const url = new URL(request.url);
           if (url.pathname === "/snapshot/export") {
             exportRequests.push(JSON.parse(await request.text()));
@@ -2528,14 +2572,14 @@ test("worker auto-captures snapshot content from a running container", async () 
 });
 
 test("preview route rehydrates the restored snapshot before proxying", async () => {
-  const forwarded = [];
+  const forwarded: Array<{ path: string; payload?: any }> = [];
   const service = createWorkerService();
   const app = createApp({
     service,
     containersEnabled: true,
     getSessionContainer() {
       return {
-        async fetch(request) {
+        async fetch(request: Request) {
           const url = new URL(request.url);
           if (url.pathname === "/runtime/bootstrap" || url.pathname === "/snapshot/restore") {
             forwarded.push({
@@ -2670,16 +2714,16 @@ test("worker can roll back a template through the API", async () => {
 });
 
 test("worker exposes billing endpoints and validates Stripe webhooks", async () => {
-  const checkoutCalls = [];
-  const portalCalls = [];
-  const invoiceCalls = [];
+  const checkoutCalls: any[] = [];
+  const portalCalls: any[] = [];
+  const invoiceCalls: any[] = [];
   const service = createWorkerService({
     BILLING_RATE_RUNTIME_MINUTE_USD: "0.05",
     BILLING_RATE_SNAPSHOT_USD: "0.50",
     BILLING_RATE_TEMPLATE_BUILD_USD: "2.00",
     billing: {
       providerName: "stripe",
-      async createCheckoutSession(input) {
+      async createCheckoutSession(input: any) {
         checkoutCalls.push(input);
         return {
           provider: "stripe",
@@ -2690,7 +2734,7 @@ test("worker exposes billing endpoints and validates Stripe webhooks", async () 
           billingStatus: "checkout_open"
         };
       },
-      async createPortalSession(input) {
+      async createPortalSession(input: any) {
         portalCalls.push(input);
         return {
           provider: "stripe",
@@ -2698,7 +2742,7 @@ test("worker exposes billing endpoints and validates Stripe webhooks", async () 
           url: "https://billing.stripe.com/p/session/worker_1"
         };
       },
-      async createUsageInvoice(input) {
+      async createUsageInvoice(input: any) {
         invoiceCalls.push(input);
         return {
           provider: "stripe",

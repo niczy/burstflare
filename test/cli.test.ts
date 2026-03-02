@@ -1,5 +1,3 @@
-// @ts-check
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -11,14 +9,14 @@ import { createApp } from "../apps/edge/src/app.js";
 function capture() {
   return {
     data: "",
-    write(chunk) {
+    write(chunk: string) {
       this.data += chunk;
     }
   };
 }
 
-function createFetch(app) {
-  return async (url, options) =>
+function createFetch(app: { fetch: (req: Request) => Promise<Response> }) {
+  return async (url: string, options?: RequestInit) =>
     app.fetch(
       new Request(url, {
         ...options
@@ -26,7 +24,7 @@ function createFetch(app) {
     );
 }
 
-function toBytes(value) {
+function toBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) {
     return value.slice();
   }
@@ -40,19 +38,19 @@ function toBytes(value) {
 }
 
 function createBucket() {
-  const values = new Map();
+  const values = new Map<string, { body: Uint8Array; contentType: string }>();
 
   return {
-    async put(key, value, options = {}) {
+    async put(key: string, value: unknown, options: { httpMetadata?: { contentType?: string } } = {}) {
       values.set(key, {
         body: toBytes(value),
         contentType: options.httpMetadata?.contentType || "application/octet-stream"
       });
     },
-    async delete(key) {
+    async delete(key: string) {
       values.delete(key);
     },
-    async get(key) {
+    async get(key: string) {
       const entry = values.get(key);
       if (!entry) {
         return null;
@@ -154,7 +152,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     });
     assert.equal(code, 0);
     const secretsOutput = JSON.parse(stdout.data.trim());
-    assert.deepEqual(secretsOutput.secrets.map((entry) => entry.name), ["API_TOKEN"]);
+    assert.deepEqual(secretsOutput.secrets.map((entry: any) => entry.name), ["API_TOKEN"]);
     assert.equal("value" in secretsOutput.secrets[0], false);
 
     stdout.data = "";
@@ -657,14 +655,13 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     stdout.data = "";
     stderr.data = "";
 
-    /** @type {{ command: string; args: string[]; options: any } | null} */
-    let spawned = null;
+    let spawned: { command: string; args: string[]; options: any } | null = null;
     let tunnelClosed = false;
-    const spawnImpl = (command, args, options) => {
+    const spawnImpl = (command: string, args: string[], options: any) => {
       if (command === "ssh-keygen") {
         const outputPath = args[args.indexOf("-f") + 1];
         return {
-          on(event, handler) {
+          on(event: string, handler: (code: number | null, signal: NodeJS.Signals | null) => void) {
             if (event === "exit") {
               void (async () => {
                 await writeFile(outputPath, "PRIVATE KEY\n");
@@ -678,7 +675,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       }
       spawned = { command, args, options };
       return {
-        on(event, handler) {
+        on(event: string, handler: (code: number | null, signal: NodeJS.Signals | null) => void) {
           if (event === "exit") {
             setImmediate(() => handler(0, null));
           }
@@ -686,7 +683,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
         }
       };
     };
-    const createSshTunnelImpl = async (sshUrl) => ({
+    const createSshTunnelImpl = async (sshUrl: string) => ({
       host: "127.0.0.1",
       port: 4123,
       sshUrl,
@@ -858,8 +855,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     });
     assert.equal(code, 0);
     const sessionsOutput = JSON.parse(stdout.data.trim());
-    assert.ok(sessionsOutput.sessions.some((entry) => entry.id === initialAuthSessionId));
-    assert.ok(sessionsOutput.sessions.some((entry) => entry.current));
+    assert.ok(sessionsOutput.sessions.some((entry: any) => entry.id === initialAuthSessionId));
+    assert.ok(sessionsOutput.sessions.some((entry: any) => entry.current));
 
     stdout.data = "";
 
@@ -883,7 +880,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     });
     assert.equal(code, 0);
     const afterRevokeSessions = JSON.parse(stdout.data.trim());
-    assert.equal(afterRevokeSessions.sessions.some((entry) => entry.id === initialAuthSessionId), false);
+    assert.equal(afterRevokeSessions.sessions.some((entry: any) => entry.id === initialAuthSessionId), false);
 
     stdout.data = "";
 
@@ -1019,7 +1016,7 @@ test("cli help adds ansi color when output supports it", async () => {
   const stdout = {
     data: "",
     isTTY: true,
-    write(chunk) {
+    write(chunk: string) {
       this.data += chunk;
     }
   };
@@ -1070,7 +1067,7 @@ test("cli uses burstflare.dev by default when no url is provided", async () => {
 
   try {
     const code = await runCli(["auth", "register", "--email", "default-url@example.com", "--name", "Default Url"], {
-      fetchImpl: async (url) => {
+      fetchImpl: async (url: string) => {
         requestedUrl = url;
         return new Response(
           JSON.stringify({
@@ -1237,7 +1234,7 @@ test("cli supports noun-first aliases and local list filters", async () => {
     });
     assert.equal(code, 0);
     const activeTemplates = JSON.parse(stdout.data.trim());
-    assert.deepEqual(activeTemplates.templates.map((entry) => entry.id), [activeTemplate.template.id]);
+    assert.deepEqual(activeTemplates.templates.map((entry: any) => entry.id), [activeTemplate.template.id]);
     stdout.data = "";
 
     code = await runCli(["template", "--archived", "--url", "http://local"], {
@@ -1248,7 +1245,7 @@ test("cli supports noun-first aliases and local list filters", async () => {
     });
     assert.equal(code, 0);
     const archivedTemplates = JSON.parse(stdout.data.trim());
-    assert.deepEqual(archivedTemplates.templates.map((entry) => entry.id), [archivedTemplate.template.id]);
+    assert.deepEqual(archivedTemplates.templates.map((entry: any) => entry.id), [archivedTemplate.template.id]);
     stdout.data = "";
 
     code = await runCli(["releases", "--template", activeTemplate.template.id, "--url", "http://local"], {
@@ -1295,7 +1292,7 @@ test("cli supports noun-first aliases and local list filters", async () => {
     });
     assert.equal(code, 0);
     const runningSessions = JSON.parse(stdout.data.trim());
-    assert.deepEqual(runningSessions.sessions.map((entry) => entry.id), [sessionId]);
+    assert.deepEqual(runningSessions.sessions.map((entry: any) => entry.id), [sessionId]);
     stdout.data = "";
 
     code = await runCli(["session", "stop", sessionId, "--url", "http://local"], {
@@ -1318,7 +1315,7 @@ test("cli supports noun-first aliases and local list filters", async () => {
     });
     assert.equal(code, 0);
     const sleepingSessions = JSON.parse(stdout.data.trim());
-    assert.deepEqual(sleepingSessions.sessions.map((entry) => entry.id), [sessionId]);
+    assert.deepEqual(sleepingSessions.sessions.map((entry: any) => entry.id), [sessionId]);
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });

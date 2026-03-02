@@ -1,5 +1,3 @@
-// @ts-check
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createBurstFlareService, createMemoryStore } from "@burstflare/shared";
@@ -8,21 +6,21 @@ const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
 
 function createObjectStore() {
-  const bundles = new Map();
-  const logs = new Map();
-  const artifacts = new Map();
-  const snapshots = new Map();
+  const bundles = new Map<string, { key: string; body: Uint8Array; contentType: string }>();
+  const logs = new Map<string, string>();
+  const artifacts = new Map<string, string>();
+  const snapshots = new Map<string, { body: Uint8Array; contentType: string }>();
   const decoder = new TextDecoder();
 
   return {
-    async putTemplateVersionBundle({ templateVersion, body, contentType }) {
+    async putTemplateVersionBundle({ templateVersion, body, contentType }: { templateVersion: { id: string; bundleKey: string }; body: Uint8Array; contentType: string }) {
       bundles.set(templateVersion.id, {
         key: templateVersion.bundleKey,
         body: body.slice(),
         contentType
       });
     },
-    async getTemplateVersionBundle({ templateVersion }) {
+    async getTemplateVersionBundle({ templateVersion }: { templateVersion: { id: string } }) {
       const entry = bundles.get(templateVersion.id);
       if (!entry) {
         return null;
@@ -33,13 +31,13 @@ function createObjectStore() {
         bytes: entry.body.byteLength
       };
     },
-    async deleteTemplateVersionBundle({ templateVersion }) {
+    async deleteTemplateVersionBundle({ templateVersion }: { templateVersion: { id: string } }) {
       bundles.delete(templateVersion.id);
     },
-    async putBuildLog({ templateVersion, log }) {
+    async putBuildLog({ templateVersion, log }: { templateVersion: { id: string }; log: string }) {
       logs.set(templateVersion.id, log);
     },
-    async getBuildLog({ templateVersion }) {
+    async getBuildLog({ templateVersion }: { templateVersion: { id: string } }) {
       const text = logs.get(templateVersion.id);
       if (!text) {
         return null;
@@ -50,13 +48,13 @@ function createObjectStore() {
         bytes: new TextEncoder().encode(text).byteLength
       };
     },
-    async deleteBuildLog({ templateVersion }) {
+    async deleteBuildLog({ templateVersion }: { templateVersion: { id: string } }) {
       logs.delete(templateVersion.id);
     },
-    async putBuildArtifact({ build, artifact }) {
+    async putBuildArtifact({ build, artifact }: { build: { id: string }; artifact: string }) {
       artifacts.set(build.id, artifact);
     },
-    async getBuildArtifact({ build }) {
+    async getBuildArtifact({ build }: { build: { id: string } }) {
       const text = artifacts.get(build.id);
       if (!text) {
         return null;
@@ -67,16 +65,16 @@ function createObjectStore() {
         bytes: new TextEncoder().encode(text).byteLength
       };
     },
-    async deleteBuildArtifact({ build }) {
+    async deleteBuildArtifact({ build }: { build: { id: string } }) {
       artifacts.delete(build.id);
     },
-    async putSnapshot({ snapshot, body, contentType }) {
+    async putSnapshot({ snapshot, body, contentType }: { snapshot: { id: string }; body: Uint8Array; contentType: string }) {
       snapshots.set(snapshot.id, {
         body: body.slice(),
         contentType
       });
     },
-    async getSnapshot({ snapshot }) {
+    async getSnapshot({ snapshot }: { snapshot: { id: string } }) {
       const entry = snapshots.get(snapshot.id);
       if (!entry) {
         return null;
@@ -87,17 +85,17 @@ function createObjectStore() {
         bytes: entry.body.byteLength
       };
     },
-    async deleteSnapshot({ snapshot }) {
+    async deleteSnapshot({ snapshot }: { snapshot: { id: string } }) {
       snapshots.delete(snapshot.id);
     },
-    readBundleText(templateVersionId) {
+    readBundleText(templateVersionId: string) {
       const entry = bundles.get(templateVersionId);
       return entry ? decoder.decode(entry.body) : null;
     },
-    readBuildLogText(templateVersionId) {
+    readBuildLogText(templateVersionId: string) {
       return logs.get(templateVersionId) || null;
     },
-    readBuildArtifactText(buildId) {
+    readBuildArtifactText(buildId: string) {
       return artifacts.get(buildId) || null;
     }
   };
@@ -106,7 +104,7 @@ function createObjectStore() {
 test("service covers invites, queued builds, releases, session events, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();
-  const queuedBuilds = [];
+  const queuedBuilds: string[] = [];
   let reconcileJobs = 0;
   const store = createMemoryStore();
   const service = createBurstFlareService({
@@ -114,7 +112,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
     objects,
     jobs: {
       buildStrategy: "queue",
-      async enqueueBuild(buildId) {
+      async enqueueBuild(buildId: string) {
         queuedBuilds.push(buildId);
         return {
           buildId,
@@ -331,8 +329,8 @@ test("service covers invites, queued builds, releases, session events, usage, an
     version: "1.1.1",
     manifest: { image: "registry.cloudflare.com/test/node-dev:1.1.1" }
   });
-  await store.transact((state) => {
-    const build = state.templateBuilds.find((entry) => entry.id === stuckVersion.build.id);
+  await store.transact((state: any) => {
+    const build = state.templateBuilds.find((entry: any) => entry.id === stuckVersion.build.id);
     assert.ok(build);
     build.status = "building";
     build.startedAt = new Date(tick - 1000 * 60 * 10).toISOString();
@@ -426,7 +424,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(objects.readBuildArtifactText(disposableVersion.build.id), null);
   const templateList = await service.listTemplates(owner.token);
   assert.equal(
-    templateList.templates.some((entry) => entry.id === disposableTemplate.template.id),
+    templateList.templates.some((entry: any) => entry.id === disposableTemplate.template.id),
     false
   );
 
@@ -521,11 +519,11 @@ test("service covers invites, queued builds, releases, session events, usage, an
   });
   const authSessions = await service.listAuthSessions(ownerSecondLogin.token);
   assert.ok(authSessions.sessions.length >= 3);
-  assert.ok(authSessions.sessions.some((entry) => entry.id === owner.authSessionId));
+  assert.ok(authSessions.sessions.some((entry: any) => entry.id === owner.authSessionId));
   const revokeSession = await service.revokeAuthSession(ownerSecondLogin.token, owner.authSessionId);
   assert.equal(revokeSession.ok, true);
   const afterRevoke = await service.listAuthSessions(ownerSecondLogin.token);
-  assert.equal(afterRevoke.sessions.some((entry) => entry.id === owner.authSessionId), false);
+  assert.equal(afterRevoke.sessions.some((entry: any) => entry.id === owner.authSessionId), false);
   await assert.rejects(() => service.authenticate(owner.token), /Unauthorized/);
   await assert.rejects(() => service.refreshSession(owner.refreshToken), /Unauthorized/);
   assert.ok((await service.authenticate(ownerSecondLogin.token)).user.id);
@@ -575,7 +573,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const secret = await service.setWorkspaceSecret(ownerSecondLogin.token, "api_token", "secret-value");
   assert.equal(secret.secret.name, "API_TOKEN");
   const secrets = await service.listWorkspaceSecrets(ownerSecondLogin.token);
-  assert.deepEqual(secrets.secrets.map((entry) => entry.name), ["API_TOKEN"]);
+  assert.deepEqual(secrets.secrets.map((entry: any) => entry.name), ["API_TOKEN"]);
 
   const exported = await service.exportWorkspace(ownerSecondLogin.token);
   assert.equal(exported.export.workspace.id, owner.workspace.id);
@@ -591,28 +589,28 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const audit = await service.getAudit(ownerSecondLogin.token, { limit: 200 });
   assert.ok(audit.audit.length >= 10);
-  assert.ok(audit.audit.some((entry) => entry.action === "workspace.invite_rejected_existing_member"));
-  assert.ok(audit.audit.some((entry) => entry.action === "workspace.invite_rejected_duplicate"));
+  assert.ok(audit.audit.some((entry: any) => entry.action === "workspace.invite_rejected_existing_member"));
+  assert.ok(audit.audit.some((entry: any) => entry.action === "workspace.invite_rejected_duplicate"));
   assert.ok(
     audit.audit.some(
-      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
+      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
     )
   );
   assert.ok(
     audit.audit.some(
-      (entry) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
+      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
     )
   );
-  assert.ok(audit.audit.some((entry) => entry.action === "workspace.member_role_reaffirmed"));
-  const roleUpdateAudit = audit.audit.find((entry) => entry.action === "workspace.member_role_updated");
+  assert.ok(audit.audit.some((entry: any) => entry.action === "workspace.member_role_reaffirmed"));
+  const roleUpdateAudit = audit.audit.find((entry: any) => entry.action === "workspace.member_role_updated");
   assert.equal(roleUpdateAudit.details.previousRole, "member");
   assert.equal(roleUpdateAudit.details.role, "admin");
 });
 
 test("service creates usage-based billing sessions, invoices, and Stripe webhooks", async () => {
-  const checkoutCalls = [];
-  const portalCalls = [];
-  const invoiceCalls = [];
+  const checkoutCalls: any[] = [];
+  const portalCalls: any[] = [];
+  const invoiceCalls: any[] = [];
   const store = createMemoryStore();
   const service = createBurstFlareService({
     store,
@@ -623,7 +621,7 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
     },
     billing: {
       providerName: "stripe",
-      async createCheckoutSession(input) {
+      async createCheckoutSession(input: any) {
         checkoutCalls.push(input);
         return {
           provider: "stripe",
@@ -634,7 +632,7 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
           billingStatus: "checkout_open"
         };
       },
-      async createPortalSession(input) {
+      async createPortalSession(input: any) {
         portalCalls.push(input);
         return {
           provider: "stripe",
@@ -642,7 +640,7 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
           url: "https://billing.stripe.com/p/session/test_1"
         };
       },
-      async createUsageInvoice(input) {
+      async createUsageInvoice(input: any) {
         invoiceCalls.push(input);
         return {
           provider: "stripe",
@@ -692,7 +690,7 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
   assert.equal(portalCalls[0].billing.customerId, "cus_test_1");
   assert.equal(portalCalls[0].returnUrl, "https://app.example.com/settings");
 
-  await store.transact((state) => {
+  await store.transact((state: any) => {
     state.usageEvents.push(
       {
         id: "use_runtime_1",
@@ -790,11 +788,11 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
 });
 
 test("service records workflow dispatch metadata and workflow-driven build completion", async () => {
-  const workflowRuns = [];
+  const workflowRuns: { buildId: string; instanceId: string }[] = [];
   const service = createBurstFlareService({
     jobs: {
       buildStrategy: "workflow",
-      async enqueueBuild(buildId) {
+      async enqueueBuild(buildId: string) {
         const instanceId = `bwf_${buildId}_${workflowRuns.length + 1}`;
         workflowRuns.push({ buildId, instanceId });
         return {
@@ -850,14 +848,14 @@ test("service records workflow dispatch metadata and workflow-driven build compl
 test("service exposes targeted operator reconcile workflows", async () => {
   let tick = Date.parse("2026-02-28T12:00:00.000Z");
   const objects = createObjectStore();
-  const queuedBuilds = [];
+  const queuedBuilds: string[] = [];
   const store = createMemoryStore();
   const service = createBurstFlareService({
     store,
     objects,
     jobs: {
       buildStrategy: "queue",
-      async enqueueBuild(buildId) {
+      async enqueueBuild(buildId: string) {
         queuedBuilds.push(buildId);
         return {
           buildId,
@@ -929,8 +927,8 @@ test("service exposes targeted operator reconcile workflows", async () => {
       image: "registry.cloudflare.com/test/ops-template:1.0.1"
     }
   });
-  await store.transact((state) => {
-    const build = state.templateBuilds.find((entry) => entry.id === stuckVersion.build.id);
+  await store.transact((state: any) => {
+    const build = state.templateBuilds.find((entry: any) => entry.id === stuckVersion.build.id);
     assert.ok(build);
     build.status = "building";
     build.startedAt = new Date(tick - 1000 * 60 * 10).toISOString();
@@ -1182,7 +1180,7 @@ test("service can roll back a template to a prior release", async () => {
   assert.equal(rolledBack.release.binding.templateName, "rollback-template");
 
   const releases = await service.listBindingReleases(owner.token);
-  const templateReleases = releases.releases.filter((entry) => entry.templateId === template.template.id);
+  const templateReleases = releases.releases.filter((entry: any) => entry.templateId === template.template.id);
   assert.equal(templateReleases.length, 3);
   assert.equal(templateReleases.at(-1).mode, "rollback");
   assert.equal(templateReleases.at(-1).templateVersionId, versionOne.templateVersion.id);
