@@ -1,17 +1,19 @@
-// @ts-check
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createCloudflareStateStore } from "@burstflare/shared";
 
 class MockD1Statement {
-  constructor(database, sql) {
+  database: MockD1Database;
+  sql: string;
+  bindings: unknown[];
+
+  constructor(database: MockD1Database, sql: string) {
     this.database = database;
     this.sql = sql.trim();
     this.bindings = [];
   }
 
-  bind(...values) {
+  bind(...values: unknown[]) {
     this.bindings = values;
     return this;
   }
@@ -33,22 +35,24 @@ class MockD1Statement {
 }
 
 class MockD1Database {
+  tables: Map<string, Map<unknown, Record<string, unknown>>>;
+
   constructor() {
     this.tables = new Map();
   }
 
-  prepare(sql) {
+  prepare(sql: string) {
     return new MockD1Statement(this, sql);
   }
 
-  ensureTable(name) {
+  ensureTable(name: string) {
     if (!this.tables.has(name)) {
       this.tables.set(name, new Map());
     }
-    return this.tables.get(name);
+    return this.tables.get(name)!;
   }
 
-  execute(sql, bindings) {
+  execute(sql: string, bindings: unknown[]): { success: boolean } {
     if (sql.startsWith("CREATE TABLE IF NOT EXISTS")) {
       const match = sql.match(/CREATE TABLE IF NOT EXISTS\s+([a-zA-Z0-9_]+)/);
       if (match) {
@@ -82,7 +86,7 @@ class MockD1Database {
       const [, tableName, columnList] = match;
       const table = this.ensureTable(tableName);
       const columns = columnList.split(",").map((column) => column.trim());
-      const row = {};
+      const row: Record<string, unknown> = {};
       for (let index = 0; index < columns.length; index += 1) {
         row[columns[index]] = bindings[index] ?? null;
       }
@@ -97,7 +101,7 @@ class MockD1Database {
     throw new Error(`Unsupported run statement: ${sql}`);
   }
 
-  query(sql, bindings) {
+  query(sql: string, bindings: unknown[]): Record<string, unknown>[] {
     if (sql.startsWith("SELECT value FROM")) {
       const match = sql.match(/SELECT value FROM\s+([a-zA-Z0-9_]+)/);
       if (!match) {
@@ -132,7 +136,7 @@ class MockD1Database {
       return Array.from(table.values())
         .sort((left, right) => {
           if (left.position !== right.position) {
-            return left.position - right.position;
+            return (left.position as number) - (right.position as number);
           }
           return String(left.row_key).localeCompare(String(right.row_key));
         })
@@ -251,8 +255,8 @@ test("cloudflare store loads normalized state without legacy fallback and preser
   const store = createCloudflareStateStore(db);
   const loaded = await store.load();
 
-  assert.deepEqual(loaded.users.map((entry) => entry.id), ["usr_2", "usr_1"]);
-  assert.deepEqual(loaded.sessions.map((entry) => entry.id), ["ses_z", "ses_a"]);
+  assert.deepEqual(loaded.users.map((entry: any) => entry.id), ["usr_2", "usr_1"]);
+  assert.deepEqual(loaded.sessions.map((entry: any) => entry.id), ["ses_z", "ses_a"]);
 
   const meta = await db.prepare("SELECT value FROM bf_state_meta WHERE key = ? LIMIT 1").bind("schema_version").first();
   assert.equal(meta.value, "1");
@@ -325,7 +329,7 @@ test("cloudflare store can load and save a scoped normalized collection without 
   const store = createCloudflareStateStore(db);
   const state = await store.loadCollections(["users"]);
 
-  assert.deepEqual(state.users.map((entry) => entry.id), ["usr_1"]);
+  assert.deepEqual(state.users.map((entry: any) => entry.id), ["usr_1"]);
   assert.deepEqual(state.templates, []);
 
   state.users[0].name = "Alpha Updated";
@@ -345,8 +349,8 @@ test("cloudflare store can load and save a scoped normalized collection without 
   const users = await db.prepare("SELECT payload_json FROM bf_users ORDER BY position ASC, row_key ASC").all();
   const templates = await db.prepare("SELECT payload_json FROM bf_templates ORDER BY position ASC, row_key ASC").all();
 
-  assert.equal(JSON.parse(users.results[0].payload_json).name, "Alpha Updated");
-  assert.equal(JSON.parse(templates.results[0].payload_json).name, "Keep Me");
+  assert.equal(JSON.parse(users.results[0].payload_json as string).name, "Alpha Updated");
+  assert.equal(JSON.parse(templates.results[0].payload_json as string).name, "Keep Me");
 });
 
 test("cloudflare store removes deleted rows from a scoped normalized collection", async () => {
@@ -398,7 +402,7 @@ test("cloudflare store removes deleted rows from a scoped normalized collection"
 
   const store = createCloudflareStateStore(db);
   const state = await store.loadCollections(["users"]);
-  state.users = state.users.filter((entry) => entry.id === "usr_2");
+  state.users = state.users.filter((entry: any) => entry.id === "usr_2");
 
   await store.save(
     state,
@@ -426,5 +430,5 @@ test("cloudflare store removes deleted rows from a scoped normalized collection"
   const users = await db.prepare("SELECT payload_json FROM bf_users ORDER BY position ASC, row_key ASC").all();
 
   assert.equal(users.results.length, 1);
-  assert.equal(JSON.parse(users.results[0].payload_json).id, "usr_2");
+  assert.equal(JSON.parse(users.results[0].payload_json as string).id, "usr_2");
 });

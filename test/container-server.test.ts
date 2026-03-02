@@ -1,5 +1,3 @@
-// @ts-check
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -13,7 +11,7 @@ import {
   updateEditorFile
 } from "../containers/session/server.mjs";
 
-function toBase64(value) {
+function toBase64(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
