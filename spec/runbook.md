@@ -76,21 +76,49 @@ Run these at the start of each operator day:
 
 ## 4. Rollout Checklist
 
-Use this sequence for every production rollout:
+### One-command deploy
+
+The `deploy` script runs the full pipeline: CI → schema validation → wrangler config generation → deploy → smoke tests.
+
+```bash
+npm run deploy                # production (default)
+npm run deploy:staging        # staging
+```
+
+Flags (pass after `--`):
+
+| Flag | Effect |
+|------|--------|
+| `--skip-ci` | Skip lint / typecheck / build / test (useful when CI already passed) |
+| `--skip-smoke` | Skip post-deploy smoke tests |
+| `--base-url=<url>` | Override the smoke-test target URL |
+
+Example:
+
+```bash
+npm run deploy -- --skip-ci --base-url=https://staging.burstflare.dev
+```
+
+### Manual steps (if not using the deploy script)
 
 1. `npm run ci`
 2. Authenticate Wrangler if needed (`npx wrangler whoami`)
 3. `npm run cf:validate-schema`
 4. `node scripts/cloudflare-generate-wrangler.mjs > wrangler.generated.toml`
-5. `sg docker -c 'npx wrangler deploy -c wrangler.generated.toml'`
+5. `npx wrangler deploy -c wrangler.generated.toml`
 6. Wait for the reported `Current Version ID`
 7. `node scripts/smoke.mjs --base-url https://burstflare.nicholas-zhaoyu.workers.dev`
-8. Run one manual operator check:
-   - create a session
-   - open preview
-   - open editor
-   - stop the session
-9. Only announce the rollout after smoke plus the manual runtime check succeed
+
+### Post-deploy verification
+
+After every rollout (automated or manual), run one manual operator check:
+
+1. Create a session
+2. Open preview
+3. Open editor
+4. Stop the session
+
+Only announce the rollout after smoke plus the manual runtime check succeed.
 
 ## 5. Limited Beta Onboarding
 

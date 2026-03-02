@@ -54,6 +54,16 @@ async function waitForHealthy(baseUrl) {
 }
 
 /**
+ * Strip ANSI escape sequences so assertions match plain text.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripAnsi(text) {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+/**
  * @param {string} command
  * @param {string[]} args
  * @param {SpawnSyncOptions} [options]
@@ -71,7 +81,7 @@ function spawnChecked(command, args, options = {}) {
       .trim();
     throw new Error(detail || `${command} ${args.join(" ")} failed`);
   }
-  return String(result.stdout || "").trim();
+  return stripAnsi(String(result.stdout || "").trim());
 }
 
 /**

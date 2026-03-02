@@ -6,58 +6,29 @@
 |---------|--------|-------|
 | `packages/shared/*` | ✅ TypeScript | Fully migrated |
 | `apps/web/app/*` | ✅ TypeScript | Next.js App Router |
-| `apps/edge/*` | 🔶 JS with `@ts-check` | Partial types, needs migration |
-| `apps/cli/*` | 🔶 JS with `@ts-check` | Partial types, needs migration |
-| `test/*` | 🔶 JS with `@ts-check` | Partial types, needs migration |
+| `apps/edge/*` | ✅ TypeScript | Migrated in PR #49 |
+| `apps/cli/*` | ✅ TypeScript | Migrated in PR #51 |
+| `test/*` | ✅ TypeScript | Migrated in PR #52 |
 
-## Migration Sequence
+## Migration Complete
 
-### Phase 1: apps/edge
+All three phases shipped and merged to main.
 
-Files to migrate:
+### Phase 1: apps/edge (PR #49) ✅
 - `apps/edge/src/worker.js` → `worker.ts`
 - `apps/edge/src/app.js` → `app.ts`
 - `apps/edge/src/dev-server.js` → `dev-server.ts`
+- Updated `wrangler.toml`, wrangler generator, smoke scripts
+- Added `--import tsx/esm` to test/ssh-smoke scripts for TS resolution
 
-Tasks:
-1. Install `@cloudflare/workers-types` if needed
-2. Rename files from `.js` to `.ts`
-3. Replace JSDoc `@typedef` annotations with TypeScript interfaces
-4. Update imports (remove `.js` extensions)
-5. Remove redundant `@ts-check` comments
-6. Verify with TypeScript compiler
-
-### Phase 2: apps/cli
-
-Files to migrate:
+### Phase 2: apps/cli (PR #51) ✅
 - `apps/cli/src/cli.js` → `cli.ts`
-- `apps/cli/src/runtime-deps.js` → `runtime-deps.ts`
+- `apps/cli/src/runtime-deps.js` → `runtime-deps.ts` (included in PR #49)
+- `apps/cli/src/postinstall.js` → `postinstall.ts` (postinstall fallback updated to use tsx)
+- Added `WritableOutput` and `SpawnImpl` types for test mock compatibility
+- Updated `ssh:smoke` and `ssh:smoke:live` scripts to use tsx loader
 
-Tasks:
-1. Ensure Node.js types are available
-2. Rename files from `.js` to `.ts`
-3. Convert JSDoc to TypeScript interfaces
-4. Update imports
-5. Remove `@ts-check` comments
-
-### Phase 3: test files
-
-Files to migrate:
-- `test/worker.test.js`
-- `test/container-server.test.js`
-- `test/cloudflare-store.test.js`
-- `test/services.test.js`
-- `test/runtime-deps.test.js`
-- `test/cli.test.js`
-
-Tasks:
-1. Rename test files to `.ts`
-2. Add appropriate test framework types (Jest/Vitest)
-3. Verify tests pass
-
-## Key Considerations
-
-1. **Build tooling**: Verify existing build scripts handle `.ts` files
-2. **Import extensions**: TypeScript in NodeNext mode may require `.js` extension handling
-3. **Type coverage**: Ensure all external types are installed (Cloudflare, Node.js, Jest)
-4. **Incremental migration**: Each phase should be tested before proceeding
+### Phase 3: test files (PR #52) ✅
+- All 6 test files renamed from `.js` to `.ts`
+- Removed `// @ts-check` directives
+- Converted JSDoc annotations to TypeScript types
