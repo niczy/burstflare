@@ -57,19 +57,41 @@ flare ssh <sessionId>
 
 ## Local Development
 
-1. Install dependencies:
+1. Use Node.js 22 (required by this repo):
+
+```bash
+nvm use
+```
+
+2. Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Start the local app:
+3. Start in UI iteration mode (recommended for frontend work):
+
+```bash
+npm run dev:ui
+```
+
+Open:
+
+```text
+http://127.0.0.1:3000
+```
+
+This mode runs both services together:
+- web UI with hot reload on `3000`
+- edge API/runtime routes on `8787`
+
+4. Start in integrated edge mode (production-style shell serving):
 
 ```bash
 npm run dev
 ```
 
-3. Open:
+Open:
 
 ```text
 http://127.0.0.1:8787
@@ -77,7 +99,7 @@ http://127.0.0.1:8787
 
 `npm run dev` builds the current vinext web bundle, then starts the edge server and serves the web app from the same local process.
 
-4. Point the CLI at local only when you are testing against the local stack:
+5. Point the CLI at local only when you are testing against the local stack:
 
 ```bash
 flare auth register --email you@example.com --url http://127.0.0.1:8787

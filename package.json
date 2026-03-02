@@ -24,6 +24,7 @@
     "cf:verify": "tsx scripts/cloudflare-verify.mts",
     "cf:verify:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/cloudflare-verify.mts",
     "dev:edge": "npm run build --workspace @burstflare/shared && tsx apps/edge/src/dev-server.ts",
+    "dev:ui": "tsx scripts/dev-ui.mts",
     "dev:web": "npm run dev --workspace @burstflare/web",
     "deploy": "tsx scripts/deploy.mts",
     "deploy:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/deploy.mts",
