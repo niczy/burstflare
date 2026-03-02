@@ -34,7 +34,7 @@
     "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc --project tsconfig.json",
     "ui:smoke": "tsx scripts/ui-smoke.mts",
-    "test": "npm run build --workspace @burstflare/shared && node --test"
+    "test": "npm run build --workspace @burstflare/shared && node --import tsx/esm --test"
   },
   "engines": {
     "node": ">=22.0.0"
