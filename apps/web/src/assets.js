@@ -1,3 +1,5 @@
+// @ts-check
+
 export const styles = `
 :root {
   color-scheme: light;

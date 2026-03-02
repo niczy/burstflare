@@ -1,3 +1,5 @@
+// @ts-check
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
