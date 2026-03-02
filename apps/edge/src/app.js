@@ -1,9 +1,9 @@
 // @ts-check
 
-import { createBurstFlareService } from "../../../packages/shared/src/service.js";
-import { createCloudflareStateStore } from "../../../packages/shared/src/cloudflare-store.js";
-import { createMemoryStore } from "../../../packages/shared/src/memory-store.js";
 import {
+  createBurstFlareService,
+  createCloudflareStateStore,
+  createMemoryStore,
   badRequest,
   cookie,
   notFound,
@@ -11,7 +11,7 @@ import {
   readCookie,
   toJson,
   unauthorized
-} from "../../../packages/shared/src/utils.js";
+} from "@burstflare/shared";
 
 const CSRF_COOKIE = "burstflare_csrf";
 const REQUEST_ID_HEADER = "x-burstflare-request-id";

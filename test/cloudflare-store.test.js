@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCloudflareStateStore } from "../packages/shared/src/cloudflare-store.js";
+import { createCloudflareStateStore } from "@burstflare/shared";
 
 class MockD1Statement {
   constructor(database, sql) {

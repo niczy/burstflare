@@ -5,7 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { createApp } from "./app.js";
-import { createBurstFlareService, createFileStore } from "../../../packages/shared/src/index.js";
+import { createBurstFlareService, createFileStore } from "@burstflare/shared";
 
 const port = Number(process.env.PORT || 8787);
 const dataFile = process.env.BURSTFLARE_DATA_FILE || ".local/burstflare-data.json";
