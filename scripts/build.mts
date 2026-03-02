@@ -45,11 +45,11 @@ async function main(): Promise<void> {
 
   await Promise.all([
     writeFile(path.join(webDist, "manifest.json"), JSON.stringify(manifest, null, 2)),
-    writeFile(path.join(edgeDist, "manifest.json"), JSON.stringify(manifest, null, 2)),
-    writeFile(path.join(cliDist, "manifest.json"), JSON.stringify(manifest, null, 2))
+    writeFile(path.join(edgeDist, "manifest.json"), JSON.stringify(manifest, null, 2))
   ]);
 
   runNpmCommand(["run", "build", "--workspace", "@burstflare/shared"]);
+  runNpmCommand(["run", "build", "--workspace", "@burstflare/flare"]);
 
   process.stdout.write("build complete\n");
 }

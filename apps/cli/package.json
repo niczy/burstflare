@@ -30,11 +30,14 @@
   },
   "preferGlobal": true,
   "scripts": {
-    "postinstall": "node src/postinstall.js"
+    "build": "tsc -p tsconfig.build.json",
+    "postinstall": "node postinstall.js"
   },
   "files": [
     "bin",
-    "src",
+    "dist",
+    "postinstall.js",
+    "LICENSE",
     "README.md"
   ],
   "publishConfig": {
