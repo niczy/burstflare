@@ -29,6 +29,7 @@
     "deploy:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/deploy.mts",
     "dev": "tsx scripts/dev.mts",
     "lint": "node scripts/lint.mjs",
+    "npm:cli:publish": "npm run build --workspace @burstflare/flare && npm publish --workspace apps/cli --access public --//registry.npmjs.org/:_authToken=$NPM_TOKEN",
     "npm:cli:smoke": "node scripts/npm-cli-smoke.mjs",
     "release:validate": "node scripts/release-validate.mjs",
     "ssh:smoke": "node --import tsx/esm scripts/ssh-smoke.mjs",
