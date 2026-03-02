@@ -7,7 +7,7 @@ import {
   NORMALIZED_SCHEMA_VERSION,
   SCHEMA_VERSION_KEY,
   TABLES
-} from "../packages/shared/src/cloudflare-schema.js";
+} from "../packages/shared/dist/cloudflare-schema.js";
 
 /**
  * @typedef {Error & {
