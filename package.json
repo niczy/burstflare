@@ -33,7 +33,7 @@
     "ssh:smoke:live": "node scripts/live-ssh-smoke.mjs",
     "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc --project tsconfig.json",
-    "ui:smoke": "node scripts/ui-smoke.mjs",
+    "ui:smoke": "tsx scripts/ui-smoke.mts",
     "test": "node --test"
   },
   "engines": {

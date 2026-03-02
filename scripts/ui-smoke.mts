@@ -1,6 +1,4 @@
-// @ts-check
-
-function getArg(name) {
+function getArg(name: string): string | null {
   const index = process.argv.indexOf(name);
   if (index === -1 || index === process.argv.length - 1) {
     return null;
@@ -8,7 +6,14 @@ function getArg(name) {
   return process.argv[index + 1];
 }
 
-async function requestText(baseUrl, path) {
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || error.message;
+  }
+  return String(error);
+}
+
+async function requestText(baseUrl: string, path: string): Promise<string> {
   const response = await fetch(`${baseUrl}${path}`);
   const text = await response.text();
   if (!response.ok) {
@@ -17,8 +22,8 @@ async function requestText(baseUrl, path) {
   return text;
 }
 
-async function waitForShell(baseUrl) {
-  let lastError = null;
+async function waitForShell(baseUrl: string): Promise<string> {
+  let lastError: unknown = null;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       return await requestText(baseUrl, "/");
@@ -30,7 +35,7 @@ async function waitForShell(baseUrl) {
   throw lastError || new Error("UI shell did not become ready");
 }
 
-async function main() {
+async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
 
   const html = await waitForShell(baseUrl);
@@ -62,8 +67,7 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  const typedError = /** @type {Error} */ (error);
-  process.stderr.write(`${typedError.stack || typedError.message}\n`);
+main().catch((error: unknown) => {
+  process.stderr.write(`${getErrorMessage(error)}\n`);
   process.exit(1);
 });
