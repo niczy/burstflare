@@ -1,16 +1,21 @@
-// @ts-check
-
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
 
-async function resetDir(target) {
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || error.message;
+  }
+  return String(error);
+}
+
+async function resetDir(target: string): Promise<void> {
   await rm(target, { force: true, recursive: true });
   await mkdir(target, { recursive: true });
 }
 
-async function main() {
+async function main(): Promise<void> {
   const webDist = path.join(root, "apps", "web", "dist");
   const edgeDist = path.join(root, "apps", "edge", "dist");
   const cliDist = path.join(root, "apps", "cli", "dist");
@@ -30,8 +35,7 @@ async function main() {
   process.stdout.write("build complete\n");
 }
 
-main().catch((error) => {
-  const typedError = /** @type {Error} */ (error);
-  process.stderr.write(`${typedError.stack || typedError.message}\n`);
+main().catch((error: unknown) => {
+  process.stderr.write(`${getErrorMessage(error)}\n`);
   process.exit(1);
 });
