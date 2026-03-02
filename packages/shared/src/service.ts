@@ -15,34 +15,14 @@ const MAX_RUNTIME_SECRETS = 32;
 const MAX_RUNTIME_SECRET_VALUE_BYTES = 4096;
 const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
 
-const PLANS = {
-  free: {
-    maxTemplates: 10,
-    maxRunningSessions: 3,
-    maxTemplateVersionsPerTemplate: 25,
-    maxSnapshotsPerSession: 25,
-    maxStorageBytes: 25 * 1024 * 1024,
-    maxRuntimeMinutes: 500,
-    maxTemplateBuilds: 100
-  },
-  pro: {
-    maxTemplates: 100,
-    maxRunningSessions: 20,
-    maxTemplateVersionsPerTemplate: 250,
-    maxSnapshotsPerSession: 250,
-    maxStorageBytes: 250 * 1024 * 1024,
-    maxRuntimeMinutes: 10_000,
-    maxTemplateBuilds: 2_000
-  },
-  enterprise: {
-    maxTemplates: 1000,
-    maxRunningSessions: 200,
-    maxTemplateVersionsPerTemplate: 2500,
-    maxSnapshotsPerSession: 2_500,
-    maxStorageBytes: 2_500 * 1024 * 1024,
-    maxRuntimeMinutes: 100_000,
-    maxTemplateBuilds: 20_000
-  }
+const DEFAULT_USAGE_QUOTA = {
+  maxTemplates: 1000,
+  maxRunningSessions: 200,
+  maxTemplateVersionsPerTemplate: 2500,
+  maxSnapshotsPerSession: 2500,
+  maxStorageBytes: 2500 * 1024 * 1024,
+  maxRuntimeMinutes: 1_000_000,
+  maxTemplateBuilds: 100_000
 };
 
 const DEFAULT_BILLING_CATALOG = {
@@ -90,8 +70,8 @@ function futureIso(clock, durationMs) {
   return new Date(nowMs(clock) + durationMs).toISOString();
 }
 
-function getPlan(name) {
-  return PLANS[name] || PLANS.free;
+function getDefaultQuota() {
+  return DEFAULT_USAGE_QUOTA;
 }
 
 const QUOTA_OVERRIDE_KEYS = [
@@ -126,7 +106,7 @@ function getWorkspaceQuotaOverrides(workspace) {
 
 function getEffectiveLimits(workspace) {
   return {
-    ...getPlan(workspace?.plan),
+    ...getDefaultQuota(),
     ...getWorkspaceQuotaOverrides(workspace)
   };
 }
@@ -143,7 +123,7 @@ function normalizeUsageTotals(value) {
 function normalizeWorkspaceBilling(billing) {
   const source = billing && typeof billing === "object" && !Array.isArray(billing) ? billing : {};
   return {
-    pricingModel: typeof source.pricingModel === "string" ? source.pricingModel : "usage",
+    pricingModel: "usage",
     provider: typeof source.provider === "string" ? source.provider : null,
     customerId: typeof source.customerId === "string" ? source.customerId : null,
     billingStatus: typeof source.billingStatus === "string" ? source.billingStatus : null,
@@ -157,7 +137,6 @@ function normalizeWorkspaceBilling(billing) {
     billedUsageTotals: normalizeUsageTotals(source.billedUsageTotals),
     subscriptionId: typeof source.subscriptionId === "string" ? source.subscriptionId : null,
     subscriptionStatus: typeof source.subscriptionStatus === "string" ? source.subscriptionStatus : null,
-    pendingPlan: typeof source.pendingPlan === "string" ? source.pendingPlan : null,
     currentPeriodEnd: typeof source.currentPeriodEnd === "string" ? source.currentPeriodEnd : null,
     cancelAtPeriodEnd: Boolean(source.cancelAtPeriodEnd),
     lastCheckoutSessionId: typeof source.lastCheckoutSessionId === "string" ? source.lastCheckoutSessionId : null,
@@ -186,7 +165,6 @@ function formatWorkspaceBilling(workspace) {
     billedUsageTotals: billing.billedUsageTotals,
     subscriptionId: billing.subscriptionId,
     subscriptionStatus: billing.subscriptionStatus,
-    pendingPlan: billing.pendingPlan,
     currentPeriodEnd: billing.currentPeriodEnd,
     cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
     lastCheckoutSessionId: billing.lastCheckoutSessionId,
@@ -957,7 +935,7 @@ function formatWorkspace(state, workspace, role) {
     id: workspace.id,
     name: workspace.name,
     ownerUserId: workspace.ownerUserId,
-    plan: workspace.plan,
+    billingModel: workspace.billingModel || "usage",
     billing: formatWorkspaceBilling(workspace),
     createdAt: workspace.createdAt,
     quotaOverrides: getWorkspaceQuotaOverrides(workspace),
@@ -1887,6 +1865,46 @@ export function createBurstFlareService(options: any = {}) {
     };
   }
 
+  async function sleepSessionsWithInsufficientBalanceInState(state) {
+    const sleptSessionIds = [];
+    const workspaceBalanceCache = new Map();
+
+    for (const session of state.sessions) {
+      if (session.state !== "running") {
+        continue;
+      }
+      const workspaceId = session.workspaceId;
+
+      if (!workspaceBalanceCache.has(workspaceId)) {
+        const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
+        if (!workspace) {
+          workspaceBalanceCache.set(workspaceId, -1);
+          continue;
+        }
+        const billing = normalizeWorkspaceBilling(workspace.billing);
+        const billableUsage = summarizeBillableUsage(state, workspaceId);
+        const pendingUsage = diffBillableUsageTotals(billableUsage, billing.billedUsageTotals);
+        const pendingCost = priceUsageSummary(pendingUsage, billingCatalog);
+        const estimatedRemainingBalance = billing.creditBalanceUsd - pendingCost.totalUsd;
+        workspaceBalanceCache.set(workspaceId, estimatedRemainingBalance);
+      }
+
+      const balance = workspaceBalanceCache.get(workspaceId);
+      if (balance <= 0) {
+        session.state = "sleeping";
+        session.lastStoppedAt = nowIso(clock);
+        session.updatedAt = nowIso(clock);
+        writeSessionEvent(state, clock, session.id, "sleeping", { reason: "insufficient_balance" });
+        sleptSessionIds.push(session.id);
+      }
+    }
+
+    return {
+      sleptSessions: sleptSessionIds.length,
+      sessionIds: sleptSessionIds
+    };
+  }
+
   async function recoverStuckBuildsInState(
     state,
     { workspaceId = null, actorUserId = null, source = "reconcile" }: any = {}
@@ -2092,7 +2110,7 @@ export function createBurstFlareService(options: any = {}) {
             id: createId("ws"),
             name: `${user.name}'s Workspace`,
             ownerUserId: user.id,
-            plan: "free",
+            billingModel: "usage",
             createdAt: nowIso(clock)
           };
           state.workspaces.push(workspace);
@@ -3039,18 +3057,16 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
-    async setWorkspacePlan(token, plan) {
+    async setWorkspacePlan(token, _plan) {
       return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
-        ensure(PLANS[plan], "Invalid plan");
-        auth.workspace.plan = plan;
         writeAudit(state, clock, {
           action: "workspace.plan_updated",
           actorUserId: auth.user.id,
           workspaceId: auth.workspace.id,
           targetType: "workspace",
           targetId: auth.workspace.id,
-          details: { plan }
+          details: { billingModel: "usage" }
         });
         return {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
@@ -3436,8 +3452,7 @@ export function createBurstFlareService(options: any = {}) {
                 : currentBilling.lastSetupIntentId,
             lastCheckoutSessionId: typeof payload.id === "string" && payload.id ? payload.id : currentBilling.lastCheckoutSessionId,
             subscriptionId: null,
-            subscriptionStatus: null,
-            pendingPlan: null
+            subscriptionStatus: null
           });
         } else if (event.type.startsWith("customer.subscription.")) {
           writeWorkspaceBilling(workspace, clock, {
@@ -4511,7 +4526,7 @@ export function createBurstFlareService(options: any = {}) {
         }
         const workspace = state.workspaces.find((entry) => entry.id === session.workspaceId) || {
           id: session.workspaceId,
-          plan: "free"
+          billingModel: "usage"
         };
         return applySessionTransition({
           state,
@@ -4951,6 +4966,12 @@ export function createBurstFlareService(options: any = {}) {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state === "running", "Session is not running", 409);
         ensure(listSessionAuthorizedPublicKeys(auth.session).length > 0, "SSH key is not configured for this session", 409);
+        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billableUsage = summarizeBillableUsage(state, auth.workspace.id);
+        const pendingUsage = diffBillableUsageTotals(billableUsage, billing.billedUsageTotals);
+        const pendingCost = priceUsageSummary(pendingUsage, billingCatalog);
+        const estimatedRemainingBalance = Number((billing.creditBalanceUsd - pendingCost.totalUsd).toFixed(4));
+        ensure(estimatedRemainingBalance > 0, "Insufficient credit balance to connect to session", 402);
         const runtimeToken = createToken(state, clock, {
           userId: auth.user.id,
           workspaceId: auth.workspace.id,
@@ -4986,6 +5007,24 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
+    async checkSessionBalance(token: string, sessionId: string) {
+      return transact(SESSION_SCOPE, (state) => {
+        const access = requireRuntimeToken(state, token, sessionId, clock);
+        const workspace = state.workspaces.find((entry) => entry.id === access.session.workspaceId);
+        ensure(workspace, "Workspace not found", 404);
+        const billing = normalizeWorkspaceBilling(workspace.billing);
+        const billableUsage = summarizeBillableUsage(state, workspace.id);
+        const pendingUsage = diffBillableUsageTotals(billableUsage, billing.billedUsageTotals);
+        const pendingCost = priceUsageSummary(pendingUsage, billingCatalog);
+        const estimatedRemainingBalanceUsd = Number(Math.max(0, billing.creditBalanceUsd - pendingCost.totalUsd).toFixed(4));
+        return {
+          ok: estimatedRemainingBalanceUsd > 0,
+          creditBalanceUsd: billing.creditBalanceUsd,
+          estimatedRemainingBalanceUsd
+        };
+      });
+    },
+
     async getUsage(token) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
@@ -5000,7 +5039,7 @@ export function createBurstFlareService(options: any = {}) {
           usage: summarizeUsage(state, auth.workspace.id),
           limits: getEffectiveLimits(auth.workspace),
           overrides: getWorkspaceQuotaOverrides(auth.workspace),
-          plan: auth.workspace.plan
+          plan: auth.workspace.billingModel || "usage"
         };
       });
     },
@@ -5262,6 +5301,8 @@ export function createBurstFlareService(options: any = {}) {
           reason: "reconcile"
         });
 
+        const balanceStopped = await sleepSessionsWithInsufficientBalanceInState(state);
+
         const recovered = await recoverStuckBuildsInState(state, {
           workspaceId,
           actorUserId: auth?.user.id || null,
@@ -5296,6 +5337,7 @@ export function createBurstFlareService(options: any = {}) {
 
         return {
           sleptSessions: slept.sleptSessions,
+          sleptSessionsInsufficientBalance: balanceStopped.sleptSessions,
           recoveredStuckBuilds: recovered.recoveredStuckBuilds,
           processedBuilds: processed.processedBuilds,
           purgedDeletedSessions: deletedPurged.purgedSessions,

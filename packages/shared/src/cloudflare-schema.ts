@@ -34,10 +34,10 @@ export const TABLES: TableDefinition[] = [
     keyOf: (row) => row.id,
     columns: [
       { name: "owner_user_id", field: "ownerUserId" },
-      { name: "plan", field: "plan" },
+      { name: "billing_model", field: "billingModel" },
       { name: "created_at", field: "createdAt" }
     ],
-    indexes: ["owner_user_id", "plan"]
+    indexes: ["owner_user_id", "billing_model"]
   },
   {
     source: "memberships",

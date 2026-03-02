@@ -1742,6 +1742,25 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     };
   }
 
+  const BALANCE_CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+
+  function scheduleSessionBalanceCheck(server: WebSocket, token: string, sessionId: string): void {
+    const check = async () => {
+      try {
+        const balance = await service.checkSessionBalance(token, sessionId);
+        if (!balance.ok) {
+          server.close(1008, "Insufficient balance");
+          return;
+        }
+      } catch (_err) {
+        server.close(1008, "Balance check failed");
+        return;
+      }
+      setTimeout(check, BALANCE_CHECK_INTERVAL_MS);
+    };
+    setTimeout(check, BALANCE_CHECK_INTERVAL_MS);
+  }
+
   async function verifyTurnstile(request: Request, body: any): Promise<void> {
     if (!turnstile.enabled) {
       return;
@@ -3154,6 +3173,13 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
             return unauthorized("Runtime token missing");
           }
           const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
+          const balanceCheck = await service.checkSessionBalance(token, sessionId);
+          if (!balanceCheck.ok) {
+            return new Response("Insufficient credit balance to connect to session.", {
+              status: 402,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
           if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
             return new Response("WebSocket upgrade required for terminal attach.", {
               status: 426,
@@ -3176,6 +3202,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
               headers: { "content-type": "text/plain; charset=utf-8" }
             });
           }
+          scheduleSessionBalanceCheck(bridge.server, token, sessionId);
           return webSocketUpgradeResponse(bridge.client);
         })
       )
@@ -3196,6 +3223,13 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
             return unauthorized("Runtime token missing");
           }
           const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
+          const balanceCheck = await service.checkSessionBalance(token, sessionId);
+          if (!balanceCheck.ok) {
+            return new Response("Insufficient credit balance to connect to session.", {
+              status: 402,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            });
+          }
           if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
             return new Response("WebSocket upgrade required for SSH attach.", {
               status: 426,
@@ -3218,6 +3252,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
               headers: { "content-type": "text/plain; charset=utf-8" }
             });
           }
+          scheduleSessionBalanceCheck(bridge.server, token, sessionId);
           return webSocketUpgradeResponse(bridge.client);
         })
       )

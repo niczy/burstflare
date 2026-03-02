@@ -232,7 +232,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(switched.workspace.id, owner.workspace.id);
 
   const plan = await service.setWorkspacePlan(owner.token, "pro");
-  assert.equal(plan.workspace.plan, "pro");
+  assert.equal(plan.workspace.billingModel, "usage");
   const renamedWorkspace = await service.updateWorkspaceSettings(owner.token, {
     name: "Burst Operations"
   });
@@ -453,6 +453,13 @@ test("service covers invites, queued builds, releases, session events, usage, an
     publicKey: TEST_SSH_PUBLIC_KEY
   });
   assert.equal(syncedSshKey.sshKeyCount, 1);
+
+  // Add credit balance directly so runtime token issuance passes the balance check
+  const ws = store.state.workspaces.find((w: any) => w.ownerUserId === owner.user.id);
+  if (ws) {
+    ws.billing = { ...(ws.billing || {}), creditBalanceUsd: 100 };
+  }
+
   const runtime = await service.issueRuntimeToken(switched.token, session.session.id);
   assert.match(runtime.sshCommand, /ssh -i <local-key-path>/);
   assert.equal(runtime.sshKeyCount, 1);
@@ -541,8 +548,8 @@ test("service covers invites, queued builds, releases, session events, usage, an
       usage.usage.storage.buildArtifactBytes
   );
   assert.equal(usage.usage.inventory.templates >= 1, true);
-  assert.equal(usage.limits.maxRunningSessions, 20);
-  assert.equal(usage.plan, "pro");
+  assert.equal(usage.limits.maxRunningSessions, 200);
+  assert.equal(usage.plan, "usage");
   assert.deepEqual(usage.overrides, {});
 
   const refreshed = await service.refreshSession(ownerSecondLogin.refreshToken);
@@ -568,7 +575,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(report.report.sessionsTotal, 0);
   assert.equal(report.report.sessionsSleeping, 0);
   assert.equal(report.report.activeUploadGrants, 0);
-  assert.equal(report.report.limits.maxRunningSessions, 20);
+  assert.equal(report.report.limits.maxRunningSessions, 200);
 
   const secret = await service.setWorkspaceSecret(ownerSecondLogin.token, "api_token", "secret-value");
   assert.equal(secret.secret.name, "API_TOKEN");
@@ -670,7 +677,7 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
   assert.equal(checkout.billing.customerId, "cus_test_1");
   assert.equal(checkout.billing.billingStatus, "checkout_open");
   assert.equal(checkout.billing.lastSetupIntentId, "seti_test_1");
-  assert.equal(checkout.workspace.plan, "free");
+  assert.equal(checkout.workspace.billingModel, "usage");
   assert.equal(checkoutCalls.length, 1);
   assert.equal(checkoutCalls[0].successUrl, "https://app.example.com/billing/success");
   assert.equal(checkoutCalls[0].cancelUrl, "https://app.example.com/billing/cancel");
@@ -759,14 +766,14 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
   assert.equal(activated.duplicate, false);
   assert.equal(activated.billing.billingStatus, "active");
   assert.equal(activated.billing.defaultPaymentMethodId, "pm_test_1");
-  assert.equal(activated.workspace.plan, "free");
+  assert.equal(activated.workspace.billingModel, "usage");
 
   const duplicate = await service.applyBillingWebhook(activeEvent);
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.billing.billingStatus, "active");
 
   const auth = await service.authenticate(owner.token);
-  assert.equal(auth.workspace.plan, "free");
+  assert.equal(auth.workspace.billingModel, "usage");
   assert.equal(auth.workspace.billing.billingStatus, "active");
 
   const paid = await service.applyBillingWebhook({
@@ -1101,7 +1108,7 @@ test("service enforces quota overrides and storage limits", async () => {
 
   const cleared = await service.setWorkspaceQuotaOverrides(owner.token, { clear: true });
   assert.deepEqual(cleared.overrides, {});
-  assert.equal(cleared.limits.maxRunningSessions, 3);
+  assert.equal(cleared.limits.maxRunningSessions, 200);
 });
 
 test("service can persist runtime state from a durable-object-driven session transition", async () => {
