@@ -165,6 +165,7 @@ function normalizeWorkspaceBilling(billing) {
     recentWebhookEventIds: Array.isArray(source.recentWebhookEventIds)
       ? source.recentWebhookEventIds.filter((entry) => typeof entry === "string").slice(-25)
       : [],
+    creditBalanceUsd: Number.isFinite(source.creditBalanceUsd) ? Math.max(0, Number(source.creditBalanceUsd)) : 0,
     updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : null
   };
 }
@@ -190,6 +191,7 @@ function formatWorkspaceBilling(workspace) {
     cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
     lastCheckoutSessionId: billing.lastCheckoutSessionId,
     lastPortalSessionId: billing.lastPortalSessionId,
+    creditBalanceUsd: billing.creditBalanceUsd,
     updatedAt: billing.updatedAt
   };
 }
@@ -3264,6 +3266,121 @@ export function createBurstFlareService(options: any = {}) {
             diffBillableUsageTotals(currentUsage, normalizeWorkspaceBilling(auth.workspace.billing).billedUsageTotals),
             billingCatalog
           )
+        };
+      });
+    },
+
+    async addWorkspacePaymentMethod(token: string, input: { paymentMethodId: string }) {
+      return transact(WORKSPACE_SCOPE, async (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const provider = requireBillingProvider();
+        ensure(typeof provider.addPaymentMethod === "function", "Billing provider does not support adding payment methods", 501);
+        ensure(typeof input?.paymentMethodId === "string" && input.paymentMethodId, "Payment method id is required", 400);
+
+        const customerId = await provider.ensureCustomer({
+          user: formatUser(auth.user),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
+          billing: formatWorkspaceBilling(auth.workspace)
+        });
+
+        const result = await provider.addPaymentMethod({
+          customerId,
+          paymentMethodId: input.paymentMethodId
+        });
+        ensure(result && typeof result === "object", "Billing provider returned an invalid payment method result", 502);
+
+        writeWorkspaceBilling(auth.workspace, clock, {
+          provider: result.provider || provider.providerName || "external",
+          customerId,
+          billingStatus: "active",
+          defaultPaymentMethodId: result.paymentMethodId || input.paymentMethodId
+        });
+
+        writeAudit(state, clock, {
+          action: "workspace.billing_payment_method_added",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "billing_payment_method",
+          targetId: result.paymentMethodId || input.paymentMethodId,
+          details: { provider: result.provider || provider.providerName || "external" }
+        });
+
+        return {
+          billing: formatWorkspaceBilling(auth.workspace),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
+        };
+      });
+    },
+
+    async chargeWorkspace(token: string, input: { amountUsd: number; description?: string }) {
+      return transact(WORKSPACE_SCOPE, async (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const provider = requireBillingProvider();
+        ensure(typeof provider.chargeCustomer === "function", "Billing provider does not support direct charges", 501);
+        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        ensure(billing.customerId, "Workspace is not linked to a billing customer", 409);
+        ensure(billing.defaultPaymentMethodId, "No default payment method on file. Add a card first.", 409);
+        const amountUsd = Number(input?.amountUsd);
+        ensure(Number.isFinite(amountUsd) && amountUsd > 0, "Charge amount must be a positive number", 400);
+
+        const charge = await provider.chargeCustomer({
+          customerId: billing.customerId,
+          paymentMethodId: billing.defaultPaymentMethodId,
+          amountUsd,
+          description: typeof input?.description === "string" ? input.description : `BurstFlare charge for workspace ${auth.workspace.name || auth.workspace.id}`
+        });
+        ensure(charge && typeof charge === "object", "Billing provider returned an invalid charge result", 502);
+        ensure(typeof charge.id === "string" && charge.id, "Charge id missing", 502);
+
+        const currentBalance = billing.creditBalanceUsd;
+        const nextBalance = Number((currentBalance + amountUsd).toFixed(4));
+
+        writeWorkspaceBilling(auth.workspace, clock, {
+          provider: charge.provider || provider.providerName || billing.provider || "external",
+          billingStatus: charge.billingStatus || billing.billingStatus || "active",
+          creditBalanceUsd: nextBalance
+        });
+
+        writeAudit(state, clock, {
+          action: "workspace.billing_charged",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "billing_charge",
+          targetId: charge.id,
+          details: {
+            amountUsd,
+            creditBalanceUsd: nextBalance,
+            provider: charge.provider || provider.providerName || "external"
+          }
+        });
+
+        return {
+          charge: {
+            id: charge.id,
+            amountUsd,
+            status: charge.status || null,
+            currency: charge.currency || "usd"
+          },
+          creditBalanceUsd: nextBalance,
+          billing: formatWorkspaceBilling(auth.workspace),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
+        };
+      });
+    },
+
+    async getWorkspaceBalance(token: string) {
+      return transact(WORKSPACE_SCOPE, (state) => {
+        const auth = requireManageWorkspace(state, token, clock);
+        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billableUsage = summarizeBillableUsage(state, auth.workspace.id);
+        const pendingUsage = diffBillableUsageTotals(billableUsage, billing.billedUsageTotals);
+        const pendingCost = priceUsageSummary(pendingUsage, billingCatalog);
+        return {
+          creditBalanceUsd: billing.creditBalanceUsd,
+          pendingUsageCostUsd: Number(pendingCost.totalUsd.toFixed(4)),
+          estimatedRemainingBalanceUsd: Number(Math.max(0, billing.creditBalanceUsd - pendingCost.totalUsd).toFixed(4)),
+          billing: formatWorkspaceBilling(auth.workspace),
+          workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
         };
       });
     },

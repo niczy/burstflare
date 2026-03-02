@@ -541,6 +541,23 @@ const HELP_CATALOG: HelpSection[] = [
     ]
   },
   {
+    title: "Billing",
+    topics: [
+      {
+        kind: "group",
+        name: "billing",
+        summary: "Manage billing information, payment methods, charges, and account balance.",
+        commands: [
+          { name: "status", usageTail: "", summary: "Show billing status, plan, and payment info." },
+          { name: "enroll", usageTail: "--success-url <url> --cancel-url <url>", summary: "Start Stripe checkout enrollment and print the URL." },
+          { name: "add-card", usageTail: "--payment-method-id <id>", summary: "Attach a Stripe payment method to the workspace." },
+          { name: "charge", usageTail: "--amount <usd> [--description <text>]", summary: "Charge the workspace and add credits to the balance." },
+          { name: "balance", usageTail: "", summary: "Show remaining credit balance and pending usage cost." }
+        ]
+      }
+    ]
+  },
+  {
     title: "Shortcuts",
     topics: [
       { kind: "command", name: "up", usageTail: "<name> --template <templateId>", summary: "Shortcut for session up." },
@@ -907,6 +924,9 @@ export async function runCli(
   if (command === "sessions") {
     command = "session";
     subcommand = subcommand || "list";
+  }
+  if (command === "billing" && !subcommand) {
+    subcommand = "status";
   }
   if (command === "workspace" && !subcommand) {
     subcommand = "current";
@@ -1670,6 +1690,81 @@ export async function runCli(
           {
             method: "DELETE",
             headers: headers(undefined, false)
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+    }
+
+    if (command === "billing") {
+      if (subcommand === "status") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/billing`,
+          { headers: headers(undefined, false) }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "balance") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/billing/balance`,
+          { headers: headers(undefined, false) }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "enroll") {
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/billing/checkout`,
+          {
+            method: "POST",
+            headers: headers(undefined),
+            body: JSON.stringify({
+              successUrl: options["success-url"],
+              cancelUrl: options["cancel-url"]
+            })
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "add-card") {
+        if (!options["payment-method-id"]) {
+          throw createCliError("--payment-method-id <id> is required", 400);
+        }
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/billing/payment-method`,
+          {
+            method: "POST",
+            headers: headers(undefined),
+            body: JSON.stringify({ paymentMethodId: options["payment-method-id"] })
+          }
+        );
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "charge") {
+        if (!options.amount) {
+          throw createCliError("--amount <usd> is required", 400);
+        }
+        const amountUsd = Number(options.amount);
+        if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
+          throw createCliError("--amount must be a positive number (e.g. --amount 10.00)", 400);
+        }
+        const data = await requestJsonAuthed(
+          `${baseUrl}/api/workspaces/current/billing/charge`,
+          {
+            method: "POST",
+            headers: headers(undefined),
+            body: JSON.stringify({
+              amountUsd,
+              description: options.description || undefined
+            })
           }
         );
         print(stdout, JSON.stringify(data, null, 2));

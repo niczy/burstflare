@@ -608,6 +608,44 @@ function createStripeBillingProvider(options: any): any {
   return {
     providerName: "stripe",
 
+    async ensureCustomer({ user, workspace, billing }: { user: any; workspace: any; billing: any }) {
+      return ensureStripeCustomer(options, { user, workspace, billing });
+    },
+
+    async addPaymentMethod({ customerId, paymentMethodId }: { customerId: string; paymentMethodId: string }) {
+      const attachForm = new URLSearchParams();
+      attachForm.set("customer", customerId);
+      await postStripeForm(options, `/payment_methods/${paymentMethodId}/attach`, attachForm);
+
+      const customerForm = new URLSearchParams();
+      customerForm.set("invoice_settings[default_payment_method]", paymentMethodId);
+      await postStripeForm(options, `/customers/${customerId}`, customerForm);
+
+      return {
+        provider: "stripe",
+        paymentMethodId
+      };
+    },
+
+    async chargeCustomer({ customerId, paymentMethodId, amountUsd, description }: { customerId: string; paymentMethodId: string; amountUsd: number; description: string }) {
+      const form = new URLSearchParams();
+      form.set("amount", String(usdToMinorUnits(amountUsd)));
+      form.set("currency", "usd");
+      form.set("customer", customerId);
+      form.set("payment_method", paymentMethodId);
+      form.set("confirm", "true");
+      form.set("description", description);
+      form.set("metadata[workspaceId]", customerId);
+      const data = await postStripeForm(options, "/payment_intents", form);
+      return {
+        provider: "stripe",
+        id: data.id,
+        status: typeof data.status === "string" ? data.status : null,
+        currency: typeof data.currency === "string" ? data.currency : "usd",
+        billingStatus: "active"
+      };
+    },
+
     async createCheckoutSession({ user, workspace, billing, successUrl, cancelUrl }: { user: any; workspace: any; billing: any; successUrl: string; cancelUrl: string }) {
       const customerId = await ensureStripeCustomer(options, {
         user,
@@ -2256,6 +2294,41 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           return unauthorized();
         }
         return toJson(await service.createWorkspaceUsageInvoice(token));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/workspaces/current/billing/payment-method",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.addWorkspacePaymentMethod(token, body));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/workspaces/current/billing/charge",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        const body = await parseJson(await request.text());
+        return toJson(await service.chargeWorkspace(token, body));
+      })
+    },
+    {
+      method: "GET",
+      pattern: "/api/workspaces/current/billing/balance",
+      handler: withErrorHandling(async (request) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await service.getWorkspaceBalance(token));
       })
     },
     {
