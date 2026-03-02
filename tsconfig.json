@@ -3,6 +3,7 @@
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "baseUrl": ".",
     "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
     "allowJs": true,
     "checkJs": false,
@@ -10,6 +11,9 @@
     "jsx": "react-jsx",
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
+    "paths": {
+      "@burstflare/shared": ["./packages/shared/src/index.js"]
+    },
     "skipLibCheck": true
   },
   "include": [

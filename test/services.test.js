@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBurstFlareService, createMemoryStore } from "../packages/shared/src/index.js";
+import { createBurstFlareService, createMemoryStore } from "@burstflare/shared";
 
 const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
