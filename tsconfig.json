@@ -12,7 +12,7 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "paths": {
-      "@burstflare/shared": ["./packages/shared/src/index.js"]
+      "@burstflare/shared": ["./packages/shared/src/index.ts"]
     },
     "skipLibCheck": true
   },
