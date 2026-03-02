@@ -1,5 +1,3 @@
-// @ts-check
-
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -14,7 +12,7 @@ const service = createBurstFlareService({
   store: createFileStore(dataFile)
 });
 
-function contentTypeForAsset(filePath) {
+function contentTypeForAsset(filePath: string): string {
   if (filePath.endsWith(".js")) {
     return "text/javascript; charset=utf-8";
   }
@@ -33,7 +31,7 @@ function contentTypeForAsset(filePath) {
   return "application/octet-stream";
 }
 
-async function getFrontendAssetResponse(request) {
+async function getFrontendAssetResponse(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/assets/")) {
     return null;
@@ -46,13 +44,13 @@ async function getFrontendAssetResponse(request) {
   }
   try {
     const body = await readFile(resolvedPath);
-    return new Response(body, {
+    return new Response(body as unknown as BodyInit, {
       headers: {
         "content-type": contentTypeForAsset(resolvedPath)
       }
     });
   } catch (error) {
-    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
     }
     throw error;
@@ -61,19 +59,16 @@ async function getFrontendAssetResponse(request) {
 
 const app = createApp({ service, getFrontendAssetResponse });
 
-function readRequestBody(request) {
+function readRequestBody(request: http.IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => resolve(Buffer.concat(chunks)));
     request.on("error", reject);
   });
 }
 
-/**
- * @param {http.IncomingHttpHeaders} nodeHeaders
- */
-function headersFromNode(nodeHeaders) {
+function headersFromNode(nodeHeaders: http.IncomingHttpHeaders): Headers {
   const headers = new Headers();
   for (const [key, value] of Object.entries(nodeHeaders)) {
     if (Array.isArray(value)) {
@@ -97,7 +92,7 @@ const server = http.createServer(async (req, res) => {
   const request = new Request(`http://${req.headers.host}${req.url}`, {
     method: req.method,
     headers: headersFromNode(req.headers),
-    body
+    body: body as BodyInit | undefined
   });
 
   try {
@@ -110,18 +105,17 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
-    Readable.fromWeb(response.body).on("error", (error) => {
-      const typedError = /** @type {Error} */ (error);
+    Readable.fromWeb(response.body as import("stream/web").ReadableStream).on("error", (error: Error) => {
       if (!res.headersSent) {
         res.statusCode = 500;
         res.setHeader("content-type", "application/json; charset=utf-8");
-        res.end(JSON.stringify({ error: typedError.message }));
+        res.end(JSON.stringify({ error: error.message }));
         return;
       }
-      res.destroy(typedError);
+      res.destroy(error);
     }).pipe(res);
   } catch (error) {
-    const typedError = /** @type {Error} */ (error);
+    const typedError = error as Error;
     res.statusCode = 500;
     res.setHeader("content-type", "application/json; charset=utf-8");
     res.end(JSON.stringify({ error: typedError.message }));

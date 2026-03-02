@@ -119,7 +119,7 @@ async function main() {
 
   try {
     if (!baseUrlArg) {
-      serverProcess = spawn("node", ["apps/edge/src/dev-server.js"], {
+      serverProcess = spawn("node", ["--import", "tsx/esm", "apps/edge/src/dev-server.ts"], {
         cwd: repoRoot,
         stdio: ["ignore", "pipe", "pipe"]
       });
