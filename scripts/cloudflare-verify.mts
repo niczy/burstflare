@@ -1,14 +1,13 @@
-// @ts-check
-
 import { createCloudflareClient, loadCloudflareConfig } from "./lib/cloudflare.mjs";
 
-/**
- * @typedef {Error & {
- *   payload?: unknown;
- * }} CloudflareScriptError
- */
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
 
-async function main() {
+async function main(): Promise<void> {
   const config = await loadCloudflareConfig();
   const client = createCloudflareClient(config);
   const verified = await client.verifyToken();
@@ -30,8 +29,7 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  const typedError = /** @type {CloudflareScriptError} */ (error);
-  process.stderr.write(`${typedError.message}\n`);
+main().catch((error: unknown) => {
+  process.stderr.write(`${getErrorMessage(error)}\n`);
   process.exit(1);
 });
