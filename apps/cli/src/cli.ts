@@ -1,4 +1,3 @@
-// @ts-check
 
 import { spawn } from "node:child_process";
 import net from "node:net";
@@ -14,47 +13,47 @@ import {
   SSH_RUNTIME_DEPENDENCIES
 } from "./runtime-deps.js";
 
+interface WritableOutput {
+  write(chunk: string | Uint8Array): void;
+  isTTY?: boolean;
+}
+
+type SpawnImpl = (
+  command: string,
+  args: string[],
+  options?: import("node:child_process").SpawnOptions
+) => { on(event: string, handler: (...args: any[]) => void): unknown };
+
 const CLI_NAME = "flare";
 const DEFAULT_BASE_URL = "https://burstflare.dev";
 
-/**
- * @typedef {Record<string, any> & {
- *   clientId?: string;
- *   sshKeys?: Record<string, any>;
- *   baseUrl?: string;
- *   token?: string;
- *   refreshToken?: string;
- *   workspaceId?: string;
- *   userEmail?: string;
- * }} CLIConfig
- */
+interface CLIConfig {
+  clientId?: string;
+  sshKeys?: Record<string, any>;
+  baseUrl?: string;
+  token?: string;
+  refreshToken?: string;
+  workspaceId?: string;
+  userEmail?: string;
+  [key: string]: unknown;
+}
 
-/**
- * @typedef {Error & {
- *   status?: number;
- *   code?: number | string | null;
- * }} CliError
- */
+interface CliError extends Error {
+  status?: number;
+  code?: number | string | null;
+}
 
-/**
- * @param {string} message
- * @param {number} status
- * @returns {CliError}
- */
-function createCliError(message, status) {
-  const error = /** @type {CliError} */ (new Error(message));
+function createCliError(message: string, status: number): CliError {
+  const error = new Error(message) as CliError;
   error.status = status;
   return error;
 }
 
-function createClientId() {
+function createClientId(): string {
   return `cli_${globalThis.crypto.randomUUID()}`;
 }
 
-/**
- * @param {CLIConfig} [config]
- */
-function normalizeSshKeys(config = {}) {
+function normalizeSshKeys(config: CLIConfig = {}): Record<string, any> {
   const keys = config?.sshKeys;
   if (!keys || typeof keys !== "object" || Array.isArray(keys)) {
     return {};
@@ -62,11 +61,7 @@ function normalizeSshKeys(config = {}) {
   return keys;
 }
 
-/**
- * @param {CLIConfig} [config]
- * @returns {CLIConfig}
- */
-function withLocalKeyState(config = {}) {
+function withLocalKeyState(config: CLIConfig = {}): CLIConfig {
   return {
     ...config,
     clientId: config.clientId || createClientId(),
@@ -74,22 +69,22 @@ function withLocalKeyState(config = {}) {
   };
 }
 
-function sshKeyDirectory(configPath) {
+function sshKeyDirectory(configPath: string): string {
   return path.join(path.dirname(configPath), "ssh");
 }
 
-function sessionSshKeyPath(configPath, sessionId) {
+function sessionSshKeyPath(configPath: string, sessionId: string): string {
   return path.join(sshKeyDirectory(configPath), `${sessionId}.ed25519`);
 }
 
-export function websocketUrlForSsh(baseUrl, sessionId, token) {
+export function websocketUrlForSsh(baseUrl: string, sessionId: string, token: string): string {
   const url = new URL(`/runtime/sessions/${sessionId}/ssh`, baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("token", token);
   return url.toString();
 }
 
-function toWebSocketBytes(value) {
+function toWebSocketBytes(value: unknown): Buffer | null {
   if (value == null) {
     return null;
   }
@@ -100,7 +95,7 @@ function toWebSocketBytes(value) {
     return Buffer.from(value);
   }
   if (ArrayBuffer.isView(value)) {
-    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    return Buffer.from(value.buffer as ArrayBuffer, value.byteOffset, value.byteLength);
   }
   if (typeof Blob !== "undefined" && value instanceof Blob) {
     return Buffer.from([]);
@@ -108,9 +103,19 @@ function toWebSocketBytes(value) {
   return Buffer.from([]);
 }
 
-export async function createSshTunnel(sshUrl, options = {}) {
+export async function createSshTunnel(
+  sshUrl: string,
+  options: {
+    netImpl?: typeof net;
+    WebSocketImpl?: any;
+  } = {}
+): Promise<{
+  host: string;
+  port: number;
+  close(): Promise<void>;
+}> {
   const netImpl = options.netImpl || net;
-  const WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket || NodeWebSocket;
+  const WebSocketImpl = options.WebSocketImpl || (globalThis as any).WebSocket || NodeWebSocket;
   const wsOpenState = WebSocketImpl.OPEN ?? 1;
   const wsConnectingState = WebSocketImpl.CONNECTING ?? 0;
   if (typeof WebSocketImpl !== "function") {
@@ -119,8 +124,8 @@ export async function createSshTunnel(sshUrl, options = {}) {
 
   return new Promise((resolve, reject) => {
     let settled = false;
-    let activeSocket = null;
-    let activeWebSocket = null;
+    let activeSocket: import("node:net").Socket | null = null;
+    let activeWebSocket: any = null;
     const server = netImpl.createServer((socket) => {
       if (activeSocket) {
         socket.end();
@@ -132,12 +137,12 @@ export async function createSshTunnel(sshUrl, options = {}) {
       ws.binaryType = "arraybuffer";
       let socketClosed = false;
       let wsOpen = false;
-      const pendingChunks = [];
+      const pendingChunks: Buffer[] = [];
       const addListener =
         typeof ws.addEventListener === "function"
-          ? (eventName, handler) => ws.addEventListener(eventName, handler)
-          : (eventName, handler) =>
-              ws.on(eventName, (...args) => {
+          ? (eventName: string, handler: (...args: any[]) => void) => ws.addEventListener(eventName, handler)
+          : (eventName: string, handler: (...args: any[]) => void) =>
+              ws.on(eventName, (...args: any[]) => {
                 if (eventName === "message") {
                   handler({ data: args[0] });
                   return;
@@ -168,7 +173,7 @@ export async function createSshTunnel(sshUrl, options = {}) {
         }
       });
 
-      addListener("message", async (event) => {
+      addListener("message", async (event: { data: unknown }) => {
         if (!activeSocket || activeSocket.destroyed) {
           return;
         }
@@ -245,16 +250,16 @@ export async function createSshTunnel(sshUrl, options = {}) {
           if (!server.listening) {
             return;
           }
-          await new Promise((resolveClose) => server.close(resolveClose));
+          await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
         }
       });
     });
   });
 }
 
-function parseArgs(argv) {
-  const positionals = [];
-  const options = {};
+function parseArgs(argv: string[]): { positionals: string[]; options: Record<string, string | true> } {
+  const positionals: string[] = [];
+  const options: Record<string, string | true> = {};
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
     if (!item.startsWith("--")) {
@@ -273,35 +278,28 @@ function parseArgs(argv) {
   return { positionals, options };
 }
 
-function defaultConfigPath(env = process.env) {
-  return env.FLARE_CONFIG || path.join(os.homedir(), ".config", CLI_NAME, "config.json");
+function defaultConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.FLARE_CONFIG as string) || path.join(os.homedir(), ".config", CLI_NAME, "config.json");
 }
 
-async function readConfig(configPath) {
+async function readConfig(configPath: string): Promise<CLIConfig> {
   try {
     const raw = await readFile(configPath, "utf8");
-    return /** @type {CLIConfig} */ (JSON.parse(raw));
+    return JSON.parse(raw) as CLIConfig;
   } catch (error) {
-    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
-      return /** @type {CLIConfig} */ ({});
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {} as CLIConfig;
     }
     throw error;
   }
 }
 
-/**
- * @param {string} configPath
- * @param {CLIConfig} value
- */
-async function writeConfig(configPath, value) {
+async function writeConfig(configPath: string, value: CLIConfig): Promise<void> {
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(value, null, 2));
 }
 
-/**
- * @returns {Promise<any>}
- */
-async function requestJson(url, options = {}, fetchImpl = fetch) {
+async function requestJson(url: string, options: RequestInit = {}, fetchImpl: typeof fetch = fetch): Promise<any> {
   const response = await fetchImpl(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -310,10 +308,7 @@ async function requestJson(url, options = {}, fetchImpl = fetch) {
   return data;
 }
 
-/**
- * @returns {Promise<string>}
- */
-async function requestText(url, options = {}, fetchImpl = fetch) {
+async function requestText(url: string, options: RequestInit = {}, fetchImpl: typeof fetch = fetch): Promise<string> {
   const response = await fetchImpl(url, options);
   const text = await response.text();
   if (!response.ok) {
@@ -322,8 +317,8 @@ async function requestText(url, options = {}, fetchImpl = fetch) {
   return text;
 }
 
-function headers(token, withJson = true) {
-  const map = {};
+function headers(token?: string, withJson: boolean = true): Record<string, string> {
+  const map: Record<string, string> = {};
   if (withJson) {
     map["content-type"] = "application/json";
   }
@@ -333,11 +328,11 @@ function headers(token, withJson = true) {
   return map;
 }
 
-function print(stream, value) {
+function print(stream: WritableOutput, value: string): void {
   stream.write(`${value}\n`);
 }
 
-function shouldUseColor(stream, env = process.env) {
+function shouldUseColor(stream: WritableOutput, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.NO_COLOR !== undefined) {
     return false;
   }
@@ -350,14 +345,44 @@ function shouldUseColor(stream, env = process.env) {
   return Boolean(stream?.isTTY);
 }
 
-function styleText(value, codes, enabled) {
+function styleText(value: string, codes: string, enabled: boolean): string {
   if (!enabled) {
     return value;
   }
   return `${codes}${value}\u001B[0m`;
 }
 
-const HELP_CATALOG = [
+interface HelpCommand {
+  name: string;
+  usageTail: string;
+  summary: string;
+}
+
+interface HelpGroupTopic {
+  kind: "group";
+  name: string;
+  alias?: string;
+  usageTail?: string;
+  summary: string;
+  commands: HelpCommand[];
+}
+
+interface HelpCommandTopic {
+  kind: "command";
+  name: string;
+  alias?: string;
+  usageTail?: string;
+  summary: string;
+}
+
+type HelpTopic = HelpGroupTopic | HelpCommandTopic;
+
+interface HelpSection {
+  title: string;
+  topics: HelpTopic[];
+}
+
+const HELP_CATALOG: HelpSection[] = [
   {
     title: "Authentication",
     topics: [
@@ -533,12 +558,12 @@ const HELP_CATALOG = [
   }
 ];
 
-function commandUsageLine(commandName, usageTail = "") {
+function commandUsageLine(commandName: string, usageTail: string = ""): string {
   return [commandName, usageTail].filter(Boolean).join(" ");
 }
 
-function buildHelpIndex() {
-  const entries = [];
+function buildHelpIndex(): Array<{ section: string; path: string[]; matchers: string[][] }> {
+  const entries: Array<{ section: string; path: string[]; matchers: string[][] }> = [];
   for (const section of HELP_CATALOG) {
     for (const topic of section.topics) {
       entries.push({
@@ -565,8 +590,8 @@ function buildHelpIndex() {
 
 const HELP_INDEX = buildHelpIndex();
 
-function resolveHelpPath(tokens = []) {
-  let bestMatch = null;
+function resolveHelpPath(tokens: string[] = []): string[] | null {
+  let bestMatch: { path: string[]; length: number } | null = null;
   for (const entry of HELP_INDEX) {
     for (const matcher of entry.matchers) {
       if (matcher.length > tokens.length) {
@@ -593,7 +618,7 @@ function resolveHelpPath(tokens = []) {
   return bestMatch?.path || null;
 }
 
-function createHelpProgram() {
+function createHelpProgram(): Command {
   const program = new Command();
   program.name(CLI_NAME);
   program.description("BurstFlare command reference");
@@ -621,18 +646,19 @@ function createHelpProgram() {
   return program;
 }
 
-function findHelpCommand(program, pathSegments) {
-  let current = program;
+function findHelpCommand(program: Command, pathSegments: string[]): Command | null {
+  let current: Command = program;
   for (const segment of pathSegments) {
-    current = current.commands.find((command) => command.name() === segment);
-    if (!current) {
+    const found = current.commands.find((command) => command.name() === segment);
+    if (!found) {
       return null;
     }
+    current = found;
   }
   return current;
 }
 
-function formatCommandHelp(text, stream, env = process.env) {
+function formatCommandHelp(text: string, stream: WritableOutput, env: NodeJS.ProcessEnv = process.env): string {
   const useColor = shouldUseColor(stream, env);
   const lines = text.trimEnd().split("\n");
   if (!useColor) {
@@ -651,7 +677,7 @@ function formatCommandHelp(text, stream, env = process.env) {
     .join("\n");
 }
 
-function helpTextForTopic(tokens, stream, env = process.env) {
+function helpTextForTopic(tokens: string[], stream: WritableOutput, env: NodeJS.ProcessEnv = process.env): string {
   const pathSegments = resolveHelpPath(tokens);
   if (!pathSegments) {
     throw new Error(`Unknown help topic: ${tokens.join(" ")}`);
@@ -664,19 +690,19 @@ function helpTextForTopic(tokens, stream, env = process.env) {
   return formatCommandHelp(command.helpInformation(), stream, env);
 }
 
-function getBaseUrl(options, config) {
-  return options.url || config.baseUrl || DEFAULT_BASE_URL;
+function getBaseUrl(options: Record<string, string | true>, config: CLIConfig): string {
+  return (options.url as string) || config.baseUrl || DEFAULT_BASE_URL;
 }
 
-function getToken(options, config) {
-  return options.token || config.token || "";
+function getToken(options: Record<string, string | true>, config: CLIConfig): string {
+  return (options.token as string) || config.token || "";
 }
 
-function getRefreshToken(options, config) {
-  return options["refresh-token"] || config.refreshToken || "";
+function getRefreshToken(options: Record<string, string | true>, config: CLIConfig): string {
+  return (options["refresh-token"] as string) || config.refreshToken || "";
 }
 
-function parseListOption(value) {
+function parseListOption(value: unknown): string[] | undefined {
   if (!value || typeof value !== "string") {
     return undefined;
   }
@@ -687,7 +713,7 @@ function parseListOption(value) {
   return items.length ? items : undefined;
 }
 
-function parseIntegerOption(value) {
+function parseIntegerOption(value: unknown): number | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -698,7 +724,7 @@ function parseIntegerOption(value) {
   return parsed;
 }
 
-function filterCollection(data, key, predicate) {
+function filterCollection(data: any, key: string, predicate: (entry: any) => boolean): any {
   const items = Array.isArray(data?.[key]) ? data[key] : [];
   const filtered = items.filter(predicate);
   return {
@@ -709,14 +735,14 @@ function filterCollection(data, key, predicate) {
   };
 }
 
-function selectCurrentWorkspace(workspaces, workspaceId) {
+function selectCurrentWorkspace(workspaces: any[], workspaceId: string | undefined): any {
   if (!Array.isArray(workspaces) || workspaces.length === 0) {
     return null;
   }
   return workspaces.find((entry) => entry.id === workspaceId) || workspaces[0];
 }
 
-async function saveAuthConfig(configPath, config, baseUrl, payload) {
+async function saveAuthConfig(configPath: string, config: CLIConfig, baseUrl: string, payload: any): Promise<CLIConfig> {
   const next = {
     ...withLocalKeyState(config),
     baseUrl,
@@ -729,7 +755,7 @@ async function saveAuthConfig(configPath, config, baseUrl, payload) {
   return next;
 }
 
-async function clearAuthConfig(configPath, config, baseUrl) {
+async function clearAuthConfig(configPath: string, config: CLIConfig, baseUrl: string): Promise<CLIConfig> {
   const next = {
     ...withLocalKeyState(config),
     baseUrl,
@@ -742,8 +768,13 @@ async function clearAuthConfig(configPath, config, baseUrl) {
   return next;
 }
 
-async function runForegroundCommand(spawnImpl, command, args, options = {}) {
-  await new Promise((resolve, reject) => {
+async function runForegroundCommand(
+  spawnImpl: SpawnImpl,
+  command: string,
+  args: string[],
+  options: import("node:child_process").SpawnOptions = {}
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
     const child = spawnImpl(command, args, options);
 
@@ -764,22 +795,22 @@ async function runForegroundCommand(spawnImpl, command, args, options = {}) {
         resolve();
         return;
       }
-      const error = /** @type {CliError} */ (new Error(
+      const error = new Error(
         signal ? `${command} terminated with signal ${signal}` : `${command} exited with code ${code}`
-      ));
+      ) as CliError;
       error.status = typeof code === "number" && code > 0 ? code : 1;
       reject(error);
     });
   });
 }
 
-function helpText(stream, env = process.env) {
+function helpText(stream: WritableOutput, env: NodeJS.ProcessEnv = process.env): string {
   const useColor = shouldUseColor(stream, env);
   const title = styleText("flare CLI", "\u001B[1;36m", useColor);
   const usageLabel = styleText("Usage", "\u001B[1;33m", useColor);
-  const sectionLabel = (value) => styleText(value, "\u001B[1;33m", useColor);
+  const sectionLabel = (value: string) => styleText(value, "\u001B[1;33m", useColor);
   const commandPrefix = styleText(CLI_NAME, "\u001B[1;32m", useColor);
-  const note = (value) => styleText(value, "\u001B[2m", useColor);
+  const note = (value: string) => styleText(value, "\u001B[2m", useColor);
 
   const lines = [
     title,
@@ -810,7 +841,18 @@ function helpText(stream, env = process.env) {
   return lines.join("\n").trimEnd();
 }
 
-export async function runCli(argv, dependencies = {}) {
+export async function runCli(
+  argv: string[],
+  dependencies: {
+    fetchImpl?: typeof fetch;
+    spawnImpl?: SpawnImpl;
+    createSshTunnelImpl?: typeof createSshTunnel;
+    stdout?: WritableOutput;
+    stderr?: WritableOutput;
+    env?: NodeJS.ProcessEnv;
+    configPath?: string;
+  } = {}
+): Promise<number> {
   const fetchImpl = dependencies.fetchImpl || fetch;
   const spawnImpl = dependencies.spawnImpl || spawn;
   const createSshTunnelImpl = dependencies.createSshTunnelImpl || createSshTunnel;
@@ -824,7 +866,7 @@ export async function runCli(argv, dependencies = {}) {
       print(stdout, positionals.length > 1 ? helpTextForTopic(positionals.slice(1), stdout, env) : helpText(stdout, env));
       return 0;
     } catch (error) {
-      const typedError = /** @type {CliError} */ (error);
+      const typedError = error as CliError;
       print(stderr, typedError.message || "Command failed");
       return 1;
     }
@@ -834,7 +876,7 @@ export async function runCli(argv, dependencies = {}) {
       print(stdout, positionals.length > 0 ? helpTextForTopic(positionals, stdout, env) : helpText(stdout, env));
       return 0;
     } catch (error) {
-      const typedError = /** @type {CliError} */ (error);
+      const typedError = error as CliError;
       print(stderr, typedError.message || "Command failed");
       return 1;
     }
@@ -897,7 +939,7 @@ export async function runCli(argv, dependencies = {}) {
     }
   }
 
-  async function rotateAuthTokens() {
+  async function rotateAuthTokens(): Promise<any> {
     if (!refreshToken) {
       throw createCliError("Refresh token missing", 401);
     }
@@ -911,13 +953,13 @@ export async function runCli(argv, dependencies = {}) {
       fetchImpl
     );
     authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
-    token = authConfig.token;
+    token = authConfig.token as string;
     refreshToken = authConfig.refreshToken || "";
     await syncKnownSshKeysForAuth(token);
     return data;
   }
 
-  function withCurrentAuth(existingHeaders = {}) {
+  function withCurrentAuth(existingHeaders: Record<string, string> = {}): Record<string, string> {
     const merged = new Headers(existingHeaders);
     if (!merged.has("authorization") && token) {
       merged.set("authorization", `Bearer ${token}`);
@@ -925,15 +967,15 @@ export async function runCli(argv, dependencies = {}) {
     return Object.fromEntries(merged.entries());
   }
 
-  async function requestJsonAuthed(url, options = {}) {
+  async function requestJsonAuthed(url: string, options: RequestInit = {}): Promise<any> {
     const firstAttempt = {
       ...options,
-      headers: withCurrentAuth(options.headers || {})
+      headers: withCurrentAuth(options.headers as Record<string, string> || {})
     };
     try {
       return await requestJson(url, firstAttempt, fetchImpl);
     } catch (error) {
-      const typedError = /** @type {CliError} */ (error);
+      const typedError = error as CliError;
       if (typedError.status !== 401 || !refreshToken) {
         throw error;
       }
@@ -942,22 +984,22 @@ export async function runCli(argv, dependencies = {}) {
         url,
         {
           ...options,
-          headers: withCurrentAuth(options.headers || {})
+          headers: withCurrentAuth(options.headers as Record<string, string> || {})
         },
         fetchImpl
       );
     }
   }
 
-  async function requestTextAuthed(url, options = {}) {
+  async function requestTextAuthed(url: string, options: RequestInit = {}): Promise<string> {
     const firstAttempt = {
       ...options,
-      headers: withCurrentAuth(options.headers || {})
+      headers: withCurrentAuth(options.headers as Record<string, string> || {})
     };
     try {
       return await requestText(url, firstAttempt, fetchImpl);
     } catch (error) {
-      const typedError = /** @type {CliError} */ (error);
+      const typedError = error as CliError;
       if (typedError.status !== 401 || !refreshToken) {
         throw error;
       }
@@ -966,18 +1008,18 @@ export async function runCli(argv, dependencies = {}) {
         url,
         {
           ...options,
-          headers: withCurrentAuth(options.headers || {})
+          headers: withCurrentAuth(options.headers as Record<string, string> || {})
         },
         fetchImpl
       );
     }
   }
 
-  async function fetchAuthed(url, options = {}) {
+  async function fetchAuthed(url: string, options: RequestInit = {}): Promise<Response> {
     const attempt = () =>
       fetchImpl(url, {
         ...options,
-        headers: withCurrentAuth(options.headers || {})
+        headers: withCurrentAuth(options.headers as Record<string, string> || {})
       });
 
     let response = await attempt();
@@ -989,7 +1031,7 @@ export async function runCli(argv, dependencies = {}) {
     return response;
   }
 
-  async function uploadWithGrant(uploadUrl, body, contentType) {
+  async function uploadWithGrant(uploadUrl: string, body: unknown, contentType: string): Promise<any> {
     return requestJson(
       uploadUrl,
       {
@@ -997,13 +1039,13 @@ export async function runCli(argv, dependencies = {}) {
         headers: {
           "content-type": contentType || "application/octet-stream"
         },
-        body
+        body: body as BodyInit
       },
       fetchImpl
     );
   }
 
-  async function persistAuthConfig(nextConfig) {
+  async function persistAuthConfig(nextConfig: CLIConfig): Promise<CLIConfig> {
     authConfig = withLocalKeyState(nextConfig);
     token = authConfig.token || "";
     refreshToken = authConfig.refreshToken || "";
@@ -1011,7 +1053,7 @@ export async function runCli(argv, dependencies = {}) {
     return authConfig;
   }
 
-  async function ensureSessionSshKey(sessionId) {
+  async function ensureSessionSshKey(sessionId: string): Promise<Record<string, any>> {
     let nextConfig = withLocalKeyState(authConfig);
     const keyPath = sessionSshKeyPath(configPath, sessionId);
     const publicKeyPath = `${keyPath}.pub`;
@@ -1046,7 +1088,7 @@ export async function runCli(argv, dependencies = {}) {
       publicKey = (await readFile(publicKeyPath, "utf8")).trim();
     }
 
-    const sshKeys = {
+    const sshKeys: Record<string, any> = {
       ...normalizeSshKeys(nextConfig)
     };
     const existing = sshKeys[sessionId] || {};
@@ -1079,7 +1121,7 @@ export async function runCli(argv, dependencies = {}) {
     };
   }
 
-  async function syncSessionSshKey(sessionId) {
+  async function syncSessionSshKey(sessionId: string): Promise<Record<string, any>> {
     const key = await ensureSessionSshKey(sessionId);
     await requestJsonAuthed(
       `${baseUrl}/api/sessions/${sessionId}/ssh-key`,
@@ -1093,7 +1135,7 @@ export async function runCli(argv, dependencies = {}) {
         })
       }
     );
-    const sshKeys = {
+    const sshKeys: Record<string, any> = {
       ...normalizeSshKeys(authConfig),
       [sessionId]: {
         ...normalizeSshKeys(authConfig)[sessionId],
@@ -1108,14 +1150,14 @@ export async function runCli(argv, dependencies = {}) {
     return sshKeys[sessionId];
   }
 
-  async function syncKnownSshKeysForAuth(nextToken) {
+  async function syncKnownSshKeysForAuth(nextToken: string): Promise<void> {
     const keyEntries = Object.entries(normalizeSshKeys(authConfig));
     if (!nextToken || keyEntries.length === 0) {
       return;
     }
     let changed = false;
     for (const [sessionId, entry] of keyEntries) {
-      const publicKeyPath = entry?.publicKeyPath || `${sessionSshKeyPath(configPath, sessionId)}.pub`;
+      const publicKeyPath = (entry as any)?.publicKeyPath || `${sessionSshKeyPath(configPath, sessionId)}.pub`;
       let publicKey = "";
       try {
         publicKey = (await readFile(publicKeyPath, "utf8")).trim();
@@ -1132,22 +1174,22 @@ export async function runCli(argv, dependencies = {}) {
               authorization: `Bearer ${nextToken}`
             },
             body: JSON.stringify({
-              keyId: entry.keyId,
-              label: entry.label,
+              keyId: (entry as any).keyId,
+              label: (entry as any).label,
               publicKey
             })
           },
           fetchImpl
         );
-        authConfig.sshKeys[sessionId] = {
-          ...entry,
+        (authConfig.sshKeys as Record<string, any>)[sessionId] = {
+          ...(entry as any),
           publicKey,
           publicKeyPath,
           syncedAt: new Date().toISOString()
         };
         changed = true;
       } catch (error) {
-        const typedError = /** @type {CliError} */ (error);
+        const typedError = error as CliError;
         if (![401, 403, 404, 409].includes(Number(typedError.status))) {
           throw error;
         }
@@ -1158,7 +1200,7 @@ export async function runCli(argv, dependencies = {}) {
     }
   }
 
-  async function ensureSessionRunningForSsh(sessionId) {
+  async function ensureSessionRunningForSsh(sessionId: string): Promise<any> {
     try {
       return await requestJsonAuthed(
         `${baseUrl}/api/sessions/${sessionId}/ssh-token`,
@@ -1168,7 +1210,7 @@ export async function runCli(argv, dependencies = {}) {
         }
       );
     } catch (error) {
-      const typedError = /** @type {CliError} */ (error);
+      const typedError = error as CliError;
       if (typedError.status !== 409 || typedError.message !== "Session is not running") {
         throw error;
       }
@@ -1189,13 +1231,13 @@ export async function runCli(argv, dependencies = {}) {
     }
   }
 
-  async function runInteractiveCommand(command, args) {
+  async function runInteractiveCommand(command: string, args: string[]): Promise<void> {
     try {
       await runForegroundCommand(spawnImpl, command, args, {
         stdio: "inherit"
       });
     } catch (error) {
-      const typedError = /** @type {CliError} */ (error);
+      const typedError = error as CliError;
       if (typedError?.message?.startsWith(`${command} exited with code `)) {
         const code = typedError.message.slice(`${command} exited with code `.length);
         const wrapped = createCliError(`SSH session exited with code ${code}`, Number(typedError.status) || 1);
@@ -1210,7 +1252,13 @@ export async function runCli(argv, dependencies = {}) {
     }
   }
 
-  function buildSshAttachInfo(sessionId, data, sshKey) {
+  function buildSshAttachInfo(sessionId: string, data: any, sshKey: Record<string, any> | null): {
+    sshUrl: string;
+    sshUser: string;
+    sshPrivateKeyPath: string;
+    localCommand: string;
+    note: string;
+  } {
     const sshUrl = websocketUrlForSsh(baseUrl, sessionId, data.token);
     const keyPath = sshKey?.privateKeyPath || "<local-key-path>";
     return {
@@ -1251,7 +1299,7 @@ export async function runCli(argv, dependencies = {}) {
           fetchImpl
         );
         authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
-        token = authConfig.token;
+        token = authConfig.token as string;
         refreshToken = authConfig.refreshToken || "";
         await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
@@ -1269,7 +1317,7 @@ export async function runCli(argv, dependencies = {}) {
           fetchImpl
         );
         authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
-        token = authConfig.token;
+        token = authConfig.token as string;
         refreshToken = authConfig.refreshToken || "";
         await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
@@ -1292,7 +1340,7 @@ export async function runCli(argv, dependencies = {}) {
           fetchImpl
         );
         authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
-        token = authConfig.token;
+        token = authConfig.token as string;
         refreshToken = authConfig.refreshToken || "";
         await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
@@ -1341,7 +1389,7 @@ export async function runCli(argv, dependencies = {}) {
           fetchImpl
         );
         authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
-        token = authConfig.token;
+        token = authConfig.token as string;
         refreshToken = authConfig.refreshToken || "";
         await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
@@ -1396,7 +1444,7 @@ export async function runCli(argv, dependencies = {}) {
           }
         );
         authConfig = await saveAuthConfig(configPath, authConfig, baseUrl, data);
-        token = authConfig.token;
+        token = authConfig.token as string;
         refreshToken = authConfig.refreshToken || "";
         await syncKnownSshKeysForAuth(token);
         print(stdout, JSON.stringify(data, null, 2));
@@ -1678,7 +1726,7 @@ export async function runCli(argv, dependencies = {}) {
         );
         let result = created;
         if (options.file) {
-          const bundleBody = await readFile(options.file);
+          const bundleBody = await readFile(options.file as string);
           const uploadGrant = await requestJsonAuthed(
             `${baseUrl}/api/templates/${templateId}/versions/${created.templateVersion.id}/bundle/upload`,
             {
@@ -2018,7 +2066,7 @@ export async function runCli(argv, dependencies = {}) {
         );
         let result = created;
         if (options.file) {
-          const snapshotBody = await readFile(options.file);
+          const snapshotBody = await readFile(options.file as string);
           const uploadGrant = await requestJsonAuthed(
             `${baseUrl}/api/sessions/${sessionId}/snapshots/${created.snapshot.id}/content/upload`,
             {
@@ -2092,7 +2140,7 @@ export async function runCli(argv, dependencies = {}) {
           throw new Error(new TextDecoder().decode(body) || `Request failed (${response.status})`);
         }
         if (options.output) {
-          await writeFile(options.output, body);
+          await writeFile(options.output as string, body);
           print(
             stdout,
             JSON.stringify(
@@ -2142,7 +2190,7 @@ export async function runCli(argv, dependencies = {}) {
         }
       );
       if (options.output) {
-        await writeFile(options.output, JSON.stringify(data, null, 2));
+        await writeFile(options.output as string, JSON.stringify(data, null, 2));
         print(
           stdout,
           JSON.stringify(
@@ -2247,7 +2295,7 @@ export async function runCli(argv, dependencies = {}) {
 
     throw new Error("Unknown command");
   } catch (error) {
-    const typedError = /** @type {CliError} */ (error);
+    const typedError = error as CliError;
     print(stderr, typedError.message || "Command failed");
     return 1;
   }
