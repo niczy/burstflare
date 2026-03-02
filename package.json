@@ -9,7 +9,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "tsx scripts/build.mts",
     "build:web": "npm run build --workspace @burstflare/web",
     "ci": "npm run lint && npm run typecheck && npm run build && npm run build:web && npm test",
     "cf:generate": "node scripts/cloudflare-generate-wrangler.mjs",
@@ -48,6 +48,7 @@
     "@types/node": "^25.3.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }
