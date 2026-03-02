@@ -1,3 +1,5 @@
+// @ts-check
+
 import { createMemoryStore } from "./memory-store.js";
 import { createId, defaultNameFromEmail } from "./utils.js";
 
@@ -51,6 +53,42 @@ const DEFAULT_BILLING_CATALOG = {
   snapshotUsd: 0.02,
   templateBuildUsd: 0.1
 };
+
+/**
+ * @typedef {{
+ *   currency?: string;
+ *   runtimeMinuteUsd?: number;
+ *   snapshotUsd?: number;
+ *   templateBuildUsd?: number;
+ * }} BillingCatalogInput
+ */
+
+/**
+ * @typedef {Error & {
+ *   status?: number;
+ *   auditEvent?: unknown;
+ * }} ServiceError
+ */
+
+/**
+ * @typedef {{
+ *   body?: unknown;
+ *   contentType?: string;
+ * }} UploadBodyOptions
+ */
+
+/**
+ * @typedef {{
+ *   successUrl?: string;
+ *   cancelUrl?: string;
+ * }} CheckoutSessionOptions
+ */
+
+/**
+ * @typedef {{
+ *   returnUrl?: string;
+ * }} BillingPortalOptions
+ */
 
 function nowMs(clock) {
   return clock();
@@ -208,8 +246,11 @@ function toIsoFromUnixSeconds(value) {
   return new Date(value * 1000).toISOString();
 }
 
+/**
+ * @param {BillingCatalogInput | null | undefined} [catalog]
+ */
 function normalizeBillingCatalog(catalog = {}) {
-  const source = catalog && typeof catalog === "object" && !Array.isArray(catalog) ? catalog : {};
+  const source = catalog && typeof catalog === "object" && !Array.isArray(catalog) ? catalog : /** @type {BillingCatalogInput} */ ({});
   const currency =
     typeof source.currency === "string" && source.currency.trim() ? source.currency.trim().toLowerCase() : "usd";
   const runtimeMinuteUsd = Number.isFinite(source.runtimeMinuteUsd)
@@ -402,13 +443,13 @@ function ensure(condition, message, status = 400) {
 }
 
 function fail(message, status = 400) {
-  const error = new Error(message);
+  const error = /** @type {ServiceError} */ (new Error(message));
   error.status = status;
   throw error;
 }
 
 function auditAndThrow(_state, _clock, audit, message, status = 400) {
-  const error = new Error(message);
+  const error = /** @type {ServiceError} */ (new Error(message));
   error.status = status;
   error.auditEvent = {
     ...audit,
@@ -1282,7 +1323,7 @@ async function persistBuildLog({ objects, template, templateVersion, build, log 
 }
 
 async function sha256Hex(value) {
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", toUint8Array(value));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(toUint8Array(value)));
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -2220,9 +2261,7 @@ export function createBurstFlareService(options = {}) {
         ensure(Number.isInteger(publicKeyAlgorithm), "Passkey algorithm is required");
         const existingOwner = state.users.find((user) => getPasskeys(user).some((passkey) => passkey.id === credentialId));
         if (existingOwner && existingOwner.id !== auth.user.id) {
-          const error = new Error("Passkey credential already registered");
-          error.status = 409;
-          throw error;
+          fail("Passkey credential already registered", 409);
         }
 
         const passkeys = getPasskeys(auth.user);
@@ -3038,7 +3077,12 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async createWorkspaceCheckoutSession(token, { successUrl, cancelUrl } = {}) {
+    /**
+     * @param {string} token
+     * @param {CheckoutSessionOptions} [options]
+     */
+    async createWorkspaceCheckoutSession(token, options = {}) {
+      const { successUrl, cancelUrl } = options;
       return transact(WORKSPACE_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const provider = requireBillingProvider();
@@ -3095,7 +3139,12 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async createWorkspaceBillingPortalSession(token, { returnUrl } = {}) {
+    /**
+     * @param {string} token
+     * @param {BillingPortalOptions} [options]
+     */
+    async createWorkspaceBillingPortalSession(token, options = {}) {
+      const { returnUrl } = options;
       return transact(WORKSPACE_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const provider = requireBillingProvider();
@@ -3746,7 +3795,14 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async uploadTemplateVersionBundle(token, templateId, versionId, { body, contentType = "application/octet-stream" } = {}) {
+    /**
+     * @param {string} token
+     * @param {string} templateId
+     * @param {string} versionId
+     * @param {UploadBodyOptions} [options]
+     */
+    async uploadTemplateVersionBundle(token, templateId, versionId, options = {}) {
+      const { body, contentType = "application/octet-stream" } = options;
       return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
         ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
@@ -4430,7 +4486,14 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async uploadSnapshotContent(token, sessionId, snapshotId, { body, contentType = "application/octet-stream" } = {}) {
+    /**
+     * @param {string} token
+     * @param {string} sessionId
+     * @param {string} snapshotId
+     * @param {UploadBodyOptions} [options]
+     */
+    async uploadSnapshotContent(token, sessionId, snapshotId, options = {}) {
+      const { body, contentType = "application/octet-stream" } = options;
       return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
@@ -4503,7 +4566,12 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async consumeUploadGrant(grantId, { body, contentType = "application/octet-stream" } = {}) {
+    /**
+     * @param {string} grantId
+     * @param {UploadBodyOptions} [options]
+     */
+    async consumeUploadGrant(grantId, options = {}) {
+      const { body, contentType = "application/octet-stream" } = options;
       return transact(ADMIN_SCOPE, async (state) => {
         const grants = pruneUploadGrants(state, clock);
         const uploadGrant = grants.find((entry) => entry.id === grantId);
