@@ -1,5 +1,3 @@
-// @ts-check
-
 import { createMemoryStore } from "./memory-store.js";
 import { createId, defaultNameFromEmail } from "./utils.js";
 
@@ -54,41 +52,31 @@ const DEFAULT_BILLING_CATALOG = {
   templateBuildUsd: 0.1
 };
 
-/**
- * @typedef {{
- *   currency?: string;
- *   runtimeMinuteUsd?: number;
- *   snapshotUsd?: number;
- *   templateBuildUsd?: number;
- * }} BillingCatalogInput
- */
+type BillingCatalogInput = {
+  currency?: string;
+  runtimeMinuteUsd?: number;
+  snapshotUsd?: number;
+  templateBuildUsd?: number;
+};
 
-/**
- * @typedef {Error & {
- *   status?: number;
- *   auditEvent?: unknown;
- * }} ServiceError
- */
+type ServiceError = Error & {
+  status?: number;
+  auditEvent?: unknown;
+};
 
-/**
- * @typedef {{
- *   body?: unknown;
- *   contentType?: string;
- * }} UploadBodyOptions
- */
+type UploadBodyOptions = {
+  body?: unknown;
+  contentType?: string;
+};
 
-/**
- * @typedef {{
- *   successUrl?: string;
- *   cancelUrl?: string;
- * }} CheckoutSessionOptions
- */
+type CheckoutSessionOptions = {
+  successUrl?: string;
+  cancelUrl?: string;
+};
 
-/**
- * @typedef {{
- *   returnUrl?: string;
- * }} BillingPortalOptions
- */
+type BillingPortalOptions = {
+  returnUrl?: string;
+};
 
 function nowMs(clock) {
   return clock();
@@ -116,11 +104,11 @@ const QUOTA_OVERRIDE_KEYS = [
   "maxTemplateBuilds"
 ];
 
-function normalizeQuotaOverrides(overrides = {}) {
+function normalizeQuotaOverrides(overrides: any = {}) {
   if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
     return {};
   }
-  const normalized = {};
+  const normalized: Record<string, number> = {};
   for (const key of QUOTA_OVERRIDE_KEYS) {
     if (overrides[key] === undefined || overrides[key] === null || overrides[key] === "") {
       continue;
@@ -206,7 +194,7 @@ function formatWorkspaceBilling(workspace) {
   };
 }
 
-function writeWorkspaceBilling(workspace, clock, updates = {}) {
+function writeWorkspaceBilling(workspace, clock, updates: any = {}) {
   const current = normalizeWorkspaceBilling(workspace?.billing);
   const next = {
     ...current,
@@ -246,11 +234,8 @@ function toIsoFromUnixSeconds(value) {
   return new Date(value * 1000).toISOString();
 }
 
-/**
- * @param {BillingCatalogInput | null | undefined} [catalog]
- */
-function normalizeBillingCatalog(catalog = {}) {
-  const source = catalog && typeof catalog === "object" && !Array.isArray(catalog) ? catalog : /** @type {BillingCatalogInput} */ ({});
+function normalizeBillingCatalog(catalog: BillingCatalogInput | null | undefined = {}) {
+  const source: BillingCatalogInput = catalog && typeof catalog === "object" && !Array.isArray(catalog) ? catalog : {};
   const currency =
     typeof source.currency === "string" && source.currency.trim() ? source.currency.trim().toLowerCase() : "usd";
   const runtimeMinuteUsd = Number.isFinite(source.runtimeMinuteUsd)
@@ -383,7 +368,7 @@ function listSessionAuthorizedPublicKeys(session) {
     .filter(Boolean);
 }
 
-function normalizeSessionSshKey(payload = {}) {
+function normalizeSessionSshKey(payload: any = {}) {
   const keyId = String(payload.keyId || "").trim();
   ensure(keyId, "SSH key id is required");
   ensure(keyId.length <= 128, "SSH key id exceeds size limit");
@@ -443,13 +428,13 @@ function ensure(condition, message, status = 400) {
 }
 
 function fail(message, status = 400) {
-  const error = /** @type {ServiceError} */ (new Error(message));
+  const error = new Error(message) as ServiceError;
   error.status = status;
   throw error;
 }
 
 function auditAndThrow(_state, _clock, audit, message, status = 400) {
-  const error = /** @type {ServiceError} */ (new Error(message));
+  const error = new Error(message) as ServiceError;
   error.status = status;
   error.auditEvent = {
     ...audit,
@@ -1061,7 +1046,7 @@ function formatTemplateDetail(state, template) {
   };
 }
 
-function formatSession(state, session, { includeSshKeys = false } = {}) {
+function formatSession(state, session, { includeSshKeys = false }: { includeSshKeys?: boolean } = {}) {
   const template = state.templates.find((entry) => entry.id === session.templateId);
   const events = state.sessionEvents.filter((entry) => entry.sessionId === session.id);
   const snapshots = state.snapshots.filter((entry) => entry.sessionId === session.id);
@@ -1706,7 +1691,7 @@ async function processBuildRecord({
   };
 }
 
-export function createBurstFlareService(options = {}) {
+export function createBurstFlareService(options: any = {}) {
   const store = options.store || createMemoryStore();
   const clock = options.clock || (() => Date.now());
   const objects = options.objects || null;
@@ -1752,7 +1737,7 @@ export function createBurstFlareService(options = {}) {
 
   function findWorkspaceByBillingReference(
     state,
-    { workspaceId = null, customerId = null, subscriptionId = null, checkoutSessionId = null } = {}
+    { workspaceId = null, customerId = null, subscriptionId = null, checkoutSessionId = null }: any = {}
   ) {
     if (workspaceId) {
       const workspace = state.workspaces.find((entry) => entry.id === workspaceId);
@@ -1879,7 +1864,7 @@ export function createBurstFlareService(options = {}) {
     };
   }
 
-  async function sleepRunningSessionsInState(state, { workspaceId = null, reason = "reconcile" } = {}) {
+  async function sleepRunningSessionsInState(state, { workspaceId = null, reason = "reconcile" }: any = {}) {
     const sleptSessionIds = [];
     for (const session of state.sessions) {
       if (workspaceId && session.workspaceId !== workspaceId) {
@@ -1900,7 +1885,10 @@ export function createBurstFlareService(options = {}) {
     };
   }
 
-  async function recoverStuckBuildsInState(state, { workspaceId = null, actorUserId = null, source = "reconcile" } = {}) {
+  async function recoverStuckBuildsInState(
+    state,
+    { workspaceId = null, actorUserId = null, source = "reconcile" }: any = {}
+  ) {
     const candidates = getReconcileCandidates(state, workspaceId);
     const recoveredBuildIds = [];
 
@@ -1961,7 +1949,10 @@ export function createBurstFlareService(options = {}) {
     };
   }
 
-  async function processQueuedBuildsInState(state, { workspaceId = null, actorUserId = null, source = "reconcile" } = {}) {
+  async function processQueuedBuildsInState(
+    state,
+    { workspaceId = null, actorUserId = null, source = "reconcile" }: any = {}
+  ) {
     const processedBuildIds = [];
 
     for (const record of getWorkspaceBuildRecords(state, workspaceId)) {
@@ -2002,8 +1993,14 @@ export function createBurstFlareService(options = {}) {
 
   async function purgeSessionsInState(
     state,
-    sessions,
-    { actorUserId = null, auditAction = null, auditDetails = null, includeOrphanSnapshots = false, workspaceId = null } = {}
+    sessions: any[],
+    {
+      actorUserId = null,
+      auditAction = null,
+      auditDetails = null,
+      includeOrphanSnapshots = false,
+      workspaceId = null
+    }: any = {}
   ) {
     const sessionIds = sessions.map((entry) => entry.id);
     if (!sessionIds.length && !includeOrphanSnapshots) {
@@ -2170,7 +2167,7 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async generateRecoveryCodes(token, { count = 8 } = {}) {
+    async generateRecoveryCodes(token, { count = 8 }: { count?: number } = {}) {
       return transact(AUTH_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         ensure(Number.isInteger(count) && count >= 4 && count <= 12, "Recovery code count must be between 4 and 12");
@@ -3081,7 +3078,7 @@ export function createBurstFlareService(options = {}) {
      * @param {string} token
      * @param {CheckoutSessionOptions} [options]
      */
-    async createWorkspaceCheckoutSession(token, options = {}) {
+    async createWorkspaceCheckoutSession(token: string, options: CheckoutSessionOptions = {}) {
       const { successUrl, cancelUrl } = options;
       return transact(WORKSPACE_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
@@ -3143,7 +3140,7 @@ export function createBurstFlareService(options = {}) {
      * @param {string} token
      * @param {BillingPortalOptions} [options]
      */
-    async createWorkspaceBillingPortalSession(token, options = {}) {
+    async createWorkspaceBillingPortalSession(token: string, options: BillingPortalOptions = {}) {
       const { returnUrl } = options;
       return transact(WORKSPACE_SCOPE, async (state) => {
         const auth = requireManageWorkspace(state, token, clock);
@@ -3271,7 +3268,7 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async applyBillingWebhook(event = {}) {
+    async applyBillingWebhook(event: any = {}) {
       return transact(WORKSPACE_SCOPE, (state) => {
         ensure(event && typeof event === "object" && !Array.isArray(event), "Billing event payload is required");
         ensure(typeof event.type === "string" && event.type, "Billing event type is required");
@@ -3383,7 +3380,7 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async setWorkspaceQuotaOverrides(token, overrides = {}) {
+    async setWorkspaceQuotaOverrides(token, overrides: any = {}) {
       return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const clear = Boolean(overrides.clear);
@@ -3801,7 +3798,7 @@ export function createBurstFlareService(options = {}) {
      * @param {string} versionId
      * @param {UploadBodyOptions} [options]
      */
-    async uploadTemplateVersionBundle(token, templateId, versionId, options = {}) {
+    async uploadTemplateVersionBundle(token: string, templateId: string, versionId: string, options: UploadBodyOptions = {}) {
       const { body, contentType = "application/octet-stream" } = options;
       return transact(TEMPLATE_SCOPE, async (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
@@ -3826,7 +3823,7 @@ export function createBurstFlareService(options = {}) {
       token,
       templateId,
       versionId,
-      { contentType = "application/octet-stream", bytes = null } = {}
+      { contentType = "application/octet-stream", bytes = null }: any = {}
     ) {
       return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
@@ -3941,7 +3938,7 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async processTemplateBuildById(buildId, { source = "queue", actorUserId = null } = {}) {
+    async processTemplateBuildById(buildId, { source = "queue", actorUserId = null }: any = {}) {
       return transact(TEMPLATE_SCOPE, async (state) => {
         const build = state.templateBuilds.find((entry) => entry.id === buildId);
         ensure(build, "Build not found", 404);
@@ -3969,7 +3966,7 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async markTemplateBuildWorkflow(buildId, patch = {}) {
+    async markTemplateBuildWorkflow(buildId, patch: any = {}) {
       return transact(TEMPLATE_SCOPE, (state) => {
         const build = state.templateBuilds.find((entry) => entry.id === buildId);
         ensure(build, "Build not found", 404);
@@ -4492,7 +4489,7 @@ export function createBurstFlareService(options = {}) {
      * @param {string} snapshotId
      * @param {UploadBodyOptions} [options]
      */
-    async uploadSnapshotContent(token, sessionId, snapshotId, options = {}) {
+    async uploadSnapshotContent(token: string, sessionId: string, snapshotId: string, options: UploadBodyOptions = {}) {
       const { body, contentType = "application/octet-stream" } = options;
       return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
@@ -4517,7 +4514,7 @@ export function createBurstFlareService(options = {}) {
       token,
       sessionId,
       snapshotId,
-      { contentType = "application/octet-stream", bytes = null } = {}
+      { contentType = "application/octet-stream", bytes = null }: any = {}
     ) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
@@ -4570,7 +4567,7 @@ export function createBurstFlareService(options = {}) {
      * @param {string} grantId
      * @param {UploadBodyOptions} [options]
      */
-    async consumeUploadGrant(grantId, options = {}) {
+    async consumeUploadGrant(grantId: string, options: UploadBodyOptions = {}) {
       const { body, contentType = "application/octet-stream" } = options;
       return transact(ADMIN_SCOPE, async (state) => {
         const grants = pruneUploadGrants(state, clock);
@@ -4891,7 +4888,7 @@ export function createBurstFlareService(options = {}) {
       });
     },
 
-    async getAudit(token, { limit = 50 } = {}) {
+    async getAudit(token, { limit = 50 }: { limit?: number } = {}) {
       return transact(ADMIN_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         writeAudit(state, clock, {
