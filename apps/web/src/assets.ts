@@ -830,6 +830,364 @@ button.secondary {
   background: rgba(195, 84, 36, 0.08);
 }
 
+.section-frame {
+  display: grid;
+  gap: 16px;
+}
+
+.section-intro {
+  display: grid;
+  gap: 10px;
+}
+
+.section-intro h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 2.3vw, 2.3rem);
+  letter-spacing: -0.04em;
+}
+
+.section-intro p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.hero-banner {
+  min-height: 54dvh;
+  display: grid;
+  align-content: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.hero-banner h1 {
+  margin: 0;
+  font-size: clamp(2.8rem, 8vw, 6.8rem);
+  line-height: 0.9;
+  letter-spacing: -0.07em;
+}
+
+.hero-banner p {
+  margin: 0 auto;
+  max-width: 70ch;
+  color: var(--muted);
+}
+
+.workflow-canvas {
+  position: relative;
+  overflow: hidden;
+}
+
+.workflow-track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  position: relative;
+}
+
+.workflow-track::before {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 50%;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(195, 84, 36, 0.05), rgba(195, 84, 36, 0.7), rgba(195, 84, 36, 0.05));
+  transform: translateY(-50%);
+}
+
+.workflow-node {
+  appearance: none;
+  text-align: left;
+  position: relative;
+  z-index: 1;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(18, 27, 35, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  gap: 8px;
+  animation: burstflare-card-enter 560ms cubic-bezier(0.19, 1, 0.22, 1) both;
+  cursor: pointer;
+  box-shadow: none;
+  color: var(--ink);
+}
+
+.workflow-node:hover {
+  border-color: rgba(195, 84, 36, 0.3);
+}
+
+.workflow-node.is-active {
+  border-color: rgba(195, 84, 36, 0.5);
+  background: rgba(255, 246, 239, 0.9);
+}
+
+.workflow-node.is-locked {
+  opacity: 0.55;
+}
+
+.workflow-panels {
+  display: grid;
+  gap: 14px;
+}
+
+.workflow-panel[hidden] {
+  display: none;
+}
+
+.workflow-node::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 8px rgba(195, 84, 36, 0.12);
+  animation: burstflare-orbit 3.8s ease-in-out infinite;
+}
+
+.workflow-node strong {
+  font-size: 0.95rem;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.comparison-card {
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(18, 27, 35, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.comparison-card h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.comparison-card ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.steps-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.step-card {
+  border-radius: 24px;
+  border: 1px solid rgba(18, 27, 35, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.step-head {
+  display: grid;
+  gap: 4px;
+}
+
+.step-head h3 {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.step-head p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.quick-status {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 9px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(18, 27, 35, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--muted);
+}
+
+details.advanced-panel {
+  border: 1px solid rgba(18, 27, 35, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 12px;
+}
+
+details.advanced-panel > summary {
+  cursor: pointer;
+  font-weight: 760;
+  color: var(--ink);
+}
+
+.contacts-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 16px;
+}
+
+/* Flat storefront-style surface */
+:root {
+  --bg: #f1f3f4;
+  --bg-deep: #f1f3f4;
+  --row-odd: #E8E8E8;
+  --row-even: rgb(250, 250, 250);
+  --panel: #ffffff;
+  --panel-strong: #ffffff;
+  --panel-soft: #ffffff;
+  --ink: #202124;
+  --muted: #5f6368;
+  --accent: #c35424;
+  --accent-deep: #8b3414;
+  --accent-soft: rgba(195, 84, 36, 0.12);
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.12);
+  --shadow: none;
+  --shadow-soft: none;
+}
+
+body {
+  background: var(--bg);
+}
+
+body::before,
+body::after {
+  display: none;
+}
+
+main {
+  max-width: 1200px;
+  padding: clamp(18px, 2.4vw, 34px) clamp(16px, 2.6vw, 40px) 96px;
+}
+
+.shell {
+  gap: 0;
+}
+
+.card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.shell > section {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  padding: clamp(36px, 6vw, 84px) 0;
+}
+
+.shell > section::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 50vw);
+  right: calc(50% - 50vw);
+  z-index: -1;
+  background: transparent;
+}
+
+.shell > section:nth-of-type(odd)::before {
+  background: var(--row-odd);
+}
+
+.shell > section:nth-of-type(even)::before {
+  background: var(--row-even);
+}
+
+/* Explicit section backgrounds requested */
+.shell > section.row-white::before {
+  background: rgb(250, 250, 250);
+}
+
+.hero-banner h1,
+.section-intro h2,
+.step-head h3,
+.comparison-card h3 {
+  color: #202124;
+}
+
+.subtitle,
+.section-intro p,
+.step-head p,
+.comparison-card ul,
+.muted {
+  color: #5f6368;
+}
+
+.hero-banner {
+  min-height: clamp(360px, 54vh, 620px);
+  align-content: center;
+}
+
+.section-frame {
+  min-height: clamp(320px, 44vh, 560px);
+  gap: 20px;
+}
+
+.workflow-canvas {
+  min-height: clamp(420px, 58vh, 760px);
+}
+
+.workflow-node,
+.comparison-card,
+.step-card,
+.surface-note,
+.mini-note,
+.turnstile-shell,
+.item,
+.output-shell pre {
+  border: 0;
+  box-shadow: none;
+  background: #f8f9fa;
+}
+
+.step-card {
+  padding: 22px;
+  min-height: 300px;
+}
+
+.workflow-panel {
+  min-height: 380px;
+}
+
+.workflow-node.is-active {
+  background: #eef3fd;
+}
+
+.card::before,
+.card::after {
+  display: none;
+}
+
+button {
+  color: #ffffff;
+  background: linear-gradient(180deg, var(--accent), var(--accent-deep));
+  box-shadow: none;
+}
+
+button:hover {
+  filter: brightness(1.04);
+  box-shadow: none;
+}
+
+button.secondary {
+  color: #8b3414;
+  background: #f7e7df;
+  border: 0;
+  box-shadow: none;
+}
+
 @media (max-width: 1180px) {
   .hero-card {
     min-height: auto;
@@ -843,6 +1201,16 @@ button.secondary {
 
   .hero-card {
     min-height: auto;
+  }
+
+  .workflow-track,
+  .comparison-grid,
+  .contacts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-track::before {
+    display: none;
   }
 }
 `;
@@ -858,351 +1226,343 @@ export const html: string = `<!doctype html>
   </head>
   <body>
     <main class="shell">
-      <section class="hero">
-        <div class="hero-main">
-          <div class="card hero-card">
-            <div class="hero-topline">
-              <span class="eyebrow">BurstFlare live product</span>
-              <span class="pill">Hosted by default</span>
+      <section class="card hero-banner">
+        <span class="eyebrow">BurstFlare</span>
+        <h1>Your Dev Environment, Ready in Minutes</h1>
+        <p>
+          BurstFlare gives teams one place for auth, templates, build promotion, live sessions, preview, terminal, snapshots, and audit
+          history so new users can go from zero to a working environment with minimal setup.
+        </p>
+        <div class="hero-actions" style="justify-content:center">
+          <button id="heroQuickLaunchButton">Quick Launch Working Session</button>
+          <button class="secondary" id="quickOpenPreviewButton">Open Latest Preview</button>
+        </div>
+      </section>
+
+      <section class="card section-frame workflow-canvas row-white">
+        <div class="section-intro">
+          <h2>How The System Works</h2>
+          <p>Use these tabs in order. Each step exposes only the controls needed for that phase.</p>
+        </div>
+        <div class="workflow-track">
+          <button class="workflow-node" type="button" data-workflow-step="0">
+            <strong>1. Identity</strong>
+            <span class="muted">Sign in and run quick launch from basic inputs.</span>
+          </button>
+          <button class="workflow-node is-locked" type="button" data-workflow-step="1">
+            <strong>2. Template Build</strong>
+            <span class="muted">Workspace setup, template creation, and promotion.</span>
+          </button>
+          <button class="workflow-node is-locked" type="button" data-workflow-step="2">
+            <strong>3. Session Runtime</strong>
+            <span class="muted">Session lifecycle, preview, terminal, and runtime actions.</span>
+          </button>
+          <button class="workflow-node is-locked" type="button" data-workflow-step="3">
+            <strong>4. Operate & Restore</strong>
+            <span class="muted">Snapshots, usage, reports, releases, and audit.</span>
+          </button>
+        </div>
+
+        <div class="workflow-panels">
+          <article class="step-card workflow-panel" data-workflow-panel="0">
+            <div class="step-head">
+              <h3>Identity</h3>
+              <p>Start with basic information and optionally run one-click session launch.</p>
             </div>
-            <div class="hero-copy">
-              <div class="section-shell">
-                <p class="section-kicker">Build once. Launch often.</p>
-                <h1 class="title">A real workspace hub, not another setup ritual.</h1>
+            <div class="row">
+              <div>
+                <label for="quickEmail">Email</label>
+                <input id="quickEmail" type="email" placeholder="you@example.com" />
               </div>
-              <p class="subtitle">
-                BurstFlare keeps templates, sessions, previews, access flows, terminal tools, snapshots, and activity in one place so
-                teams can move from sign-in to a working environment without extra handoffs.
-              </p>
-            </div>
-            <div class="hero-metrics">
-              <div class="metric-chip">
-                <strong>Templates stay ready</strong>
-                <span>Create, queue, promote, and relaunch without rebuilding your whole process.</span>
-              </div>
-              <div class="metric-chip">
-                <strong>Sessions stay close</strong>
-                <span>Preview, editor, Quick Terminal, and SSH all hang off the same workspace flow.</span>
-              </div>
-              <div class="metric-chip">
-                <strong>One default endpoint</strong>
-                <span>burstflare.dev for production, with local override only when you want it.</span>
+              <div>
+                <label for="quickName">Name</label>
+                <input id="quickName" type="text" placeholder="Your name" />
               </div>
             </div>
-            <div class="hero-actions">
+            <div class="row">
+              <div>
+                <label for="quickTemplateName">Template Name (Optional)</label>
+                <input id="quickTemplateName" type="text" placeholder="Leave empty for random" />
+              </div>
+              <div>
+                <label for="quickSessionName">Session Name (Optional)</label>
+                <input id="quickSessionName" type="text" placeholder="Leave empty for random" />
+              </div>
+            </div>
+            <div class="row">
+              <button id="quickLaunchButton">Create Working Dev Environment</button>
+            </div>
+            <div class="quick-status" id="quickLaunchStatus">Waiting to launch.</div>
+            <div class="list" id="dashboardPulse"></div>
+
+            <div class="row">
+              <div>
+                <label for="email">Email</label>
+                <input id="email" type="email" placeholder="you@example.com" />
+              </div>
+              <div>
+                <label for="name">Name</label>
+                <input id="name" type="text" placeholder="Nicholas" />
+              </div>
+            </div>
+            <div>
+              <label>Verification Challenge</label>
+              <div class="turnstile-shell muted" id="turnstileWidget">The verification challenge loads automatically in the hosted app.</div>
+            </div>
+            <div>
+              <label for="turnstileToken">Verification Token</label>
+              <input id="turnstileToken" type="text" placeholder="Leave blank unless local testing" />
+            </div>
+            <div class="row">
+              <button id="registerButton">Register</button>
+              <button class="secondary" id="loginButton">Login</button>
+              <button class="secondary" id="passkeyLoginButton">Passkey Login</button>
+            </div>
+            <div class="row">
+              <button class="secondary" id="recoverButton">Use Recovery Code</button>
+              <button class="secondary" id="logoutButton">Logout</button>
+              <button class="secondary" id="logoutAllButton">Logout All Sessions</button>
+            </div>
+            <div>
+              <label for="recoveryCode">Recovery Code</label>
+              <input id="recoveryCode" type="text" placeholder="recovery_..." />
+            </div>
+            <div class="row">
+              <button class="secondary" id="recoveryCodesButton">New Recovery Codes</button>
+              <button class="secondary" id="passkeyRegisterButton">Register Passkey</button>
+            </div>
+            <div class="surface-note">
+              <strong id="identity">Not signed in</strong>
+              <span id="lastRefresh">Last refresh: never</span>
+            </div>
+            <pre class="code-block" id="recoveryCodes">No recovery codes generated.</pre>
+            <div class="list" id="passkeys"></div>
+            <div class="muted" id="deviceStatus">Pending device approvals: 0</div>
+            <div class="list" id="pendingDevices"></div>
+            <div class="list" id="authSessions"></div>
+            <div class="row">
+              <div>
+                <label for="deviceCode">Approve Device Code</label>
+                <input id="deviceCode" type="text" placeholder="device_..." />
+              </div>
+              <div class="inline-actions" style="align-self:end">
+                <button class="secondary" id="approveDeviceButton">Approve Device</button>
+                <button class="secondary" id="authSessionsButton">Refresh Sessions</button>
+              </div>
+            </div>
+            <div class="error" id="errors"></div>
+            <div class="row">
+              <button class="secondary" type="button" data-next-step="1">Continue to Template Build</button>
+            </div>
+          </article>
+
+          <article class="step-card workflow-panel" data-workflow-panel="1" hidden>
+            <div class="step-head">
+              <h3>Template Build</h3>
+              <p>Create workspace metadata, build template version, and promote it.</p>
+            </div>
+            <div>
+              <label for="workspaceName">Workspace Name</label>
+              <input id="workspaceName" type="text" placeholder="My Workspace" />
+            </div>
+            <div class="row">
+              <div>
+                <label for="inviteEmail">Invite Email</label>
+                <input id="inviteEmail" type="email" placeholder="teammate@example.com" />
+              </div>
+              <div>
+                <label for="inviteRole">Role</label>
+                <select id="inviteRole">
+                  <option value="member">member</option>
+                  <option value="admin">admin</option>
+                  <option value="viewer">viewer</option>
+                </select>
+              </div>
+            </div>
+            <div class="row">
+              <button class="secondary" id="saveWorkspaceButton">Save Workspace</button>
+              <button id="inviteButton">Create Invite</button>
+              <button class="secondary" id="membersButton">Refresh Members</button>
+            </div>
+            <div class="row">
+              <div>
+                <label for="inviteCode">Accept Invite Code</label>
+                <input id="inviteCode" type="text" placeholder="invite_..." />
+              </div>
+              <div class="inline-actions" style="align-self:end">
+                <button class="secondary" id="acceptInviteButton">Accept Invite</button>
+                <button class="secondary" id="planButton">Upgrade To Pro</button>
+              </div>
+            </div>
+            <div class="list" id="members"></div>
+
+            <div>
+              <label for="templateName">Template Name</label>
+              <input id="templateName" type="text" placeholder="node-dev" />
+            </div>
+            <div>
+              <label for="templateDescription">Description</label>
+              <textarea id="templateDescription" placeholder="Node.js shell with SSH, browser access, and preview ports"></textarea>
+            </div>
+            <button id="createTemplateButton">Create Template</button>
+            <div class="row">
+              <div>
+                <label for="versionTemplate">Template ID</label>
+                <input id="versionTemplate" type="text" placeholder="tpl_..." />
+              </div>
+              <div>
+                <label for="templateVersion">Version</label>
+                <input id="templateVersion" type="text" placeholder="1.0.0" />
+              </div>
+            </div>
+            <div>
+              <label for="persistedPaths">Persisted Paths</label>
+              <input id="persistedPaths" type="text" placeholder="/workspace,/home/dev/.cache" />
+            </div>
+            <div class="row">
+              <button class="secondary" id="addVersionButton">Queue Build</button>
+              <button class="secondary" id="processBuildsButton">Process Builds</button>
+              <button class="secondary" id="listBuildsButton">Refresh Builds</button>
+            </div>
+            <div class="row">
+              <div>
+                <label for="promoteTemplate">Template ID</label>
+                <input id="promoteTemplate" type="text" placeholder="tpl_..." />
+              </div>
+              <div>
+                <label for="promoteVersion">Version ID</label>
+                <input id="promoteVersion" type="text" placeholder="tplv_..." />
+              </div>
+            </div>
+            <button id="promoteButton">Promote Version</button>
+            <div class="list" id="templates"></div>
+            <div class="output-shell">
+              <pre id="templateInspector">Select a template to inspect.</pre>
+              <pre id="builds">[]</pre>
+            </div>
+            <div class="row">
+              <button class="secondary" type="button" data-prev-step="0">Back</button>
+              <button class="secondary" type="button" data-next-step="2">Continue to Session Runtime</button>
+            </div>
+          </article>
+
+          <article class="step-card workflow-panel" data-workflow-panel="2" hidden>
+            <div class="step-head">
+              <h3>Session Runtime</h3>
+              <p>Create and manage session, then attach quick terminal.</p>
+            </div>
+            <div class="row">
+              <div>
+                <label for="sessionName">Session Name</label>
+                <input id="sessionName" type="text" placeholder="my-workspace" />
+              </div>
+              <div>
+                <label for="sessionTemplate">Template ID</label>
+                <input id="sessionTemplate" type="text" placeholder="tpl_..." />
+              </div>
+            </div>
+            <button id="createSessionButton">Create Session</button>
+            <div class="list" id="sessions"></div>
+            <div class="row">
               <button class="secondary" id="refreshButton">Refresh Workspace</button>
               <button class="secondary" id="reconcileButton">Run Cleanup</button>
             </div>
-          </div>
-
-          <div class="hero-band">
-            <div class="card quickstart-shell">
-              <div class="card-head">
-                <h2>Quick Start</h2>
-                <p>Open the product first. Bring in the CLI when you want repeatable setup or operator workflows.</p>
-              </div>
-              <div class="quickstart-grid">
-                <div class="step">
-                  <strong>1. Open BurstFlare</strong>
-                  <span>Use the hosted app to create an account and land in the full dashboard immediately.</span>
-                  <pre class="code-block">https://burstflare.dev</pre>
-                </div>
-                <div class="step">
-                  <strong>2. Add the CLI</strong>
-                  <span><code>flare</code> points at the live product by default, so most users never need a URL flag.</span>
-                  <pre class="code-block">npm install -g @burstflare/flare
-flare auth register --email you@example.com</pre>
-                </div>
-                <div class="step">
-                  <strong>3. Ship a template</strong>
-                  <span>Create one reusable environment, upload a version, then promote the release.</span>
-                  <pre class="code-block">flare template create node-dev
-flare template upload &lt;templateId&gt; --version 1.0.0
-flare template promote &lt;templateId&gt; &lt;versionId&gt;</pre>
-                </div>
-                <div class="step">
-                  <strong>4. Launch a session</strong>
-                  <span>Start a workspace, then jump into Preview, Editor, Quick Terminal, or SSH.</span>
-                  <pre class="code-block">flare session up sandbox --template &lt;templateId&gt;
-flare ssh &lt;sessionId&gt;</pre>
-                </div>
-              </div>
-              <p class="mini-note">
-                Local development still works. When you need it, pass <code>--url http://127.0.0.1:8787</code> and keep the same CLI flow.
-              </p>
+            <div class="muted" id="terminalStatus">Not connected</div>
+            <pre class="terminal" id="terminalOutput">Waiting for a session attach...</pre>
+            <div class="row">
+              <input class="terminal-input" id="terminalInput" type="text" placeholder="Type a command or message" />
+              <button class="secondary" id="terminalSendButton">Send</button>
+              <button class="secondary" id="terminalCloseButton">Close</button>
             </div>
-
-            <div class="card hero-pulse">
-              <div class="card-head">
-                <h2>Dashboard Pulse</h2>
-                <p>See what is active before you invite teammates, promote another version, or start another session.</p>
-              </div>
-              <div class="surface-note">
-                <strong>Live workspace readout</strong>
-                <span>The counts below refresh from the current workspace and keep the whole surface grounded.</span>
-              </div>
-              <div class="list" id="dashboardPulse"></div>
+            <div class="row">
+              <button class="secondary" type="button" data-prev-step="1">Back</button>
+              <button class="secondary" type="button" data-next-step="3">Continue to Operate & Restore</button>
             </div>
-          </div>
-        </div>
+          </article>
 
-        <aside class="card hero-side">
-          <div class="card-head">
-            <h2>Get Started</h2>
-            <p>Use this rail for sign-in, passkeys, recovery, and device approval. It stays close while the rest of the dashboard moves.</p>
-          </div>
-          <div class="row">
-            <div>
-              <label for="email">Email</label>
-              <input id="email" type="email" placeholder="you@example.com" />
+          <article class="step-card workflow-panel" data-workflow-panel="3" hidden>
+            <div class="step-head">
+              <h3>Operate & Restore</h3>
+              <p>Snapshot restore, usage reporting, release visibility, and audit trails.</p>
+            </div>
+            <div class="row">
+              <div>
+                <label for="snapshotSession">Session ID</label>
+                <input id="snapshotSession" type="text" placeholder="ses_..." />
+              </div>
+              <div>
+                <label for="snapshotLabel">Label</label>
+                <input id="snapshotLabel" type="text" placeholder="manual-save" />
+              </div>
             </div>
             <div>
-              <label for="name">Name</label>
-              <input id="name" type="text" placeholder="Nicholas" />
+              <label for="snapshotContent">Snapshot Content</label>
+              <textarea id="snapshotContent" placeholder="Optional text payload"></textarea>
             </div>
-          </div>
-          <div>
-            <label>Verification Challenge</label>
-            <div class="turnstile-shell muted" id="turnstileWidget">The verification challenge loads automatically in the hosted app.</div>
-          </div>
-          <div>
-            <label for="turnstileToken">Verification Token</label>
-            <input id="turnstileToken" type="text" placeholder="Leave blank unless you are testing a local environment" />
-          </div>
-          <div class="row">
-            <button id="registerButton">Register</button>
-            <button class="secondary" id="loginButton">Login</button>
-            <button class="secondary" id="passkeyLoginButton">Sign In With Passkey</button>
-          </div>
-          <div class="row">
-            <button class="secondary" id="recoverButton">Use Recovery Code</button>
-            <button class="secondary" id="logoutButton">Logout</button>
-          </div>
-          <div>
-            <label for="recoveryCode">Recovery Code</label>
-            <input id="recoveryCode" type="text" placeholder="recovery_..." />
-          </div>
-          <div class="row">
-            <button class="secondary" id="recoveryCodesButton">New Recovery Codes</button>
-            <button class="secondary" id="passkeyRegisterButton">Register Passkey</button>
-          </div>
-          <div class="surface-note">
-            <strong id="identity">Not signed in</strong>
-            <span id="lastRefresh">Last refresh: never</span>
-          </div>
-          <pre class="code-block" id="recoveryCodes">No recovery codes generated.</pre>
-          <div class="list" id="passkeys"></div>
-          <div class="error" id="errors"></div>
-        </aside>
-      </section>
-
-      <section class="grid grid-2">
-        <div class="card stack">
-          <div class="card-head">
-            <h2>Workspace Control</h2>
-            <p>Rename the active workspace, invite teammates, accept invite codes, and tune plan limits without leaving the main board.</p>
-          </div>
-          <div>
-            <label for="workspaceName">Workspace Name</label>
-            <input id="workspaceName" type="text" placeholder="My Workspace" />
-          </div>
-          <div class="row">
-            <div>
-              <label for="inviteEmail">Invite Email</label>
-              <input id="inviteEmail" type="email" placeholder="teammate@example.com" />
+            <div class="row">
+              <button id="snapshotButton">Create Snapshot</button>
+              <button class="secondary" id="snapshotListButton">Load Snapshots</button>
+              <button class="secondary" id="reportButton">Refresh Admin Report</button>
             </div>
-            <div>
-              <label for="inviteRole">Role</label>
-              <select id="inviteRole">
-                <option value="member">member</option>
-                <option value="admin">admin</option>
-                <option value="viewer">viewer</option>
-              </select>
+            <div class="list" id="snapshotList"></div>
+            <div class="output-shell">
+              <pre id="snapshotContentPreview">No snapshot content loaded.</pre>
+              <pre id="usage"></pre>
+              <pre id="report">[]</pre>
+              <pre id="releases">[]</pre>
+              <pre id="audit">[]</pre>
             </div>
-          </div>
-          <div class="row">
-            <button class="secondary" id="saveWorkspaceButton">Save Workspace</button>
-            <button id="inviteButton">Create Invite</button>
-            <button class="secondary" id="membersButton">Refresh Members</button>
-          </div>
-          <div>
-            <label for="inviteCode">Accept Invite Code</label>
-            <input id="inviteCode" type="text" placeholder="invite_..." />
-          </div>
-          <div class="row">
-            <button class="secondary" id="acceptInviteButton">Accept Invite</button>
-            <button class="secondary" id="planButton">Upgrade To Pro</button>
-          </div>
-          <div class="surface-note">
-            <strong>Workspace flow</strong>
-            <span>Set the workspace name, send the invite, then confirm the member list updates below.</span>
-          </div>
-          <div class="list" id="members"></div>
-        </div>
-
-        <div class="card stack">
-          <div class="card-head">
-            <h2>Sessions & Access</h2>
-            <p>Review active sign-ins, approve device codes, and clean up stale access without forcing a full account reset.</p>
-          </div>
-          <div>
-            <label for="deviceCode">Approve Device Code</label>
-            <input id="deviceCode" type="text" placeholder="device_..." />
-          </div>
-          <div class="row">
-            <button class="secondary" id="approveDeviceButton">Approve Device</button>
-            <button class="secondary" id="authSessionsButton">Refresh Sessions</button>
-            <button class="secondary" id="logoutAllButton">Logout All Sessions</button>
-          </div>
-          <div class="muted" id="deviceStatus">Pending device approvals: 0</div>
-          <div class="list" id="pendingDevices"></div>
-          <div class="list" id="authSessions"></div>
+            <div class="row">
+              <button class="secondary" type="button" data-prev-step="2">Back</button>
+            </div>
+          </article>
         </div>
       </section>
 
-      <section class="grid grid-3">
-        <div class="card stack">
-          <div class="card-head">
-            <h2>Template Studio</h2>
-            <p>Define reusable environments, queue versions, process builds, and promote releases without leaving the same surface.</p>
-          </div>
-          <div>
-            <label for="templateName">Template Name</label>
-            <input id="templateName" type="text" placeholder="node-dev" />
-          </div>
-          <div>
-            <label for="templateDescription">Description</label>
-            <textarea id="templateDescription" placeholder="Node.js shell with SSH, browser access, and preview ports"></textarea>
-          </div>
-          <button id="createTemplateButton">Create Template</button>
-          <div class="row">
-            <div>
-              <label for="versionTemplate">Template ID</label>
-              <input id="versionTemplate" type="text" placeholder="tpl_..." />
-            </div>
-            <div>
-              <label for="templateVersion">Version</label>
-              <input id="templateVersion" type="text" placeholder="1.0.0" />
-            </div>
-          </div>
-          <div>
-            <label for="persistedPaths">Persisted Paths</label>
-            <input id="persistedPaths" type="text" placeholder="/workspace,/home/dev/.cache" />
-          </div>
-          <div class="row">
-            <button class="secondary" id="addVersionButton">Queue Build</button>
-            <button class="secondary" id="processBuildsButton">Process Builds</button>
-            <button class="secondary" id="listBuildsButton">Refresh Builds</button>
-          </div>
-          <div class="row">
-            <div>
-              <label for="promoteTemplate">Template ID</label>
-              <input id="promoteTemplate" type="text" placeholder="tpl_..." />
-            </div>
-            <div>
-              <label for="promoteVersion">Version ID</label>
-              <input id="promoteVersion" type="text" placeholder="tplv_..." />
-            </div>
-          </div>
-          <button id="promoteButton">Promote Version</button>
-          <div class="surface-note">
-            <strong>Release shortcut</strong>
-            <span>Create a template, queue a version, refresh builds, then promote the result before launching a session.</span>
-          </div>
-          <div class="list" id="templates"></div>
-          <div class="output-shell">
-            <pre id="templateInspector">Select a template to inspect.</pre>
-            <pre id="builds">[]</pre>
-          </div>
+      <section class="card section-frame">
+        <div class="section-intro">
+          <h2>Why BurstFlare Wins</h2>
+          <p>Compared with typical hosted IDE products, BurstFlare keeps runtime control and CLI-grade workflows together.</p>
         </div>
-
-        <div class="card stack">
-          <div class="card-head">
-            <h2>Launch Sessions</h2>
-            <p>Start a workspace from the current template and route users into preview, editor, terminal, or SSH in one sequence.</p>
-          </div>
-          <div class="row">
-            <div>
-              <label for="sessionName">Session Name</label>
-              <input id="sessionName" type="text" placeholder="my-workspace" />
-            </div>
-            <div>
-              <label for="sessionTemplate">Template ID</label>
-              <input id="sessionTemplate" type="text" placeholder="tpl_..." />
-            </div>
-          </div>
-          <button id="createSessionButton">Create Session</button>
-          <div class="surface-note">
-            <strong>Session flow</strong>
-            <span>Create, start, inspect events, then use the quick actions on each session card to preview, edit, or attach.</span>
-          </div>
-          <div class="list" id="sessions"></div>
-        </div>
-
-        <div class="card stack">
-          <div class="card-head">
-            <h2>Quick Terminal</h2>
-            <p>Use the in-browser terminal for lightweight checks, then move to SSH when you need a full native shell.</p>
-          </div>
-          <div class="surface-note">
-            <strong>Terminal handoff</strong>
-            <span>Keep this panel open for quick checks while Preview and Editor stay on the session cards.</span>
-          </div>
-          <div class="muted" id="terminalStatus">Not connected</div>
-          <pre class="terminal" id="terminalOutput">Waiting for a session attach...</pre>
-          <div class="row">
-            <input class="terminal-input" id="terminalInput" type="text" placeholder="Type a command or message" />
-            <button class="secondary" id="terminalSendButton">Send</button>
-            <button class="secondary" id="terminalCloseButton">Close</button>
-          </div>
+        <div class="comparison-grid">
+          <article class="comparison-card">
+            <h3>BurstFlare</h3>
+            <ul>
+              <li>One hosted endpoint + CLI path without environment juggling.</li>
+              <li>Template lifecycle and session lifecycle share one control plane.</li>
+              <li>Preview, editor, terminal, SSH, snapshots, and audit all in one surface.</li>
+            </ul>
+          </article>
+          <article class="comparison-card">
+            <h3>Typical Market Flow</h3>
+            <ul>
+              <li>Separate systems for auth, environment catalog, and runtime access.</li>
+              <li>More manual handoffs between template build and session launch.</li>
+              <li>New users must learn operator controls before first success.</li>
+            </ul>
+          </article>
         </div>
       </section>
 
-      <section class="grid grid-2">
-        <div class="card stack">
-          <div class="card-head">
-            <h2>Snapshots & Health</h2>
-            <p>Capture a restorable checkpoint, inspect its content, and keep usage plus workspace health visible from one control area.</p>
-          </div>
-          <div class="row">
-            <div>
-              <label for="snapshotSession">Session ID</label>
-              <input id="snapshotSession" type="text" placeholder="ses_..." />
-            </div>
-            <div>
-              <label for="snapshotLabel">Label</label>
-              <input id="snapshotLabel" type="text" placeholder="manual-save" />
-            </div>
-          </div>
-          <div>
-            <label for="snapshotContent">Snapshot Content</label>
-            <textarea id="snapshotContent" placeholder="Optional text payload to store with the snapshot"></textarea>
-          </div>
-          <div class="row">
-            <button id="snapshotButton">Create Snapshot</button>
-            <button class="secondary" id="snapshotListButton">Load Snapshots</button>
-            <button class="secondary" id="reportButton">Refresh Admin Report</button>
-          </div>
-          <div class="list" id="snapshotList"></div>
-          <div class="output-shell">
-            <pre id="snapshotContentPreview">No snapshot content loaded.</pre>
-            <pre id="usage"></pre>
-            <pre id="report">[]</pre>
-          </div>
-        </div>
 
-        <div class="card stack">
-          <div class="card-head">
-            <h2>Releases & Activity</h2>
-            <p>Track release history, audit trails, and the main workspace timeline without dropping into a separate admin screen.</p>
+      <section class="card section-frame row-white">
+        <div class="section-intro">
+          <h2>Further Reading & Contact</h2>
+          <p>Continue with docs or start a support loop with the team.</p>
+        </div>
+        <div class="contacts-grid">
+          <div class="surface-note">
+            <strong>Resources</strong>
+            <span>Read architecture, runbook, and roadmap under <code>spec/</code>. Use the CLI docs to automate workflows.</span>
+            <pre class="code-block">spec/overview.md
+spec/architecture.md
+spec/runbook.md
+apps/cli/README.md</pre>
           </div>
           <div class="surface-note">
-            <strong>Daily loop</strong>
-            <span>Sign in, adjust the workspace, ship a template, launch a session, then save a snapshot when you want a clean checkpoint.</span>
-          </div>
-          <div class="output-shell">
-            <pre id="releases">[]</pre>
-            <pre id="audit">[]</pre>
+            <strong>Contact</strong>
+            <span>Use workspace invites for team access and this dashboard for session and audit visibility.</span>
+            <p class="mini-note">Product endpoint: <code>https://burstflare.dev</code></p>
           </div>
         </div>
       </section>
@@ -1220,6 +1580,9 @@ const state = {
   me: null,
   terminalSocket: null,
   terminalSessionId: "",
+  quickPreviewUrl: "",
+  workflowStep: Number(localStorage.getItem("burstflare_workflow_step") || 0),
+  workflowUnlocked: Number(localStorage.getItem("burstflare_workflow_unlocked") || 0),
   turnstileWidgetId: "",
   refreshTimer: null,
   refreshPending: false
@@ -1408,6 +1771,179 @@ function parsePersistedPaths(value) {
   return items.length ? items : undefined;
 }
 
+function setQuickStatus(message) {
+  const target = byId("quickLaunchStatus");
+  if (target) {
+    target.textContent = message;
+  }
+}
+
+function clampStep(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(3, Math.floor(parsed)));
+}
+
+function setWorkflowStep(step) {
+  const nextStep = clampStep(step);
+  const allowedStep = Math.min(nextStep, clampStep(state.workflowUnlocked));
+  state.workflowStep = allowedStep;
+  localStorage.setItem("burstflare_workflow_step", String(allowedStep));
+
+  document.querySelectorAll("[data-workflow-step]").forEach((button) => {
+    const buttonStep = clampStep(button.dataset.workflowStep || "0");
+    button.classList.toggle("is-active", buttonStep === allowedStep);
+    button.classList.toggle("is-locked", buttonStep > state.workflowUnlocked);
+  });
+
+  document.querySelectorAll("[data-workflow-panel]").forEach((panel) => {
+    const panelStep = clampStep(panel.dataset.workflowPanel || "0");
+    panel.hidden = panelStep !== allowedStep;
+  });
+}
+
+function unlockWorkflowStep(step) {
+  const nextUnlocked = Math.max(clampStep(state.workflowUnlocked), clampStep(step));
+  state.workflowUnlocked = nextUnlocked;
+  localStorage.setItem("burstflare_workflow_unlocked", String(nextUnlocked));
+  setWorkflowStep(Math.max(state.workflowStep, Math.min(state.workflowStep, nextUnlocked)));
+}
+
+function initWorkflowTabs() {
+  state.workflowStep = clampStep(state.workflowStep);
+  state.workflowUnlocked = clampStep(state.workflowUnlocked);
+  if (state.refreshToken || state.csrfToken) {
+    state.workflowUnlocked = Math.max(state.workflowUnlocked, 1);
+  }
+  if (state.workflowUnlocked < state.workflowStep) {
+    state.workflowUnlocked = state.workflowStep;
+  }
+  document.querySelectorAll("[data-workflow-step]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setWorkflowStep(button.dataset.workflowStep || "0");
+    });
+  });
+  document.querySelectorAll("[data-next-step]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const next = clampStep(button.dataset.nextStep || "0");
+      unlockWorkflowStep(next);
+      setWorkflowStep(next);
+    });
+  });
+  document.querySelectorAll("[data-prev-step]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const prev = clampStep(button.dataset.prevStep || "0");
+      setWorkflowStep(prev);
+    });
+  });
+  localStorage.setItem("burstflare_workflow_unlocked", String(state.workflowUnlocked));
+  setWorkflowStep(state.workflowStep);
+}
+
+function scrollToWorkflowStep(step) {
+  const target = document.querySelector('[data-workflow-panel="' + clampStep(step) + '"]');
+  if (target && typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }
+}
+
+async function ensureSignedInForQuickLaunch() {
+  if (state.refreshToken || state.csrfToken) {
+    return;
+  }
+  let email = byId("quickEmail").value.trim() || byId("email").value.trim();
+  const name = byId("quickName").value.trim() || byId("name").value.trim() || "BurstFlare User";
+  if (!email) {
+    email = "quick-" + Date.now() + "@example.com";
+    byId("quickEmail").value = email;
+    byId("email").value = email;
+  }
+  const turnstileToken = byId("turnstileToken").value.trim();
+  if (TURNSTILE_SITE_KEY && !turnstileToken) {
+    throw new Error("Complete the verification challenge in Step 1 before quick launch.");
+  }
+
+  try {
+    const data = await api("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        name,
+        ...(turnstileToken ? { turnstileToken } : {})
+      })
+    });
+    setAuth(data.refreshToken, data.csrfToken || "");
+    byId("email").value = email;
+    byId("name").value = name;
+    return;
+  } catch (_registerError) {}
+
+  const login = await api("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      kind: "browser",
+      ...(turnstileToken ? { turnstileToken } : {})
+    })
+  });
+  setAuth(login.refreshToken, login.csrfToken || "");
+  byId("email").value = email;
+  byId("name").value = name;
+}
+
+async function runQuickLaunch() {
+  setQuickStatus("Signing in...");
+  await ensureSignedInForQuickLaunch();
+
+  setQuickStatus("Preparing quick-start session...");
+  const quickPayload = {};
+  const templateName = byId("quickTemplateName").value.trim();
+  const sessionName = byId("quickSessionName").value.trim();
+  if (templateName) {
+    quickPayload.templateName = templateName;
+  }
+  if (sessionName) {
+    quickPayload.sessionName = sessionName;
+  }
+
+  const result = await api("/api/quickstart/session", {
+    method: "POST",
+    body: JSON.stringify(quickPayload)
+  });
+
+  byId("templateName").value = result.template.name;
+  byId("versionTemplate").value = result.template.id;
+  byId("promoteTemplate").value = result.template.id;
+  byId("templateVersion").value = result.templateVersion.version;
+  byId("promoteVersion").value = result.templateVersion.id;
+  byId("sessionName").value = result.session.name;
+  byId("sessionTemplate").value = result.template.id;
+  byId("snapshotSession").value = result.session.id;
+  state.quickPreviewUrl = result.session.previewUrl || "";
+  setQuickStatus("Ready. Session " + result.session.id + " is " + result.session.state + ".");
+  unlockWorkflowStep(3);
+  setWorkflowStep(2);
+}
+
+async function triggerQuickLaunch() {
+  setError("");
+  setWorkflowStep(0);
+  scrollToWorkflowStep(0);
+  try {
+    await runQuickLaunch();
+    await refresh();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Quick launch failed";
+    setQuickStatus(message);
+    setError(message);
+  }
+}
+
 function setAuth(refreshToken = state.refreshToken, csrfToken = state.csrfToken) {
   state.refreshToken = refreshToken || "";
   state.csrfToken = csrfToken || "";
@@ -1420,6 +1956,9 @@ function setAuth(refreshToken = state.refreshToken, csrfToken = state.csrfToken)
     localStorage.setItem("burstflare_csrf", state.csrfToken);
   } else {
     localStorage.removeItem("burstflare_csrf");
+  }
+  if (state.refreshToken || state.csrfToken) {
+    unlockWorkflowStep(1);
   }
 }
 
@@ -2193,6 +2732,7 @@ byId("createTemplateButton").addEventListener("click", async () => {
         description: byId("templateDescription").value
       })
     });
+    unlockWorkflowStep(2);
   });
 });
 
@@ -2226,6 +2766,8 @@ byId("promoteButton").addEventListener("click", async () => {
       method: 'POST',
       body: JSON.stringify({ versionId: byId("promoteVersion").value })
     });
+    unlockWorkflowStep(2);
+    setWorkflowStep(2);
   });
 });
 
@@ -2239,7 +2781,25 @@ byId("createSessionButton").addEventListener("click", async () => {
       })
     });
     await api('/api/sessions/' + data.session.id + '/start', { method: 'POST' });
+    unlockWorkflowStep(3);
+    setWorkflowStep(3);
   });
+});
+
+byId("quickLaunchButton").addEventListener("click", async () => {
+  await triggerQuickLaunch();
+});
+
+byId("heroQuickLaunchButton").addEventListener("click", async () => {
+  await triggerQuickLaunch();
+});
+
+byId("quickOpenPreviewButton").addEventListener("click", () => {
+  if (!state.quickPreviewUrl) {
+    setQuickStatus("No preview URL yet. Run quick launch first.");
+    return;
+  }
+  window.open(state.quickPreviewUrl, "_blank", "noopener");
 });
 
 byId("snapshotButton").addEventListener("click", async () => {
@@ -2297,6 +2857,7 @@ byId("reconcileButton").addEventListener("click", async () => {
 
 byId("reportButton").addEventListener("click", () => perform(async () => {}));
 
+initWorkflowTabs();
 mountTurnstile();
 
 if (state.refreshToken || state.csrfToken) {
