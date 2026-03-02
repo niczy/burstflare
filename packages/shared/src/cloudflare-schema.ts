@@ -1,21 +1,15 @@
-// @ts-check
+type TableColumn = {
+  name: string;
+  field: string;
+};
 
-/**
- * @typedef {{
- *   name: string;
- *   field: string;
- * }} TableColumn
- */
-
-/**
- * @typedef {{
- *   source: string;
- *   table: string;
- *   keyOf: (row: any, index?: number) => string;
- *   columns: TableColumn[];
- *   indexes?: string[];
- * }} TableDefinition
- */
+type TableDefinition = {
+  source: string;
+  table: string;
+  keyOf: (row: any, index?: number) => string;
+  columns: TableColumn[];
+  indexes?: string[];
+};
 
 export const LEGACY_TABLE = "_burstflare_state";
 export const LEGACY_STATE_KEY = "global";
@@ -23,8 +17,7 @@ export const META_TABLE = "bf_state_meta";
 export const SCHEMA_VERSION_KEY = "schema_version";
 export const NORMALIZED_SCHEMA_VERSION = "1";
 
-/** @type {TableDefinition[]} */
-export const TABLES = [
+export const TABLES: TableDefinition[] = [
   {
     source: "users",
     table: "bf_users",
@@ -219,7 +212,7 @@ export const TABLES = [
   }
 ];
 
-export function createTableSql(definition) {
+export function createTableSql(definition: TableDefinition): string {
   const extraColumns = definition.columns
     .map((column) => `,\n          ${column.name} TEXT`)
     .join("");
@@ -233,6 +226,6 @@ export function createTableSql(definition) {
       `;
 }
 
-export function createIndexSql(table, column) {
+export function createIndexSql(table: string, column: string): string {
   return `CREATE INDEX IF NOT EXISTS idx_${table}_${column} ON ${table} (${column});`;
 }
