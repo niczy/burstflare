@@ -1,3 +1,5 @@
+// @ts-check
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp, createWorkerService, handleQueueBatch, handleScheduled, runReconcile } from "../apps/edge/src/app.js";

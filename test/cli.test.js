@@ -1,3 +1,5 @@
+// @ts-check
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -655,6 +657,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     stdout.data = "";
     stderr.data = "";
 
+    /** @type {{ command: string; args: string[]; options: any } | null} */
     let spawned = null;
     let tunnelClosed = false;
     const spawnImpl = (command, args, options) => {
@@ -706,6 +709,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     assert.equal(stdout.data, "");
     assert.equal(stderr.data, "");
+    assert.ok(spawned);
     assert.equal(spawned.command, "ssh");
     assert.deepEqual(spawned.args, [
       "-i",
