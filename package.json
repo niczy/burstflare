@@ -25,6 +25,8 @@
     "cf:verify:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/cloudflare-verify.mts",
     "dev:edge": "npm run build --workspace @burstflare/shared && tsx apps/edge/src/dev-server.ts",
     "dev:web": "npm run dev --workspace @burstflare/web",
+    "deploy": "tsx scripts/deploy.mts",
+    "deploy:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/deploy.mts",
     "dev": "tsx scripts/dev.mts",
     "lint": "node scripts/lint.mjs",
     "npm:cli:smoke": "node scripts/npm-cli-smoke.mjs",
