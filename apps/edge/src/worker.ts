@@ -1,27 +1,67 @@
-// @ts-check
-
 import { Container, getContainer } from "@cloudflare/containers";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import { createApp, createWorkerService, handleQueueBatch, handleScheduled } from "./app.js";
 
 const RUNTIME_STATE_KEY = "burstflare:runtime-state";
 
-/**
- * @typedef {{
- *   storage: {
- *     get(key: string): Promise<any>;
- *     put(key: string, value: any): Promise<void>;
- *   };
- * }} RuntimeStorageContext
- */
+interface RuntimeStorageContext {
+  get(key: string): Promise<unknown>;
+  put(key: string, value: unknown): Promise<void>;
+}
 
-/**
- * @typedef {Error & {
- *   status?: number;
- * }} StatusError
- */
+interface StatusError extends Error {
+  status?: number;
+}
 
-function nowIso() {
+interface RuntimeState {
+  sessionId: string | null;
+  desiredState: string;
+  status: string;
+  runtimeState: string;
+  bootCount: number;
+  operationVersion: number;
+  lastOperationId: string | null;
+  lastCommand: string | null;
+  lastCommandAt: string | null;
+  lastStartedAt: string | null;
+  lastStoppedAt: string | null;
+  lastStopReason: string | null;
+  lastBootstrapAt: string | null;
+  lastBootstrapSnapshotId: string | null;
+  lastBootstrapState: string | null;
+  lastLifecyclePhase: string | null;
+  lastLifecycleAt: string | null;
+  lastLifecycleReason: string | null;
+  lastExitCode: number | null;
+  lastError: string | null;
+  updatedAt: string | null;
+}
+
+interface RuntimeStateInput {
+  sessionId?: string | null;
+  desiredState?: string;
+  status?: string;
+  runtimeState?: string;
+  bootCount?: number;
+  operationVersion?: number;
+  lastOperationId?: string | null;
+  lastCommand?: string | null;
+  lastCommandAt?: string | null;
+  lastStartedAt?: string | null;
+  lastStoppedAt?: string | null;
+  lastStopReason?: string | null;
+  lastBootstrapAt?: string | null;
+  lastBootstrapSnapshotId?: string | null;
+  lastBootstrapState?: string | null;
+  lastLifecyclePhase?: string | null;
+  lastLifecycleAt?: string | null;
+  lastLifecycleReason?: string | null;
+  lastExitCode?: number | null;
+  lastError?: string | null;
+  updatedAt?: string | null;
+}
+
+function nowIso(): string {
   return new Date().toISOString();
 }
 
@@ -30,12 +70,12 @@ export class BurstFlareSessionContainer extends Container {
   requiredPorts = [8080];
   sleepAfter = "15m";
 
-  runtimeStorage() {
-    return /** @type {RuntimeStorageContext} */ (/** @type {any} */ (this).ctx).storage;
+  runtimeStorage(): RuntimeStorageContext {
+    return (this as unknown as { ctx: { storage: RuntimeStorageContext } }).ctx.storage as RuntimeStorageContext;
   }
 
-  async readRuntimeState() {
-    const current = await this.runtimeStorage().get(RUNTIME_STATE_KEY);
+  async readRuntimeState(): Promise<RuntimeState> {
+    const current = await this.runtimeStorage().get(RUNTIME_STATE_KEY) as RuntimeState | undefined;
     if (current) {
       return current;
     }
@@ -64,9 +104,9 @@ export class BurstFlareSessionContainer extends Container {
     };
   }
 
-  async writeRuntimeState(patch) {
+  async writeRuntimeState(patch: RuntimeStateInput): Promise<RuntimeState> {
     const current = await this.readRuntimeState();
-    const next = {
+    const next: RuntimeState = {
       ...current,
       ...patch,
       updatedAt: nowIso()
@@ -75,16 +115,40 @@ export class BurstFlareSessionContainer extends Container {
     return next;
   }
 
-  async getContainerStatus() {
+  async getContainerStatus(): Promise<string> {
     try {
       const state = await this.getState();
       return state?.status || "unknown";
-    } catch (_error) {
+    } catch {
       return "unknown";
     }
   }
 
-  async getRuntimeState() {
+  async getRuntimeState(): Promise<{
+    sessionId: string | null;
+    desiredState: string;
+    status: string;
+    runtimeState: string;
+    bootCount: number;
+    operationVersion: number;
+    lastOperationId: string | null;
+    lastCommand: string | null;
+    lastCommandAt: string | null;
+    lastStartedAt: string | null;
+    lastStoppedAt: string | null;
+    lastStopReason: string | null;
+    lastBootstrapAt: string | null;
+    lastBootstrapSnapshotId: string | null;
+    lastBootstrapState: string | null;
+    lastLifecyclePhase: string | null;
+    lastLifecycleAt: string | null;
+    lastLifecycleReason: string | null;
+    lastExitCode: number | null;
+    lastError: string | null;
+    updatedAt: string | null;
+    version: number;
+    operationId: string | null;
+  }> {
     const current = await this.readRuntimeState();
     return {
       ...current,
@@ -94,14 +158,14 @@ export class BurstFlareSessionContainer extends Container {
     };
   }
 
-  nextOperation(current) {
+  nextOperation(current: RuntimeState | undefined): { operationVersion: number; lastOperationId: string } {
     return {
       operationVersion: (current?.operationVersion || 0) + 1,
       lastOperationId: globalThis.crypto.randomUUID()
     };
   }
 
-  async waitForContainerStopped(retries = 20, waitMs = 100) {
+  async waitForContainerStopped(retries = 20, waitMs = 100): Promise<string> {
     for (let attempt = 0; attempt < retries; attempt += 1) {
       const state = await this.getContainerStatus();
       if (!["running", "healthy"].includes(state)) {
@@ -112,7 +176,7 @@ export class BurstFlareSessionContainer extends Container {
     return this.getContainerStatus();
   }
 
-  async startRuntime(metadata = {}) {
+  async startRuntime(metadata: { sessionId?: string } = {}): Promise<ReturnType<typeof this.getRuntimeState>> {
     const current = await this.readRuntimeState();
     await this.startAndWaitForPorts();
     const containerState = await this.getContainerStatus();
@@ -133,7 +197,7 @@ export class BurstFlareSessionContainer extends Container {
     return this.getRuntimeState();
   }
 
-  async stopRuntime(reason = "stop") {
+  async stopRuntime(reason = "stop"): Promise<ReturnType<typeof this.getRuntimeState>> {
     const containerState = await this.getContainerStatus();
     if (["running", "healthy"].includes(containerState)) {
       await this.destroy().catch(() => {});
@@ -157,7 +221,7 @@ export class BurstFlareSessionContainer extends Container {
     return this.getRuntimeState();
   }
 
-  async restartRuntime(metadata = {}) {
+  async restartRuntime(metadata: { sessionId?: string } = {}): Promise<ReturnType<typeof this.getRuntimeState>> {
     const current = await this.readRuntimeState();
     const containerState = await this.getContainerStatus();
     if (current.status === "running" || ["running", "healthy"].includes(containerState)) {
@@ -185,7 +249,7 @@ export class BurstFlareSessionContainer extends Container {
     return this.getRuntimeState();
   }
 
-  async deleteRuntime() {
+  async deleteRuntime(): Promise<ReturnType<typeof this.getRuntimeState>> {
     await this.destroy().catch(() => {});
     await this.waitForContainerStopped();
     const deletedAt = nowIso();
@@ -206,7 +270,7 @@ export class BurstFlareSessionContainer extends Container {
     return this.getRuntimeState();
   }
 
-  async recordBootstrap(metadata = {}) {
+  async recordBootstrap(metadata: { sessionId?: string; lastRestoredSnapshotId?: string | null; state?: string | null } = {}): Promise<ReturnType<typeof this.getRuntimeState>> {
     await this.writeRuntimeState({
       sessionId: metadata.sessionId || null,
       lastBootstrapAt: nowIso(),
@@ -216,7 +280,7 @@ export class BurstFlareSessionContainer extends Container {
     return this.getRuntimeState();
   }
 
-  async recordLifecycleHook(metadata = {}) {
+  async recordLifecycleHook(metadata: { sessionId?: string; phase?: string | null; reason?: string | null } = {}): Promise<ReturnType<typeof this.getRuntimeState>> {
     await this.writeRuntimeState({
       sessionId: metadata.sessionId || null,
       lastLifecyclePhase: metadata.phase || null,
@@ -226,7 +290,7 @@ export class BurstFlareSessionContainer extends Container {
     return this.getRuntimeState();
   }
 
-  async onStart() {
+  async onStart(): Promise<void> {
     const current = await this.readRuntimeState();
     await this.writeRuntimeState({
       sessionId: current.sessionId || null,
@@ -237,7 +301,7 @@ export class BurstFlareSessionContainer extends Container {
     });
   }
 
-  async onStop(params) {
+  async onStop(params?: { reason?: string; exitCode?: number }): Promise<void> {
     const current = await this.readRuntimeState();
     await this.writeRuntimeState({
       sessionId: current.sessionId || null,
@@ -249,17 +313,23 @@ export class BurstFlareSessionContainer extends Container {
     });
   }
 
-  async onError(error) {
+  async onError(error: unknown): Promise<never> {
     await this.writeRuntimeState({
       status: "error",
-      lastError: String(error?.message || error || "Unknown container error")
+      lastError: String((error as Error)?.message || error || "Unknown container error")
     });
     throw error;
   }
 }
 
+interface WorkflowPayload {
+  buildId?: string;
+  workflowName?: string;
+  instanceId?: string;
+}
+
 export class BurstFlareBuildWorkflow extends WorkflowEntrypoint {
-  async run(event, step) {
+  async run(event: { payload?: WorkflowPayload }, step: { do: <T>(name: string, fn: () => Promise<T>) => Promise<T> }): Promise<{ buildId: string; processed: number; status: string; attempts: number }> {
     const payload = event?.payload || {};
     const buildId = payload.buildId;
     if (!buildId) {
@@ -278,7 +348,7 @@ export class BurstFlareBuildWorkflow extends WorkflowEntrypoint {
         });
       });
     } catch (error) {
-      if ((/** @type {StatusError} */ (error)).status === 404) {
+      if ((error as StatusError).status === 404) {
         return {
           buildId,
           processed: 0,
@@ -302,7 +372,7 @@ export class BurstFlareBuildWorkflow extends WorkflowEntrypoint {
         };
       });
     } catch (error) {
-      if ((/** @type {StatusError} */ (error)).status === 404) {
+      if ((error as StatusError).status === 404) {
         return {
           buildId,
           processed: 0,
@@ -315,17 +385,30 @@ export class BurstFlareBuildWorkflow extends WorkflowEntrypoint {
   }
 }
 
-function createRuntimeOptions(env) {
+interface EnvWithSessionContainer {
+  SESSION_CONTAINER?: string;
+  ASSETS?: { fetch(request: Request): Promise<Response> };
+  BUILD_WORKFLOW_NAME?: string;
+  [key: string]: unknown;
+}
+
+interface RuntimeOptions {
+  containersEnabled: boolean;
+  getFrontendAssetResponse?: (request: Request) => Promise<Response | null> | Response | null;
+  getSessionContainer?: (sessionId: string) => ReturnType<typeof getContainer> | null;
+}
+
+function createRuntimeOptions(env: EnvWithSessionContainer): RuntimeOptions {
   return {
     ...env,
     containersEnabled: Boolean(env?.SESSION_CONTAINER),
-    async getFrontendAssetResponse(request) {
+    async getFrontendAssetResponse(request: Request): Promise<Response | null> {
       if (!env?.ASSETS || !["GET", "HEAD"].includes(request.method)) {
         return null;
       }
       return env.ASSETS.fetch(request);
     },
-    getSessionContainer(sessionId) {
+    getSessionContainer(sessionId: string) {
       if (!env?.SESSION_CONTAINER) {
         return null;
       }
@@ -337,16 +420,16 @@ function createRuntimeOptions(env) {
 export { createApp, createWorkerService } from "./app.js";
 
 export default {
-  async fetch(request, env) {
+  async fetch(request: Request, env: EnvWithSessionContainer): Promise<Response> {
     const app = createApp(createRuntimeOptions(env));
     return app.fetch(request);
   },
 
-  async queue(batch, env) {
+  async queue(batch: { messages: { body: unknown }[] }, env: EnvWithSessionContainer): Promise<void> {
     await handleQueueBatch(batch, createRuntimeOptions(env));
   },
 
-  async scheduled(controller, env) {
+  async scheduled(controller: { cron?: string }, env: EnvWithSessionContainer): Promise<void> {
     await handleScheduled(controller, createRuntimeOptions(env));
   }
 };
