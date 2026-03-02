@@ -1,20 +1,18 @@
-// @ts-check
-
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-/** @type {import("node:child_process").ChildProcess | null} */
-let activeChild = null;
+let activeChild: ChildProcess | null = null;
 
-/** @type {NodeJS.Signals[]} */
-const shutdownSignals = ["SIGINT", "SIGTERM"];
+const shutdownSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {import("node:child_process").SpawnOptions} [options]
- */
-function spawnCommand(command, args, options = {}) {
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || error.message;
+  }
+  return String(error);
+}
+
+function spawnCommand(command: string, args: string[], options: SpawnOptions = {}): ChildProcess {
   const child = spawn(command, args, {
     stdio: "inherit",
     env: process.env,
@@ -23,19 +21,13 @@ function spawnCommand(command, args, options = {}) {
   return child;
 }
 
-/**
- * @param {NodeJS.Signals} [signal]
- */
-function stopChild(signal = "SIGTERM") {
+function stopChild(signal: NodeJS.Signals = "SIGTERM"): void {
   if (activeChild && !activeChild.killed) {
     activeChild.kill(signal);
   }
 }
 
-/**
- * @param {string[]} args
- */
-function runCommand(args) {
+function runCommand(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawnCommand(npmCommand, args);
     child.on("error", reject);
@@ -53,7 +45,7 @@ function runCommand(args) {
   });
 }
 
-async function main() {
+async function main(): Promise<void> {
   await runCommand(["run", "build:web"]);
 
   activeChild = spawnCommand(npmCommand, ["run", "dev:edge"]);
@@ -69,9 +61,8 @@ for (const signal of shutdownSignals) {
   });
 }
 
-main().catch((error) => {
-  const typedError = /** @type {Error} */ (error);
-  process.stderr.write(`${typedError.stack || typedError.message}\n`);
+main().catch((error: unknown) => {
+  process.stderr.write(`${getErrorMessage(error)}\n`);
   stopChild("SIGTERM");
   process.exit(1);
 });
