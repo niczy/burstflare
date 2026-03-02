@@ -11,7 +11,17 @@ async function runPostinstall() {
     }
   }
 
-  await import(new URL("./src/postinstall.js", import.meta.url).href);
+  // src is TypeScript — run via tsx (available in workspace devDependencies)
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const srcPath = fileURLToPath(new URL("./src/postinstall.ts", import.meta.url));
+  const result = spawnSync(process.execPath, ["--import", "tsx/esm", srcPath], {
+    stdio: "inherit",
+    cwd: fileURLToPath(new URL(".", import.meta.url))
+  });
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
 }
 
 await runPostinstall();
