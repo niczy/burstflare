@@ -1,5 +1,3 @@
-// @ts-check
-
 import { createCloudflareClient, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
 import {
   LEGACY_TABLE,
@@ -7,15 +5,14 @@ import {
   NORMALIZED_SCHEMA_VERSION,
   SCHEMA_VERSION_KEY,
   TABLES
-} from "../packages/shared/dist/cloudflare-schema.js";
+} from "../packages/shared/src/cloudflare-schema.js";
 
-/**
- * @typedef {Error & {
- *   payload?: unknown;
- * }} CloudflareScriptError
- */
+interface CloudflareScriptError extends Error {
+  payload?: unknown;
+}
 
-function flattenResults(result) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function flattenResults(result: any): any[] {
   if (Array.isArray(result)) {
     return result;
   }
@@ -25,8 +22,8 @@ function flattenResults(result) {
   return [result];
 }
 
-function expectedIndexNames() {
-  const names = [];
+function expectedIndexNames(): string[] {
+  const names: string[] = [];
   for (const definition of TABLES) {
     for (const column of definition.indexes || []) {
       names.push(`idx_${definition.table}_${column}`);
@@ -35,7 +32,7 @@ function expectedIndexNames() {
   return names.sort();
 }
 
-async function main() {
+async function main(): Promise<void> {
   const config = await loadCloudflareConfig();
   const state = await readProvisionState(config.stateFile);
   if (!state?.resources?.d1?.id) {
@@ -92,8 +89,8 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  const typedError = /** @type {CloudflareScriptError} */ (error);
+main().catch((error: unknown) => {
+  const typedError = error as CloudflareScriptError;
   process.stderr.write(`${typedError.message}\n`);
   if (typedError.payload) {
     process.stderr.write(`${JSON.stringify(typedError.payload, null, 2)}\n`);

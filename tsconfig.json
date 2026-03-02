@@ -25,7 +25,6 @@
     "packages/**/*.js",
     "packages/**/*.ts",
     "packages/**/*.tsx",
-    "scripts/**/*.mjs",
     "scripts/**/*.mts",
     "scripts/**/*.ts",
     "test/**/*.js",

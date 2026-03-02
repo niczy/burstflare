@@ -1,16 +1,10 @@
-// @ts-check
-
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, type SpawnSyncOptions, spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/**
- * @typedef {import("node:child_process").SpawnSyncOptions} SpawnSyncOptions
- */
-
-function getArg(name) {
+function getArg(name: string): string | null {
   const index = process.argv.indexOf(name);
   if (index === -1 || index === process.argv.length - 1) {
     return null;
@@ -18,25 +12,19 @@ function getArg(name) {
   return process.argv[index + 1];
 }
 
-/**
- * @param {number} ms
- */
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
-/**
- * @param {unknown} condition
- * @param {string} message
- */
-function assert(condition, message) {
+function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
 }
 
-async function waitForHealthy(baseUrl) {
-  let lastError = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForHealthy(baseUrl: string): Promise<any> {
+  let lastError: unknown = null;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       const response = await fetch(`${baseUrl}/api/health`);
@@ -53,22 +41,13 @@ async function waitForHealthy(baseUrl) {
   throw lastError || new Error("Dev server did not become healthy");
 }
 
-/**
- * Strip ANSI escape sequences so assertions match plain text.
- * @param {string} text
- * @returns {string}
- */
-function stripAnsi(text) {
+/** Strip ANSI escape sequences so assertions match plain text. */
+function stripAnsi(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {SpawnSyncOptions} [options]
- */
-function spawnChecked(command, args, options = {}) {
+function spawnChecked(command: string, args: string[], options: SpawnSyncOptions = {}): string {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     ...options
@@ -84,23 +63,16 @@ function spawnChecked(command, args, options = {}) {
   return stripAnsi(String(result.stdout || "").trim());
 }
 
-/**
- * @param {unknown} value
- * @param {string} key
- * @returns {any}
- */
-function unwrap(value, key) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function unwrap(value: unknown, key: string): any {
   if (value && typeof value === "object" && !Array.isArray(value) && key in value) {
-    return /** @type {Record<string, any>} */ (value)[key];
+    return (value as Record<string, unknown>)[key];
   }
   return value;
 }
 
-/**
- * @param {string} text
- * @returns {any}
- */
-function parseOutput(text) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseOutput(text: string): any {
   if (!text) {
     return null;
   }
@@ -111,7 +83,7 @@ function parseOutput(text) {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const scriptDir = fileURLToPath(new URL(".", import.meta.url));
   const repoRoot = resolve(scriptDir, "..");
   const baseUrlArg = getArg("--base-url");
@@ -123,8 +95,7 @@ async function main() {
   const configGuest = join(tempRoot, "guest-config.json");
   const configAux = join(tempRoot, "aux-config.json");
   const outputDir = join(tempRoot, "artifacts");
-  /** @type {import("node:child_process").ChildProcess | null} */
-  let serverProcess = null;
+  let serverProcess: ChildProcess | null = null;
   let baseUrl = baseUrlArg || "http://127.0.0.1:8787";
 
   try {

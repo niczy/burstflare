@@ -1,9 +1,7 @@
-// @ts-check
-
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-function stripQuotes(value) {
+function stripQuotes(value: string): string {
   if (
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"))
@@ -13,19 +11,19 @@ function stripQuotes(value) {
   return value;
 }
 
-export async function loadEnv(filePath = ".env") {
+export async function loadEnv(filePath = ".env"): Promise<Record<string, string>> {
   const absolute = path.resolve(process.cwd(), filePath);
   let content = "";
   try {
     content = await readFile(absolute, "utf8");
   } catch (error) {
-    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return {};
     }
     throw error;
   }
 
-  const env = {};
+  const env: Record<string, string> = {};
   for (const line of content.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) {
@@ -42,23 +40,21 @@ export async function loadEnv(filePath = ".env") {
   return env;
 }
 
-/**
- * @param {Record<string, string>} dotEnv
- * @param {NodeJS.ProcessEnv} [runtimeEnv]
- */
-export function mergeEnv(dotEnv, runtimeEnv = process.env) {
+export function mergeEnv(
+  dotEnv: Record<string, string>,
+  runtimeEnv: NodeJS.ProcessEnv = process.env
+): Record<string, string | undefined> {
   return {
     ...dotEnv,
     ...runtimeEnv
   };
 }
 
-/**
- * @param {Record<string, string | undefined>} env
- * @param {string} key
- * @param {string[]} [fallbackKeys]
- */
-export function getRequiredEnv(env, key, fallbackKeys = []) {
+export function getRequiredEnv(
+  env: Record<string, string | undefined>,
+  key: string,
+  fallbackKeys: string[] = []
+): string {
   for (const candidate of [key, ...fallbackKeys]) {
     const value = env[candidate];
     if (value) {
@@ -68,9 +64,6 @@ export function getRequiredEnv(env, key, fallbackKeys = []) {
   throw new Error(`Missing required environment variable: ${key}`);
 }
 
-/**
- * @param {string} value
- */
-export function slugifyDomain(value) {
+export function slugifyDomain(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
