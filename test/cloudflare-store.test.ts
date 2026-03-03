@@ -306,27 +306,35 @@ test("cloudflare store can load and save a scoped normalized collection without 
   await db
     .prepare(
       `
-        INSERT INTO bf_templates (row_key, position, workspace_id, active_version_id, archived_at, created_by_user_id, payload_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO bf_instances (row_key, position, user_id, name, image, created_at, updated_at_field, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .bind(
-      "tpl_1",
+      "ins_1",
       0,
-      "ws_1",
-      null,
-      null,
       "usr_1",
+      "Keep Me",
+      "node:20",
+      "2026-02-28T00:00:00.000Z",
+      "2026-02-28T00:00:00.000Z",
       JSON.stringify({
-        id: "tpl_1",
-        workspaceId: "ws_1",
+        id: "ins_1",
+        userId: "usr_1",
         name: "Keep Me",
         description: "",
-        activeVersionId: null,
-        archivedAt: null,
-        archivedByUserId: null,
-        createdByUserId: "usr_1",
-        createdAt: "2026-02-28T00:00:00.000Z"
+        image: "node:20",
+        dockerfilePath: null,
+        dockerContext: null,
+        persistedPaths: [],
+        sleepTtlSeconds: null,
+        envVars: {},
+        secrets: {},
+        commonStateKey: null,
+        commonStateBytes: 0,
+        commonStateUpdatedAt: null,
+        createdAt: "2026-02-28T00:00:00.000Z",
+        updatedAt: "2026-02-28T00:00:00.000Z"
       }),
       "2026-02-28T00:00:00.000Z"
     )
@@ -336,7 +344,7 @@ test("cloudflare store can load and save a scoped normalized collection without 
   const state = await store.loadCollections(["users"]);
 
   assert.deepEqual(state.users.map((entry: any) => entry.id), ["usr_1"]);
-  assert.deepEqual(state.templates, []);
+  assert.deepEqual(state.instances, []);
 
   state.users[0].name = "Alpha Updated";
   await store.save(state, {
@@ -353,10 +361,10 @@ test("cloudflare store can load and save a scoped normalized collection without 
   });
 
   const users = await db.prepare("SELECT payload_json FROM bf_users ORDER BY position ASC, row_key ASC").all();
-  const templates = await db.prepare("SELECT payload_json FROM bf_templates ORDER BY position ASC, row_key ASC").all();
+  const instances = await db.prepare("SELECT payload_json FROM bf_instances ORDER BY position ASC, row_key ASC").all();
 
   assert.equal(JSON.parse(users.results[0].payload_json as string).name, "Alpha Updated");
-  assert.equal(JSON.parse(templates.results[0].payload_json as string).name, "Keep Me");
+  assert.equal(JSON.parse(instances.results[0].payload_json as string).name, "Keep Me");
 });
 
 test("cloudflare store removes deleted rows from a scoped normalized collection", async () => {
