@@ -3070,8 +3070,9 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           }
           const runtimeSecrets = await service.getSystemRuntimeSecrets(detail.session.id);
           await applyRuntimeBootstrapToContainer(container, detail.session, runtimeSecrets);
-          if (detail.session.lastRestoredSnapshotId) {
-            await applyRuntimeSnapshotHydration(token, detail.session);
+          const latestSnapshot = detail.snapshots?.[0] || null;
+          if (latestSnapshot) {
+            await applySnapshotToRuntime(token, detail.session, latestSnapshot.id, latestSnapshot);
           }
           return container.fetch(createPreviewRequest(request, sessionId));
         })
@@ -3101,8 +3102,9 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           }
           const runtimeSecrets = await service.getSystemRuntimeSecrets(detail.session.id);
           await applyRuntimeBootstrapToContainer(container, detail.session, runtimeSecrets);
-          if (detail.session.lastRestoredSnapshotId) {
-            await applyRuntimeSnapshotHydration(auth.token, detail.session);
+          const latestSnapshot = detail.snapshots?.[0] || null;
+          if (latestSnapshot) {
+            await applySnapshotToRuntime(auth.token, detail.session, latestSnapshot.id, latestSnapshot);
           }
           return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
         })
@@ -3132,8 +3134,9 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           }
           const runtimeSecrets = await service.getSystemRuntimeSecrets(detail.session.id);
           await applyRuntimeBootstrapToContainer(container, detail.session, runtimeSecrets);
-          if (detail.session.lastRestoredSnapshotId) {
-            await applyRuntimeSnapshotHydration(auth.token, detail.session);
+          const latestSnapshot = detail.snapshots?.[0] || null;
+          if (latestSnapshot) {
+            await applySnapshotToRuntime(auth.token, detail.session, latestSnapshot.id, latestSnapshot);
           }
           return container.fetch(createRuntimeEditorRequest(request, detail.session, auth.bodyText));
         })
