@@ -218,7 +218,7 @@ test("service can create and operate on sessions owned by an instance", async ()
   assert.equal(stopped.session.instanceId, instance.instance.id);
 });
 
-test("service covers invites, queued builds, releases, session events, usage, and audit", async () => {
+test("service covers removed sharing, queued builds, releases, session events, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();
   const queuedBuilds: string[] = [];
@@ -314,38 +314,23 @@ test("service covers invites, queued builds, releases, session events, usage, an
     /already registered/
   );
 
-  const invite = await service.createWorkspaceInvite(owner.token, {
-    email: "teammate@example.com",
-    role: "member"
-  });
-  await service.acceptWorkspaceInvite(teammate.token, invite.invite.code);
   await assert.rejects(
     () =>
       service.createWorkspaceInvite(owner.token, {
         email: "teammate@example.com",
         role: "member"
       }),
-    /already a member/
+    /Workspace sharing has been removed/
   );
-  const prospectInvite = await service.createWorkspaceInvite(owner.token, {
-    email: "prospect@example.com",
-    role: "viewer"
-  });
+  await assert.rejects(() => service.acceptWorkspaceInvite(teammate.token, "invite_removed"), /Workspace sharing has been removed/);
   await assert.rejects(
-    () =>
-      service.createWorkspaceInvite(owner.token, {
-        email: "prospect@example.com",
-        role: "viewer"
-      }),
-    /Invite already pending/
+    () => service.updateWorkspaceMemberRole(owner.token, teammate.user.id, "admin"),
+    /Workspace sharing has been removed/
   );
-  await assert.rejects(() => service.acceptWorkspaceInvite(teammate.token, prospectInvite.invite.code), /Invite email mismatch/);
-  await assert.rejects(() => service.acceptWorkspaceInvite(teammate.token, invite.invite.code), /Invite already used/);
-  const reaffirmedRole = await service.updateWorkspaceMemberRole(owner.token, teammate.user.id, "member");
-  assert.equal(reaffirmedRole.membership.role, "member");
-  const elevatedRole = await service.updateWorkspaceMemberRole(owner.token, teammate.user.id, "admin");
-  assert.equal(elevatedRole.membership.role, "admin");
-  const switched = await service.switchWorkspace(teammate.token, owner.workspace.id);
+  const switched = {
+    token: owner.token,
+    workspace: owner.workspace
+  };
   assert.equal(switched.workspace.id, owner.workspace.id);
 
   const plan = await service.setWorkspacePlan(owner.token, "pro");
@@ -629,20 +614,23 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(logoutAll.ok, true);
   assert.ok(logoutAll.revokedTokens >= 2);
   await assert.rejects(() => service.authenticate(switched.token), /Unauthorized/);
-  await assert.rejects(() => service.authenticate(teammate.token), /Unauthorized/);
-
   const ownerSecondLogin = await service.login({
     email: "owner@example.com",
     kind: "browser"
   });
+  const ownerThirdLogin = await service.login({
+    email: "owner@example.com",
+    kind: "browser"
+  });
   const authSessions = await service.listAuthSessions(ownerSecondLogin.token);
-  assert.ok(authSessions.sessions.length >= 3);
-  assert.ok(authSessions.sessions.some((entry: any) => entry.id === owner.authSessionId));
-  const revokeSession = await service.revokeAuthSession(ownerSecondLogin.token, owner.authSessionId);
+  assert.ok(authSessions.sessions.length >= 2);
+  assert.ok(authSessions.sessions.some((entry: any) => entry.id === ownerThirdLogin.authSessionId));
+  const revokeSession = await service.revokeAuthSession(ownerSecondLogin.token, ownerThirdLogin.authSessionId);
   assert.equal(revokeSession.ok, true);
   const afterRevoke = await service.listAuthSessions(ownerSecondLogin.token);
-  assert.equal(afterRevoke.sessions.some((entry: any) => entry.id === owner.authSessionId), false);
+  assert.equal(afterRevoke.sessions.some((entry: any) => entry.id === ownerThirdLogin.authSessionId), false);
   await assert.rejects(() => service.authenticate(owner.token), /Unauthorized/);
+  await assert.rejects(() => service.authenticate(ownerThirdLogin.token), /Unauthorized/);
   await assert.rejects(() => service.refreshSession(owner.refreshToken), /Unauthorized/);
   assert.ok((await service.authenticate(ownerSecondLogin.token)).user.id);
 
@@ -676,7 +664,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   assert.equal(reconcileJobs, 1);
 
   const report = await service.getAdminReport(ownerSecondLogin.token);
-  assert.equal(report.report.members, 2);
+  assert.equal(report.report.members, 1);
   assert.equal(report.report.releases, 1);
   assert.equal(report.report.buildsQueued, 0);
   assert.equal(report.report.buildsBuilding, 0);
@@ -695,7 +683,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const exported = await service.exportWorkspace(ownerSecondLogin.token);
   assert.equal(exported.export.workspace.id, owner.workspace.id);
-  assert.equal(exported.export.members.length, 2);
+  assert.equal(exported.export.members.length, 1);
   assert.equal(exported.export.templates.length >= 1, true);
   assert.equal(exported.export.artifacts.templateBundles.length >= 1, true);
   assert.equal(exported.export.security.runtimeSecrets.length, 1);
@@ -707,22 +695,14 @@ test("service covers invites, queued builds, releases, session events, usage, an
 
   const audit = await service.getAudit(ownerSecondLogin.token, { limit: 200 });
   assert.ok(audit.audit.length >= 10);
-  assert.ok(audit.audit.some((entry: any) => entry.action === "workspace.invite_rejected_existing_member"));
-  assert.ok(audit.audit.some((entry: any) => entry.action === "workspace.invite_rejected_duplicate"));
-  assert.ok(
-    audit.audit.some(
-      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
-    )
+  assert.equal(
+    audit.audit.some((entry: any) => String(entry.action || "").startsWith("workspace.invite_")),
+    false
   );
-  assert.ok(
-    audit.audit.some(
-      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
-    )
+  assert.equal(
+    audit.audit.some((entry: any) => String(entry.action || "").startsWith("workspace.member_role_")),
+    false
   );
-  assert.ok(audit.audit.some((entry: any) => entry.action === "workspace.member_role_reaffirmed"));
-  const roleUpdateAudit = audit.audit.find((entry: any) => entry.action === "workspace.member_role_updated");
-  assert.equal(roleUpdateAudit.details.previousRole, "member");
-  assert.equal(roleUpdateAudit.details.role, "admin");
 });
 
 test("service creates usage-based billing sessions, invoices, and Stripe webhooks", async () => {
