@@ -81,48 +81,6 @@ async function waitForHealthy(baseUrl: string): Promise<any> {
   throw lastError || new Error("Health check did not become ready");
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getBuildById(baseUrl: string, headers: HeadersInit, buildId: string): Promise<any> {
-  const payload = await requestJson(baseUrl, "/api/template-builds", {
-    headers
-  });
-  return payload.builds.find((entry) => entry.id === buildId) || null;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function waitForBuildReady(baseUrl: string, headers: HeadersInit, buildId: string): Promise<any> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const build = await getBuildById(baseUrl, headers, buildId);
-    if (build?.status === "succeeded") {
-      return {
-        build,
-        processed: 0
-      };
-    }
-    if (build?.status === "dead_lettered" || build?.status === "failed") {
-      throw new Error(`Build ${buildId} ended in ${build.status}`);
-    }
-    if (attempt === 4) {
-      const processed = await requestJson(baseUrl, "/api/template-builds/process", {
-        method: "POST",
-        headers
-      });
-      if (processed.processed > 0) {
-        const retriedBuild = await getBuildById(baseUrl, headers, buildId);
-        if (retriedBuild?.status === "succeeded") {
-          return {
-            build: retriedBuild,
-            processed: processed.processed
-          };
-        }
-      }
-    }
-    await sleep(250);
-  }
-  const build = await getBuildById(baseUrl, headers, buildId);
-  throw new Error(`Build ${buildId} did not become ready (last status: ${build?.status || "missing"})`);
-}
-
 async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
   const turnstileToken = getTurnstileToken();
@@ -178,43 +136,20 @@ async function main(): Promise<void> {
     headers: secondHeaders
   });
 
-  const template = await requestJson(baseUrl, "/api/templates", {
+  const instance = await requestJson(baseUrl, "/api/instances", {
     method: "POST",
     headers: authHeaders,
     body: JSON.stringify({
-      name: `smoke-template-${Date.now()}`,
-      description: "Smoke test template"
+      name: `smoke-instance-${Date.now()}`,
+      description: "Smoke test instance",
+      image: "registry.cloudflare.com/example/smoke:1.0.0"
     })
   });
-
-  const version = await requestJson(baseUrl, `/api/templates/${template.template.id}/versions`, {
-    method: "POST",
-    headers: authHeaders,
-    body: JSON.stringify({
-      version: "1.0.0",
-      manifest: {
-        image: "registry.cloudflare.com/example/smoke:1.0.0"
-      }
-    })
-  });
-
-  const buildResult = await waitForBuildReady(baseUrl, authHeaders, version.build.id);
-  const buildArtifact = await requestJson(baseUrl, `/api/template-builds/${version.build.id}/artifact`, {
+  const instances = await requestJson(baseUrl, "/api/instances", {
     headers: authHeaders
   });
-  if (!buildArtifact.imageReference || !buildArtifact.imageDigest) {
-    throw new Error("Build artifact did not include OCI-style image metadata");
-  }
-
-  const promoted = await requestJson(baseUrl, `/api/templates/${template.template.id}/promote`, {
-    method: "POST",
-    headers: authHeaders,
-    body: JSON.stringify({
-      versionId: version.templateVersion.id
-    })
-  });
-  if (promoted.release?.binding?.imageReference !== buildArtifact.imageReference) {
-    throw new Error("Release binding imageReference did not match the build artifact");
+  if (!instances.instances.some((entry) => entry.id === instance.instance.id)) {
+    throw new Error("Created instance was not returned by the instance list");
   }
 
   const session = await requestJson(baseUrl, "/api/sessions", {
@@ -222,7 +157,7 @@ async function main(): Promise<void> {
     headers: authHeaders,
     body: JSON.stringify({
       name: "smoke-session",
-      templateId: template.template.id
+      instanceId: instance.instance.id
     })
   });
 
@@ -354,10 +289,9 @@ async function main(): Promise<void> {
         baseUrl,
         email,
         authSessions: authSessions.sessions.length,
-        buildStatus: buildResult.build.status,
-        buildImageReference: buildArtifact.imageReference,
-        processedBuilds: buildResult.processed,
-        activeVersionId: promoted.activeVersion.id,
+        instanceId: instance.instance.id,
+        instanceImage: instance.instance.image,
+        listedInstances: instances.instances.length,
         sessionState: started.session.state,
         sshCommand: sshToken.sshCommand,
         previewChecked,
@@ -366,7 +300,7 @@ async function main(): Promise<void> {
         restartedState: restarted.session.state,
         detailState: detail.session.state,
         snapshotId: snapshot.snapshot.id,
-        templates: report.report.templates,
+        legacyTemplates: report.report.templates,
         sessionsTotal: report.report.sessionsTotal
       },
       null,

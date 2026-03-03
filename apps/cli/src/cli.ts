@@ -435,49 +435,28 @@ const HELP_CATALOG: HelpSection[] = [
     ]
   },
   {
-    title: "Templates and Releases",
+    title: "Instances",
     topics: [
       {
         kind: "group",
-        name: "template",
-        alias: "templates",
-        summary: "Create templates and manage template versions. Defaults to list when no subcommand is given.",
+        name: "instance",
+        alias: "instances",
+        summary: "Create and manage reusable runtime instances. Defaults to list when no subcommand is given.",
         commands: [
-          { name: "list", usageTail: "[--active|--archived]", summary: "List templates, optionally filtered by archive state." },
-          { name: "inspect", usageTail: "<templateId>", summary: "Inspect one template." },
-          { name: "create", usageTail: "<name> [--description <text>]", summary: "Create a new template." },
-          { name: "upload", usageTail: "<templateId> --version <version> [--file <path>] [--notes <text>]", summary: "Create a template version and optionally upload a bundle." },
-          { name: "promote", usageTail: "<templateId> <versionId>", summary: "Promote a version to the active release." },
-          { name: "rollback", usageTail: "<templateId> [<releaseId>]", summary: "Roll back a template to a prior release." },
-          { name: "archive", usageTail: "<templateId>", summary: "Archive a template." },
-          { name: "restore", usageTail: "<templateId>", summary: "Restore an archived template." },
-          { name: "delete", usageTail: "<templateId>", summary: "Delete a template." }
-        ]
-      },
-      {
-        kind: "group",
-        name: "release",
-        alias: "releases",
-        summary: "Inspect release history. Defaults to list when no subcommand is given.",
-        commands: [{ name: "list", usageTail: "[--template <templateId>]", summary: "List releases, optionally filtered by template." }]
-      }
-    ]
-  },
-  {
-    title: "Builds",
-    topics: [
-      {
-        kind: "group",
-        name: "build",
-        alias: "builds",
-        summary: "Inspect and manage template builds. Defaults to list when no subcommand is given.",
-        commands: [
-          { name: "list", usageTail: "[--status <status>]", summary: "List template builds, optionally filtered by status." },
-          { name: "log", usageTail: "<buildId>", summary: "Print the build log." },
-          { name: "artifact", usageTail: "<buildId>", summary: "Print the build artifact output." },
-          { name: "process", usageTail: "", summary: "Process queued builds." },
-          { name: "retry", usageTail: "<buildId>", summary: "Retry one build." },
-          { name: "retry-dead-lettered", usageTail: "", summary: "Retry dead-lettered builds." }
+          { name: "list", usageTail: "", summary: "List instances." },
+          { name: "inspect", usageTail: "<instanceId>", summary: "Inspect one instance." },
+          {
+            name: "create",
+            usageTail: "<name> (--image <image> | --dockerfile <path>) [--description <text>] [--env <KEY=value,...>] [--secret <KEY=value,...>]",
+            summary: "Create a new instance."
+          },
+          {
+            name: "edit",
+            usageTail: "<instanceId> [--name <name>] [--image <image>] [--dockerfile <path>] [--context <path>]",
+            summary: "Update an existing instance."
+          },
+          { name: "rebuild", usageTail: "<instanceId>", summary: "Rebuild and push the instance image from its saved Dockerfile." },
+          { name: "delete", usageTail: "<instanceId>", summary: "Delete an instance." }
         ]
       }
     ]
@@ -491,8 +470,8 @@ const HELP_CATALOG: HelpSection[] = [
         alias: "sessions",
         summary: "Launch and control runtime sessions. Defaults to list when no subcommand is given.",
         commands: [
-          { name: "list", usageTail: "[--status <status>] [--template <templateId>]", summary: "List sessions, optionally filtered by status or template." },
-          { name: "up", usageTail: "<name> --template <templateId>", summary: "Create and start a session." },
+          { name: "list", usageTail: "[--status <status>] [--instance <instanceId>]", summary: "List sessions, optionally filtered by status or instance." },
+          { name: "up", usageTail: "<name> --instance <instanceId>", summary: "Create and start a session." },
           { name: "status", usageTail: "<sessionId>", summary: "Show session details." },
           { name: "events", usageTail: "<sessionId>", summary: "List session events." },
           { name: "start", usageTail: "<sessionId>", summary: "Start a sleeping session." },
@@ -560,8 +539,8 @@ const HELP_CATALOG: HelpSection[] = [
   {
     title: "Shortcuts",
     topics: [
-      { kind: "command", name: "up", usageTail: "<name> --template <templateId>", summary: "Shortcut for session up." },
-      { kind: "command", name: "list", usageTail: "[--status <status>] [--template <templateId>]", summary: "Shortcut for session list." },
+      { kind: "command", name: "up", usageTail: "<name> --instance <instanceId>", summary: "Shortcut for session up." },
+      { kind: "command", name: "list", usageTail: "[--status <status>] [--instance <instanceId>]", summary: "Shortcut for session list." },
       { kind: "command", name: "status", usageTail: "<sessionId>", summary: "Shortcut for session status." },
       { kind: "command", name: "events", usageTail: "<sessionId>", summary: "Shortcut for session events." },
       { kind: "command", name: "start", usageTail: "<sessionId>", summary: "Shortcut for session start." },
@@ -728,6 +707,38 @@ function parseListOption(value: unknown): string[] | undefined {
     .map((entry) => entry.trim())
     .filter(Boolean);
   return items.length ? items : undefined;
+}
+
+function parseKeyValueMapOption(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "string") {
+    return undefined;
+  }
+  const result: Record<string, string> = {};
+  for (const entry of value.split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) {
+      throw createCliError("Expected KEY=value entries", 400);
+    }
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const rawValue = trimmed.slice(separatorIndex + 1);
+    if (!key) {
+      throw createCliError("Expected KEY=value entries", 400);
+    }
+    result[key] = rawValue;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function slugifyInstanceName(value: string): string {
+  const slug = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "instance";
 }
 
 function parseIntegerOption(value: unknown): number | undefined {
@@ -909,6 +920,10 @@ export async function runCli(
     command = "workspace";
     subcommand = subcommand || "list";
   }
+  if (command === "instances") {
+    command = "instance";
+    subcommand = subcommand || "list";
+  }
   if (command === "templates") {
     command = "template";
     subcommand = subcommand || "list";
@@ -931,13 +946,7 @@ export async function runCli(
   if (command === "workspace" && !subcommand) {
     subcommand = "current";
   }
-  if (command === "template" && !subcommand) {
-    subcommand = "list";
-  }
-  if (command === "build" && !subcommand) {
-    subcommand = "list";
-  }
-  if (command === "release" && !subcommand) {
+  if (command === "instance" && !subcommand) {
     subcommand = "list";
   }
   if (command === "session" && !subcommand) {
@@ -1063,6 +1072,48 @@ export async function runCli(
       },
       fetchImpl
     );
+  }
+
+  async function runDockerBuildAndPush(image: string, dockerfilePath: string, dockerContext: string): Promise<void> {
+    ensureCommands(["docker"], {
+      env,
+      action: "flare instance rebuild"
+    });
+    await runForegroundCommand(spawnImpl, "docker", ["build", "-f", dockerfilePath, "-t", image, dockerContext], {
+      stdio: "inherit"
+    });
+    await runForegroundCommand(spawnImpl, "docker", ["push", image], {
+      stdio: "inherit"
+    });
+  }
+
+  async function prepareInstanceImage(input: {
+    name: string;
+    image?: string | null;
+    dockerfilePath?: string | null;
+    dockerContext?: string | null;
+  }): Promise<{ image: string; dockerfilePath: string | null; dockerContext: string | null }> {
+    const name = String(input.name || "").trim();
+    const dockerfilePath = input.dockerfilePath ? String(input.dockerfilePath) : null;
+    const dockerContext = dockerfilePath ? String(input.dockerContext || path.dirname(dockerfilePath) || ".") : null;
+    let image = input.image ? String(input.image).trim() : "";
+
+    if (dockerfilePath) {
+      if (!image) {
+        image = `registry.cloudflare.com/local/${slugifyInstanceName(name)}:${Date.now()}`;
+      }
+      await runDockerBuildAndPush(image, dockerfilePath, dockerContext || ".");
+    }
+
+    if (!image) {
+      throw createCliError("Provide --image <image> or --dockerfile <path>", 400);
+    }
+
+    return {
+      image,
+      dockerfilePath,
+      dockerContext
+    };
   }
 
   async function persistAuthConfig(nextConfig: CLIConfig): Promise<CLIConfig> {
@@ -1772,6 +1823,160 @@ export async function runCli(
       }
     }
 
+    if (command === "instance") {
+      if (subcommand === "inspect" || subcommand === "show") {
+        const instanceId = rest[0];
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
+          headers: headers(undefined, false)
+        });
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "list") {
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances`, {
+          headers: headers(undefined, false)
+        });
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "create") {
+        const name = rest[0];
+        if (!name) {
+          throw createCliError("Instance name is required", 400);
+        }
+        const imageInput = await prepareInstanceImage({
+          name,
+          image: (options.image as string) || null,
+          dockerfilePath: (options.dockerfile as string) || null,
+          dockerContext: (options.context as string) || null
+        });
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances`, {
+          method: "POST",
+          headers: headers(undefined),
+          body: JSON.stringify({
+            name,
+            description: options.description || "",
+            image: imageInput.image,
+            dockerfilePath: imageInput.dockerfilePath,
+            dockerContext: imageInput.dockerContext,
+            envVars: parseKeyValueMapOption(options.env),
+            secrets: parseKeyValueMapOption(options.secret)
+          })
+        });
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "edit") {
+        const instanceId = rest[0];
+        if (!instanceId) {
+          throw createCliError("Instance id is required", 400);
+        }
+        const current = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
+          headers: headers(undefined, false)
+        });
+        const updates: Record<string, unknown> = {};
+        const nextName = (options.name as string) || rest[1] || "";
+        if (nextName) {
+          updates.name = nextName;
+        }
+        if (Object.prototype.hasOwnProperty.call(options, "description")) {
+          updates.description = options.description || "";
+        }
+        if (options.image || options.dockerfile || options.context) {
+          const imageInput = await prepareInstanceImage({
+            name: String(updates.name || current.instance.name),
+            image: (options.image as string) || current.instance.image,
+            dockerfilePath: (options.dockerfile as string) || current.instance.dockerfilePath,
+            dockerContext: (options.context as string) || current.instance.dockerContext
+          });
+          updates.image = imageInput.image;
+          updates.dockerfilePath = imageInput.dockerfilePath;
+          updates.dockerContext = imageInput.dockerContext;
+        }
+        if (options["clear-env"]) {
+          updates.envVars = {};
+        } else if (Object.prototype.hasOwnProperty.call(options, "env")) {
+          updates.envVars = parseKeyValueMapOption(options.env);
+        }
+        if (options["clear-secrets"]) {
+          updates.secrets = {};
+        } else if (Object.prototype.hasOwnProperty.call(options, "secret")) {
+          updates.secrets = parseKeyValueMapOption(options.secret);
+        }
+        if (Object.keys(updates).length === 0) {
+          throw createCliError("No instance changes provided", 400);
+        }
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
+          method: "PATCH",
+          headers: headers(undefined),
+          body: JSON.stringify(updates)
+        });
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "rebuild") {
+        const instanceId = rest[0];
+        if (!instanceId) {
+          throw createCliError("Instance id is required", 400);
+        }
+        const current = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
+          headers: headers(undefined, false)
+        });
+        if (!current.instance.dockerfilePath) {
+          throw createCliError("Instance does not have a saved Dockerfile to rebuild", 409);
+        }
+        const imageInput = await prepareInstanceImage({
+          name: current.instance.name,
+          image: current.instance.image,
+          dockerfilePath: current.instance.dockerfilePath,
+          dockerContext: current.instance.dockerContext
+        });
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
+          method: "PATCH",
+          headers: headers(undefined),
+          body: JSON.stringify({
+            image: imageInput.image,
+            dockerfilePath: imageInput.dockerfilePath,
+            dockerContext: imageInput.dockerContext
+          })
+        });
+        print(
+          stdout,
+          JSON.stringify(
+            {
+              ...data,
+              rebuild: {
+                image: imageInput.image,
+                dockerfilePath: imageInput.dockerfilePath,
+                dockerContext: imageInput.dockerContext
+              }
+            },
+            null,
+            2
+          )
+        );
+        return 0;
+      }
+
+      if (subcommand === "delete") {
+        const instanceId = rest[0];
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
+          method: "DELETE",
+          headers: headers(undefined, false)
+        });
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+    }
+
+    if (command === "template" || command === "build" || command === "release") {
+      throw createCliError(`'${command}' commands were removed. Use 'flare instance' and 'flare session' instead.`, 410);
+    }
+
     if (command === "template") {
       if (subcommand === "inspect") {
         const templateId = rest[0];
@@ -2026,13 +2231,16 @@ export async function runCli(
 
     if (command === "up") {
       const name = subcommand;
-      const templateId = options.template;
+      const instanceId = options.instance || options.template;
+      if (!instanceId) {
+        throw createCliError("--instance <instanceId> is required", 400);
+      }
       const created = await requestJsonAuthed(
         `${baseUrl}/api/sessions`,
         {
           method: "POST",
           headers: headers(undefined),
-          body: JSON.stringify({ name, templateId })
+          body: JSON.stringify({ name, instanceId })
         }
       );
       const started = await requestJsonAuthed(
@@ -2067,6 +2275,9 @@ export async function runCli(
       }
       if (options.template) {
         result = filterCollection(result, "sessions", (entry) => entry.templateId === options.template);
+      }
+      if (options.instance) {
+        result = filterCollection(result, "sessions", (entry) => entry.instanceId === options.instance);
       }
       print(stdout, JSON.stringify(result, null, 2));
       return 0;

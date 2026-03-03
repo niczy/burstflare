@@ -78,36 +78,6 @@ async function waitForHealthy(baseUrl: string): Promise<any> {
   throw lastError || new Error("Health check did not become ready");
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getBuildById(baseUrl: string, headers: HeadersInit, buildId: string): Promise<any> {
-  const payload = await requestJson(baseUrl, "/api/template-builds", {
-    headers
-  });
-  return payload.builds.find((entry) => entry.id === buildId) || null;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function waitForBuildReady(baseUrl: string, headers: HeadersInit, buildId: string): Promise<any> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const build = await getBuildById(baseUrl, headers, buildId);
-    if (build?.status === "succeeded") {
-      return build;
-    }
-    if (build?.status === "failed" || build?.status === "dead_lettered") {
-      throw new Error(`Build ${buildId} ended in ${build.status}`);
-    }
-    if (attempt === 4) {
-      await requestJson(baseUrl, "/api/template-builds/process", {
-        method: "POST",
-        headers
-      });
-    }
-    await sleep(250);
-  }
-  const build = await getBuildById(baseUrl, headers, buildId);
-  throw new Error(`Build ${buildId} did not become ready (last status: ${build?.status || "missing"})`);
-}
-
 async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
   const turnstileToken = getTurnstileToken();
@@ -146,81 +116,52 @@ async function main(): Promise<void> {
     authorization: `Bearer ${register.token}`
   };
 
-  const template = await requestJson(baseUrl, "/api/templates", {
+  const instance = await requestJson(baseUrl, "/api/instances", {
     method: "POST",
     headers,
     body: JSON.stringify({
       name: `release-validate-${Date.now()}`,
-      description: "Release validation template"
+      description: "Release validation instance",
+      image: "registry.cloudflare.com/example/release-validate:1.0.0"
     })
   });
 
-  const versionOne = await requestJson(baseUrl, `/api/templates/${template.template.id}/versions`, {
+  const session = await requestJson(baseUrl, "/api/sessions", {
     method: "POST",
     headers,
     body: JSON.stringify({
-      version: "1.0.0",
-      manifest: {
-        image: "registry.cloudflare.com/example/release-validate:1.0.0"
-      }
+      name: "release-validate-session",
+      instanceId: instance.instance.id
     })
   });
-  const versionTwo = await requestJson(baseUrl, `/api/templates/${template.template.id}/versions`, {
+  await requestJson(baseUrl, `/api/sessions/${session.session.id}/start`, {
     method: "POST",
-    headers,
-    body: JSON.stringify({
-      version: "2.0.0",
-      manifest: {
-        image: "registry.cloudflare.com/example/release-validate:2.0.0"
-      }
-    })
-  });
-
-  await waitForBuildReady(baseUrl, headers, versionOne.build.id);
-  await waitForBuildReady(baseUrl, headers, versionTwo.build.id);
-
-  const firstPromotion = await requestJson(baseUrl, `/api/templates/${template.template.id}/promote`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      versionId: versionOne.templateVersion.id
-    })
-  });
-  const secondPromotion = await requestJson(baseUrl, `/api/templates/${template.template.id}/promote`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      versionId: versionTwo.templateVersion.id
-    })
-  });
-  const rolledBack = await requestJson(baseUrl, `/api/templates/${template.template.id}/rollback`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({})
-  });
-  const releases = await requestJson(baseUrl, "/api/releases", {
     headers
   });
+  const snapshot = await requestJson(baseUrl, `/api/sessions/${session.session.id}/snapshots`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      label: "validation"
+    })
+  });
 
-  const templateReleases = releases.releases.filter((entry) => entry.templateId === template.template.id);
-  if (rolledBack.activeVersion.id !== versionOne.templateVersion.id) {
-    throw new Error("Rollback did not restore the first version");
+  const rollbackResponse = await fetch(`${baseUrl}/api/templates/${instance.instance.id}/rollback`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers
+    },
+    body: JSON.stringify({})
+  });
+  if (rollbackResponse.status !== 404) {
+    throw new Error(`Expected template rollback route to be removed (status=${rollbackResponse.status})`);
   }
-  if (templateReleases.length !== 3) {
-    throw new Error(`Expected 3 releases for validation template, got ${templateReleases.length}`);
-  }
-  const latestRelease = templateReleases.at(-1);
-  if (latestRelease.mode !== "rollback") {
-    throw new Error("Latest release is not marked as a rollback");
-  }
-  if (latestRelease.sourceReleaseId !== firstPromotion.release.id) {
-    throw new Error("Rollback provenance does not point to the first release");
-  }
-  if (latestRelease.templateVersionId !== versionOne.templateVersion.id) {
-    throw new Error("Rollback release does not target the first version");
-  }
-  if (!latestRelease.binding?.artifactDigest) {
-    throw new Error("Rollback release is missing its binding artifact digest");
+  const releasesResponse = await fetch(`${baseUrl}/api/releases`, {
+    headers
+  });
+  if (releasesResponse.status !== 404) {
+    throw new Error(`Expected releases route to be removed (status=${releasesResponse.status})`);
   }
 
   process.stdout.write(
@@ -228,13 +169,11 @@ async function main(): Promise<void> {
       {
         baseUrl,
         email,
-        templateId: template.template.id,
-        firstReleaseId: firstPromotion.release.id,
-        secondReleaseId: secondPromotion.release.id,
-        rollbackReleaseId: latestRelease.id,
-        rollbackSourceReleaseId: latestRelease.sourceReleaseId,
-        activeVersionId: rolledBack.activeVersion.id,
-        artifactDigest: latestRelease.binding.artifactDigest
+        instanceId: instance.instance.id,
+        sessionId: session.session.id,
+        snapshotId: snapshot.snapshot.id,
+        rollbackRouteRemoved: true,
+        releasesRouteRemoved: true
       },
       null,
       2

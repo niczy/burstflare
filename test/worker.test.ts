@@ -414,22 +414,22 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   });
   assert.equal(rejectedRecovery.response.status, 401);
 
-  const csrfBlocked = await requestJson(app, "/api/templates", {
+  const csrfBlocked = await requestJson(app, "/api/instances", {
     method: "POST",
     headers: {
       cookie: ownerCookieHeader
     },
-    body: JSON.stringify({ name: "blocked-cookie", description: "blocked without csrf" })
+    body: JSON.stringify({ name: "blocked-cookie", image: "node:20" })
   });
   assert.equal(csrfBlocked.response.status, 403);
 
-  const csrfAllowed = await requestJson(app, "/api/templates", {
+  const csrfAllowed = await requestJson(app, "/api/instances", {
     method: "POST",
     headers: {
       cookie: ownerCookieHeader,
       "x-burstflare-csrf": owner.data.csrfToken
     },
-    body: JSON.stringify({ name: "cookie-template", description: "allowed with csrf" })
+    body: JSON.stringify({ name: "cookie-instance", image: "node:20" })
   });
   assert.equal(csrfAllowed.response.status, 200);
 
@@ -449,275 +449,42 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   const switchedToken = owner.data.token;
   const switchedHeaders = ownerHeaders;
 
-  const template = await requestJson(app, "/api/templates", {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({ name: "python-dev", description: "Python toolchain" })
-  });
-  const templateId = template.data.template.id;
-
-  const version = await requestJson(app, `/api/templates/${templateId}/versions`, {
+  const instance = await requestJson(app, "/api/instances", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({
-      version: "2.0.0",
-      manifest: {
-        image: "registry.cloudflare.com/test/python-dev:2.0.0",
-        persistedPaths: ["/workspace"],
-        sleepTtlSeconds: 1
-      }
+      name: "python-dev",
+      description: "Python toolchain",
+      image: "registry.cloudflare.com/test/python-dev:2.0.0"
     })
   });
-  assert.equal(version.data.build.status, "queued");
-  assert.deepEqual(version.data.templateVersion.manifest.persistedPaths, ["/workspace"]);
-  assert.equal(queuedBuilds.length, 1);
-  assert.equal((queuedBuilds[0] as any).type, "build");
-  assert.equal((queuedBuilds[0] as any).buildId, version.data.build.id);
-  assert.match((queuedBuilds[0] as any).dispatchedAt, /\d{4}-\d{2}-\d{2}T/);
+  assert.equal(instance.response.status, 200);
+  const instanceId = instance.data.instance.id;
 
-  const invalidVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
-    method: "POST",
+  const instanceList = await requestJson(app, "/api/instances", {
+    headers: ownerHeaders
+  });
+  assert.equal(instanceList.response.status, 200);
+  assert.equal(instanceList.data.instances.some((entry: any) => entry.id === instanceId), true);
+
+  const updatedInstance = await requestJson(app, `/api/instances/${instanceId}`, {
+    method: "PATCH",
     headers: ownerHeaders,
     body: JSON.stringify({
-      version: "invalid",
-      manifest: {
-        image: "registry.cloudflare.com/test/python-dev:invalid",
-        features: ["invalid-feature"]
-      }
+      description: "Updated Python toolchain",
+      envVars: { MODE: "dev" }
     })
   });
-  assert.equal(invalidVersion.response.status, 400);
-
-  const bundleBody = "print('hello from bundle')";
-  const bundleGrant = await requestJson(app, `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle/upload`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      contentType: "text/x-python",
-      bytes: bundleBody.length
-    })
-  });
-  assert.equal(bundleGrant.response.status, 200);
-  assert.equal(bundleGrant.data.uploadGrant.transport, "worker_upload_grant");
-  assert.equal(bundleGrant.data.uploadGrant.storage, "r2");
-  const bundleUpload = await requestJson(app, bundleGrant.data.uploadGrant.url, {
-    method: "PUT",
-    headers: {
-      "content-type": "text/x-python"
-    },
-    body: bundleBody
-  });
-  assert.equal(bundleUpload.response.status, 200);
-  assert.equal(bundleUpload.data.bundle.contentType, "text/x-python");
-
-  const oversizedBundle = await requestJson(
-    app,
-    `/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`,
-    {
-      method: "PUT",
-      headers: {
-        ...ownerHeaders,
-        "content-type": "application/octet-stream"
-      },
-      body: "x".repeat(300_000)
-    }
-  );
-  assert.equal(oversizedBundle.response.status, 413);
-
-  const downloadedBundle = await app.fetch(
-    new Request(`http://example.test/api/templates/${templateId}/versions/${version.data.templateVersion.id}/bundle`, {
-      headers: ownerHeaders
-    })
-  );
-  assert.equal(downloadedBundle.status, 200);
-  assert.equal(await downloadedBundle.text(), bundleBody);
-
-  const prematurePromote = await requestJson(app, `/api/templates/${templateId}/promote`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({ versionId: version.data.templateVersion.id })
-  });
-  assert.equal(prematurePromote.response.status, 409);
-
-  const buildProcess = await requestJson(app, "/api/template-builds/process", {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(buildProcess.data.processed, 1);
-
-  const buildLog = await app.fetch(
-    new Request(`http://example.test/api/template-builds/${version.data.build.id}/log`, {
-      headers: ownerHeaders
-    })
-  );
-  assert.equal(buildLog.status, 200);
-  assert.match(await buildLog.text(), /bundle_uploaded=true/);
-  const buildArtifact = await app.fetch(
-    new Request(`http://example.test/api/template-builds/${version.data.build.id}/artifact`, {
-      headers: ownerHeaders
-    })
-  );
-  assert.equal(buildArtifact.status, 200);
-  const parsedBuildArtifact = JSON.parse(await buildArtifact.text());
-  assert.equal(parsedBuildArtifact.source, "bundle");
-  assert.equal(parsedBuildArtifact.templateVersionId, version.data.templateVersion.id);
-  assert.match(parsedBuildArtifact.imageReference, /^registry\.cloudflare\.com\/test\/python-dev@sha256:/);
-  assert.match(parsedBuildArtifact.imageDigest, /^sha256:/);
-  assert.equal(parsedBuildArtifact.layerCount, 2);
-
-  const failingVersion = await requestJson(app, `/api/templates/${templateId}/versions`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      version: "2.1.0",
-      manifest: {
-        image: "registry.cloudflare.com/test/python-dev:2.1.0",
-        simulateFailure: true
-      }
-    })
-  });
-  assert.equal(failingVersion.response.status, 200);
-
-  const failedProcess = await requestJson(app, "/api/template-builds/process", {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(failedProcess.response.status, 200);
-  assert.equal(failedProcess.data.processed, 1);
-
-  const failedBuildLog = await app.fetch(
-    new Request(`http://example.test/api/template-builds/${failingVersion.data.build.id}/log`, {
-      headers: ownerHeaders
-    })
-  );
-  assert.equal(failedBuildLog.status, 200);
-  assert.match(await failedBuildLog.text(), /build_status=failed/);
-
-  const retryOne = await requestJson(app, `/api/template-builds/${failingVersion.data.build.id}/retry`, {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(retryOne.response.status, 200);
-
-  const failedProcessTwo = await requestJson(app, "/api/template-builds/process", {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(failedProcessTwo.response.status, 200);
-
-  const retryTwo = await requestJson(app, `/api/template-builds/${failingVersion.data.build.id}/retry`, {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(retryTwo.response.status, 200);
-
-  const deadLetterProcess = await requestJson(app, "/api/template-builds/process", {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(deadLetterProcess.response.status, 200);
-
-  const allBuilds = await requestJson(app, "/api/template-builds", {
-    headers: ownerHeaders
-  });
-  const deadLetterBuild = allBuilds.data.builds.find((entry: any) => entry.id === failingVersion.data.build.id);
-  assert.equal(deadLetterBuild.status, "dead_lettered");
-  assert.equal(deadLetterBuild.attempts, 3);
-
-  const bulkRetried = await requestJson(app, "/api/admin/builds/retry-dead-lettered", {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(bulkRetried.response.status, 200);
-  assert.equal(bulkRetried.data.recovered, 1);
-  assert.deepEqual(bulkRetried.data.buildIds, [failingVersion.data.build.id]);
-
-  const promoted = await requestJson(app, `/api/templates/${templateId}/promote`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({ versionId: version.data.templateVersion.id })
-  });
-  assert.equal(promoted.response.status, 200);
-  assert.equal(promoted.data.release.binding.artifactSource, "bundle");
-  assert.equal(promoted.data.release.binding.templateName, "python-dev");
-  assert.equal(promoted.data.release.binding.imageReference, parsedBuildArtifact.imageReference);
-  assert.equal(promoted.data.release.binding.imageDigest, parsedBuildArtifact.imageDigest);
-  assert.equal(promoted.data.release.binding.layerCount, 2);
-
-  const templateDetail = await requestJson(app, `/api/templates/${templateId}`, {
-    headers: ownerHeaders
-  });
-  assert.equal(templateDetail.response.status, 200);
-  assert.equal(templateDetail.data.template.releaseCount, 1);
-  assert.equal(templateDetail.data.template.releases.length, 1);
-  assert.equal(templateDetail.data.template.latestRelease.id, promoted.data.release.id);
-  assert.equal(templateDetail.data.template.storageSummary.bundleBytes >= bundleBody.length, true);
-
-  const archived = await requestJson(app, `/api/templates/${templateId}/archive`, {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(archived.response.status, 200);
-
-  const session = await requestJson(app, "/api/sessions", {
-    method: "POST",
-    headers: switchedHeaders,
-    body: JSON.stringify({ name: "feature-x", templateId })
-  });
-  assert.equal(session.response.status, 409);
-
-  const restoredTemplate = await requestJson(app, `/api/templates/${templateId}/restore`, {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(restoredTemplate.response.status, 200);
-
-  const disposableTemplate = await requestJson(app, "/api/templates", {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({ name: "trash-dev", description: "Disposable template" })
-  });
-  assert.equal(disposableTemplate.response.status, 200);
-  const disposableTemplateId = disposableTemplate.data.template.id;
-
-  const disposableVersion = await requestJson(app, `/api/templates/${disposableTemplateId}/versions`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      version: "0.1.0",
-      manifest: { image: "registry.cloudflare.com/test/trash-dev:0.1.0" }
-    })
-  });
-  assert.equal(disposableVersion.response.status, 200);
-
-  const deletedTemplate = await requestJson(app, `/api/templates/${disposableTemplateId}`, {
-    method: "DELETE",
-    headers: ownerHeaders
-  });
-  assert.equal(deletedTemplate.response.status, 200);
-  assert.equal(deletedTemplate.data.deletedVersions, 1);
-
-  const templateList = await requestJson(app, "/api/templates", {
-    headers: ownerHeaders
-  });
-  assert.equal(
-    templateList.data.templates.some((entry: any) => entry.id === disposableTemplateId),
-    false
-  );
+  assert.equal(updatedInstance.response.status, 200);
+  assert.equal(updatedInstance.data.instance.description, "Updated Python toolchain");
 
   const restoredSession = await requestJson(app, "/api/sessions", {
     method: "POST",
     headers: switchedHeaders,
-    body: JSON.stringify({ name: "feature-x", templateId })
+    body: JSON.stringify({ name: "feature-x", instanceId })
   });
   assert.equal(restoredSession.response.status, 200);
   const sessionId = restoredSession.data.session.id;
-
-  const deleteBlocked = await requestJson(app, `/api/templates/${templateId}`, {
-    method: "DELETE",
-    headers: ownerHeaders
-  });
-  assert.equal(deleteBlocked.response.status, 409);
 
   const started = await requestJson(app, `/api/sessions/${sessionId}/start`, {
     method: "POST",
@@ -734,7 +501,7 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   const staleSession = await requestJson(app, "/api/sessions", {
     method: "POST",
     headers: switchedHeaders,
-    body: JSON.stringify({ name: "feature-y", templateId })
+    body: JSON.stringify({ name: "feature-y", instanceId })
   });
   assert.equal(staleSession.response.status, 200);
   const staleSessionId = staleSession.data.session.id;
@@ -891,8 +658,8 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   const report = await requestJson(app, "/api/admin/report", {
     headers: ownerHeaders
   });
-  assert.equal(report.data.report.releases, 1);
-  assert.equal(report.data.report.buildsQueued, 1);
+  assert.equal(report.data.report.releases, 0);
+  assert.equal(report.data.report.buildsQueued, 0);
   assert.equal(report.data.report.buildsBuilding, 0);
   assert.equal(report.data.report.buildsStuck, 0);
   assert.equal(report.data.report.buildsDeadLettered, 0);
@@ -964,7 +731,7 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   assert.equal(cleanupRun.response.status, 200);
   assert.equal(cleanupRun.data.recoveredStuckBuilds, 0);
   assert.equal(cleanupRun.data.purgedDeletedSessions, 1);
-  assert.equal(cleanupRun.data.purgedStaleSleepingSessions, 1);
+  assert.equal(cleanupRun.data.purgedStaleSleepingSessions, 0);
   const removedSession = await requestJson(app, `/api/sessions/${sessionId}`, {
     headers: switchedHeaders
   });
@@ -972,7 +739,7 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   const removedStaleSession = await requestJson(app, `/api/sessions/${staleSessionId}`, {
     headers: switchedHeaders
   });
-  assert.equal(removedStaleSession.response.status, 404);
+  assert.equal(removedStaleSession.response.status, 200);
 
   const logoutAll = await requestJson(app, "/api/auth/logout-all", {
     method: "POST",
@@ -1182,51 +949,23 @@ test("worker exposes targeted operator reconcile endpoints", async () => {
     authorization: `Bearer ${owner.data.token}`
   };
 
-  const template = await requestJson(app, "/api/templates", {
+  const instance = await requestJson(app, "/api/instances", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({
-      name: "operator-routes-template",
-      description: "Operator routes template"
+      name: "operator-routes-instance",
+      description: "Operator routes instance",
+      image: "registry.cloudflare.com/example/operator-routes:1.0.0"
     })
   });
-  assert.equal(template.response.status, 200);
-
-  const version = await requestJson(app, `/api/templates/${template.data.template.id}/versions`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      version: "1.0.0",
-      manifest: {
-        image: "registry.cloudflare.com/example/operator-routes:1.0.0",
-        sleepTtlSeconds: 1
-      }
-    })
-  });
-  assert.equal(version.response.status, 200);
-
-  const processed = await requestJson(app, "/api/template-builds/process", {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(processed.response.status, 200);
-  assert.equal(processed.data.processed, 1);
-
-  const promoted = await requestJson(app, `/api/templates/${template.data.template.id}/promote`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      versionId: version.data.templateVersion.id
-    })
-  });
-  assert.equal(promoted.response.status, 200);
+  assert.equal(instance.response.status, 200);
 
   const running = await requestJson(app, "/api/sessions", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({
       name: "operator-running",
-      templateId: template.data.template.id
+      instanceId: instance.data.instance.id
     })
   });
   assert.equal(running.response.status, 200);
@@ -1240,7 +979,7 @@ test("worker exposes targeted operator reconcile endpoints", async () => {
     headers: ownerHeaders,
     body: JSON.stringify({
       name: "operator-stale",
-      templateId: template.data.template.id
+      instanceId: instance.data.instance.id
     })
   });
   assert.equal(stale.response.status, 200);
@@ -1272,7 +1011,7 @@ test("worker exposes targeted operator reconcile endpoints", async () => {
     headers: ownerHeaders,
     body: JSON.stringify({
       name: "operator-deleted",
-      templateId: template.data.template.id
+      instanceId: instance.data.instance.id
     })
   });
   assert.equal(deleted.response.status, 200);
@@ -1302,7 +1041,7 @@ test("worker exposes targeted operator reconcile endpoints", async () => {
   });
   assert.equal(preview.response.status, 200);
   assert.equal(preview.data.preview.sleptSessions, 1);
-  assert.equal(preview.data.preview.purgedStaleSleepingSessions, 1);
+  assert.equal(preview.data.preview.purgedStaleSleepingSessions, 0);
   assert.equal(preview.data.preview.purgedDeletedSessions, 1);
   assert.deepEqual(preview.data.preview.sessionIds.running, [running.data.session.id]);
 
@@ -1325,8 +1064,8 @@ test("worker exposes targeted operator reconcile endpoints", async () => {
     headers: ownerHeaders
   });
   assert.equal(purgedSleeping.response.status, 200);
-  assert.equal(purgedSleeping.data.purgedStaleSleepingSessions, 1);
-  assert.equal(purgedSleeping.data.purgedSnapshots, 1);
+  assert.equal(purgedSleeping.data.purgedStaleSleepingSessions, 0);
+  assert.equal(purgedSleeping.data.purgedSnapshots, 0);
 
   const purgedDeleted = await requestJson(app, "/api/admin/reconcile/purge-deleted", {
     method: "POST",
@@ -1372,39 +1111,35 @@ test("worker exposes quota overrides and richer usage data", async () => {
   assert.equal(overrides.data.limits.maxTemplates, 1);
   assert.equal(overrides.data.overrides.maxStorageBytes, 8);
 
-  const template = await requestJson(app, "/api/templates", {
+  const instance = await requestJson(app, "/api/instances", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({
-      name: "quota-worker-template",
-      description: "quota test"
+      name: "quota-worker-instance",
+      description: "quota test",
+      image: "registry.cloudflare.com/example/quota-worker:1.0.0"
     })
   });
-  assert.equal(template.response.status, 200);
+  assert.equal(instance.response.status, 200);
 
-  const blockedTemplate = await requestJson(app, "/api/templates", {
+  const session = await requestJson(app, "/api/sessions", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({
-      name: "quota-worker-template-2",
-      description: "blocked"
+      name: "quota-worker-session",
+      instanceId: instance.data.instance.id
     })
   });
-  assert.equal(blockedTemplate.response.status, 403);
+  assert.equal(session.response.status, 200);
 
-  const version = await requestJson(app, `/api/templates/${template.data.template.id}/versions`, {
+  const snapshot = await requestJson(app, `/api/sessions/${session.data.session.id}/snapshots`, {
     method: "POST",
     headers: ownerHeaders,
-    body: JSON.stringify({
-      version: "1.0.0",
-      manifest: {
-        image: "registry.cloudflare.com/example/quota-worker:1.0.0"
-      }
-    })
+    body: JSON.stringify({ label: "quota" })
   });
-  assert.equal(version.response.status, 200);
+  assert.equal(snapshot.response.status, 200);
 
-  const blockedUpload = await requestJson(app, `/api/templates/${template.data.template.id}/versions/${version.data.templateVersion.id}/bundle`, {
+  const blockedUpload = await requestJson(app, `/api/sessions/${session.data.session.id}/snapshots/${snapshot.data.snapshot.id}/content`, {
     method: "PUT",
     headers: {
       ...ownerHeaders,
@@ -1424,7 +1159,7 @@ test("worker exposes quota overrides and richer usage data", async () => {
   });
   assert.equal(raised.response.status, 200);
 
-  const uploaded = await requestJson(app, `/api/templates/${template.data.template.id}/versions/${version.data.templateVersion.id}/bundle`, {
+  const uploaded = await requestJson(app, `/api/sessions/${session.data.session.id}/snapshots/${snapshot.data.snapshot.id}/content`, {
     method: "PUT",
     headers: {
       ...ownerHeaders,
@@ -1440,7 +1175,7 @@ test("worker exposes quota overrides and richer usage data", async () => {
   assert.equal(usage.response.status, 200);
   assert.equal(usage.data.limits.maxTemplates, 1);
   assert.equal(usage.data.overrides.maxStorageBytes, 1024);
-  assert.equal(usage.data.usage.storage.templateBundlesBytes, 2);
+  assert.equal(usage.data.usage.storage.snapshotBytes, 2);
 });
 
 test("worker secures runtime routes and redacts workspace secrets", async () => {
@@ -1483,49 +1218,23 @@ test("worker secures runtime routes and redacts workspace secrets", async () => 
   assert.deepEqual(listedSecrets.data.secrets.map((entry: any) => entry.name), ["API_TOKEN"]);
   assert.equal("value" in listedSecrets.data.secrets[0], false);
 
-  const template = await requestJson(app, "/api/templates", {
+  const instance = await requestJson(app, "/api/instances", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({
-      name: "security-template",
-      description: "security test"
+      name: "security-instance",
+      description: "security test",
+      image: "registry.cloudflare.com/example/security-template:1.0.0"
     })
   });
-  assert.equal(template.response.status, 200);
-
-  const version = await requestJson(app, `/api/templates/${template.data.template.id}/versions`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      version: "1.0.0",
-      manifest: {
-        image: "registry.cloudflare.com/example/security-template:1.0.0"
-      }
-    })
-  });
-  assert.equal(version.response.status, 200);
-
-  const processed = await requestJson(app, "/api/template-builds/process", {
-    method: "POST",
-    headers: ownerHeaders
-  });
-  assert.equal(processed.response.status, 200);
-
-  const promoted = await requestJson(app, `/api/templates/${template.data.template.id}/promote`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      versionId: version.data.templateVersion.id
-    })
-  });
-  assert.equal(promoted.response.status, 200);
+  assert.equal(instance.response.status, 200);
 
   const session = await requestJson(app, "/api/sessions", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({
       name: "security-session",
-      templateId: template.data.template.id
+      instanceId: instance.data.instance.id
     })
   });
   assert.equal(session.response.status, 200);
@@ -1569,7 +1278,7 @@ test("worker secures runtime routes and redacts workspace secrets", async () => 
   assert.equal(exported.response.status, 200);
   assert.equal(exported.data.export.security.runtimeSecrets[0].name, "API_TOKEN");
   assert.equal("value" in exported.data.export.security.runtimeSecrets[0], false);
-  assert.equal(exported.data.export.artifacts.buildArtifacts.length, 1);
+  assert.equal(exported.data.export.artifacts.buildArtifacts.length, 0);
 });
 
 test("runtime-aware reconcile stops running sessions and persists runtime state", async () => {
@@ -2590,62 +2299,34 @@ test("preview route rehydrates the latest snapshot before proxying", async () =>
   assert.equal(forwarded[2].path, "/");
 });
 
-test("worker can roll back a template through the API", async () => {
+test("worker removes template rollback and release routes", async () => {
   const service = createWorkerService();
   const app = createApp({
-    service,
-    TEMPLATE_BUCKET: createBucket(),
-    BUILD_BUCKET: createBucket()
+    service
   });
   const owner = await service.registerUser({
     email: "worker-rollback@example.com",
     name: "Worker Rollback"
   });
-  const template = await service.createTemplate(owner.token, {
-    name: "worker-rollback",
-    description: "Worker rollback template"
-  });
-  const versionOne = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/worker-rollback:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(versionOne.build.id);
-  const firstPromotion = await service.promoteTemplateVersion(owner.token, template.template.id, versionOne.templateVersion.id);
 
-  const versionTwo = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "2.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/worker-rollback:2.0.0"
-    }
-  });
-  await service.processTemplateBuildById(versionTwo.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, versionTwo.templateVersion.id);
-
-  const rollback = await requestJson(app, `/api/templates/${template.template.id}/rollback`, {
+  const rollback = await requestJson(app, "/api/templates/template_123/rollback", {
     method: "POST",
     headers: {
       authorization: `Bearer ${owner.token}`,
       "content-type": "application/json"
     },
     body: JSON.stringify({
-      releaseId: firstPromotion.release.id
+      releaseId: "release_123"
     })
   });
-  assert.equal(rollback.response.status, 200);
-  assert.equal(rollback.data.activeVersion.id, versionOne.templateVersion.id);
-  assert.equal(rollback.data.targetRelease.id, firstPromotion.release.id);
-  assert.equal(rollback.data.release.mode, "rollback");
-  assert.equal(rollback.data.release.sourceReleaseId, firstPromotion.release.id);
+  assert.equal(rollback.response.status, 404);
 
   const releases = await requestJson(app, "/api/releases", {
     headers: {
       authorization: `Bearer ${owner.token}`
     }
   });
-  assert.equal(releases.response.status, 200);
-  assert.equal(releases.data.releases.at(-1).mode, "rollback");
+  assert.equal(releases.response.status, 404);
 });
 
 test("worker exposes billing endpoints and validates Stripe webhooks", async () => {

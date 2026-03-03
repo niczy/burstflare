@@ -69,7 +69,7 @@ function createBucket() {
   };
 }
 
-test("cli can run device flow, build processing, session lifecycle, and reporting", async () => {
+test("cli can run device flow, instance lifecycle, and reporting", async () => {
   const app = createApp({
     TEMPLATE_BUCKET: createBucket(),
     RECONCILE_QUEUE: {
@@ -83,7 +83,6 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
   const stderr = capture();
   const configPath = path.join(os.tmpdir(), `flare-cli-${Date.now()}.json`);
   const bundlePath = path.join(os.tmpdir(), `flare-bundle-${Date.now()}.txt`);
-  const restoredPath = path.join(os.tmpdir(), `flare-restored-${Date.now()}.txt`);
   const exportPath = path.join(os.tmpdir(), `flare-export-${Date.now()}.json`);
   const toolDir = path.join(os.tmpdir(), `flare-tools-${Date.now()}`);
 
@@ -233,33 +232,19 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
-    code = await runCli(["template", "create", "go-dev", "--description", "Go runtime", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const templateOutput = JSON.parse(stdout.data.trim());
-    const templateId = templateOutput.template.id;
-
-    stdout.data = "";
-
     code = await runCli(
       [
-        "template",
-        "upload",
-        templateId,
-        "--version",
-        "1.0.0",
-        "--file",
-        bundlePath,
-        "--content-type",
-        "text/plain",
-        "--sleep-ttl-seconds",
-        "1",
-        "--persisted-paths",
-        "/workspace,/home/flare/.cache",
+        "instance",
+        "create",
+        "go-dev",
+        "--description",
+        "Go runtime",
+        "--image",
+        "node:20",
+        "--env",
+        "MODE=dev",
+        "--secret",
+        "API_KEY=abc",
         "--url",
         "http://local"
       ],
@@ -271,247 +256,63 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       }
     );
     assert.equal(code, 0);
-    const versionOutput = JSON.parse(stdout.data.trim());
-    const versionId = versionOutput.templateVersion.id;
-    assert.equal(versionOutput.bundle.contentType, "text/plain");
-    assert.deepEqual(versionOutput.templateVersion.manifest.persistedPaths, ["/workspace", "/home/flare/.cache"]);
+    const instanceOutput = JSON.parse(stdout.data.trim());
+    const instanceId = instanceOutput.instance.id;
+    assert.equal(instanceOutput.instance.image, "node:20");
+    assert.deepEqual(instanceOutput.instance.secretNames, ["API_KEY"]);
 
     stdout.data = "";
 
-    code = await runCli(["build", "process", "--url", "http://local"], {
+    code = await runCli(["instance", "inspect", instanceId, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    const processOutput = JSON.parse(stdout.data.trim());
-    assert.equal(processOutput.processed, 1);
+    const inspectedInstance = JSON.parse(stdout.data.trim());
+    assert.equal(inspectedInstance.instance.id, instanceId);
 
     stdout.data = "";
 
-    code = await runCli(["build", "log", versionOutput.build.id, "--url", "http://local"], {
+    code = await runCli(["instance", "edit", instanceId, "--description", "Go runtime updated", "--image", "node:22", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    assert.match(stdout.data, /bundle_uploaded=true/);
+    const editedInstance = JSON.parse(stdout.data.trim());
+    assert.equal(editedInstance.instance.description, "Go runtime updated");
+    assert.equal(editedInstance.instance.image, "node:22");
 
     stdout.data = "";
 
-    code = await runCli(["build", "artifact", versionOutput.build.id, "--url", "http://local"], {
+    code = await runCli(["instance", "create", "trash-dev", "--description", "Disposable instance", "--image", "alpine:3.20", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    const buildArtifactOutput = JSON.parse(stdout.data.trim());
-    assert.equal(buildArtifactOutput.source, "bundle");
-    assert.equal(buildArtifactOutput.templateVersionId, versionOutput.templateVersion.id);
-    assert.match(buildArtifactOutput.imageReference, /@sha256:/);
-    assert.match(buildArtifactOutput.imageDigest, /^sha256:/);
-    assert.equal(buildArtifactOutput.layerCount, 2);
+    const disposableInstance = JSON.parse(stdout.data.trim());
+    const disposableInstanceId = disposableInstance.instance.id;
 
     stdout.data = "";
 
-    code = await runCli(
-      [
-        "template",
-        "upload",
-        templateId,
-        "--version",
-        "2.0.0",
-        "--file",
-        bundlePath,
-        "--content-type",
-        "text/plain",
-        "--simulate-failure",
-        "--url",
-        "http://local"
-      ],
-      {
-        fetchImpl,
-        stdout,
-        stderr,
-        configPath
-      }
-    );
-    assert.equal(code, 0);
-    const failingVersionOutput = JSON.parse(stdout.data.trim());
-
-    stdout.data = "";
-
-    code = await runCli(["build", "process", "--url", "http://local"], {
+    code = await runCli(["instance", "delete", disposableInstanceId, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
+    const deletedInstance = JSON.parse(stdout.data.trim());
+    assert.equal(deletedInstance.ok, true);
 
     stdout.data = "";
 
-    code = await runCli(["build", "log", failingVersionOutput.build.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    assert.match(stdout.data, /build_status=failed/);
-
-    stdout.data = "";
-
-    code = await runCli(["build", "retry", failingVersionOutput.build.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-
-    stdout.data = "";
-
-    code = await runCli(["build", "process", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-
-    stdout.data = "";
-
-    code = await runCli(["build", "retry", failingVersionOutput.build.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-
-    stdout.data = "";
-
-    code = await runCli(["build", "process", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-
-    stdout.data = "";
-
-    code = await runCli(["build", "log", failingVersionOutput.build.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    assert.match(stdout.data, /build_status=dead_lettered/);
-
-    stdout.data = "";
-
-    code = await runCli(["build", "retry-dead-lettered", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const bulkRetried = JSON.parse(stdout.data.trim());
-    assert.equal(bulkRetried.recovered, 1);
-    assert.deepEqual(bulkRetried.buildIds, [failingVersionOutput.build.id]);
-
-    stdout.data = "";
-
-    code = await runCli(["template", "promote", templateId, versionId, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const promoteOutput = JSON.parse(stdout.data.trim());
-    assert.equal(promoteOutput.release.binding.artifactSource, "bundle");
-
-    stdout.data = "";
-
-    code = await runCli(["template", "inspect", templateId, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const inspectedTemplate = JSON.parse(stdout.data.trim());
-    assert.equal(inspectedTemplate.template.releaseCount, 1);
-    assert.equal(inspectedTemplate.template.releases.length, 1);
-    assert.equal(inspectedTemplate.template.latestRelease.id, promoteOutput.release.id);
-
-    stdout.data = "";
-
-    code = await runCli(["template", "archive", templateId, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-
-    stdout.data = "";
-
-    code = await runCli(["up", "blocked-shell", "--template", templateId, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 1);
-    assert.match(stderr.data, /Template is archived/);
-
-    stdout.data = "";
-    stderr.data = "";
-
-    code = await runCli(["template", "restore", templateId, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-
-    stdout.data = "";
-
-    code = await runCli(["template", "create", "trash-dev", "--description", "Disposable template", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const disposableTemplate = JSON.parse(stdout.data.trim());
-    const disposableTemplateId = disposableTemplate.template.id;
-
-    stdout.data = "";
-
-    code = await runCli(["template", "delete", disposableTemplateId, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const deletedTemplate = JSON.parse(stdout.data.trim());
-    assert.equal(deletedTemplate.ok, true);
-
-    stdout.data = "";
-
-    code = await runCli(["up", "my-shell", "--template", templateId, "--url", "http://local"], {
+    code = await runCli(["up", "my-shell", "--instance", instanceId, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -523,7 +324,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
-    code = await runCli(["up", "sleepy-shell", "--template", templateId, "--url", "http://local"], {
+    code = await runCli(["up", "sleepy-shell", "--instance", instanceId, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -558,40 +359,29 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
 
     stdout.data = "";
 
-    code = await runCli(["snapshot", "get", sessionId, snapshotId, "--output", restoredPath, "--url", "http://local"], {
+    code = await runCli(["snapshot", "list", sessionId, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    const restoreOutput = JSON.parse(stdout.data.trim());
-    assert.equal(restoreOutput.bytes, 18);
-    assert.equal(await readFile(restoredPath, "utf8"), "cli bundle payload");
+    const listedSnapshots = JSON.parse(stdout.data.trim());
+    assert.equal(listedSnapshots.snapshots.length, 1);
+    assert.equal(listedSnapshots.snapshots[0].id, snapshotId);
 
     stdout.data = "";
 
-    code = await runCli(["snapshot", "restore", sessionId, snapshotId, "--url", "http://local"], {
+    code = await runCli(["status", sessionId, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    const restoreSnapshotOutput = JSON.parse(stdout.data.trim());
-    assert.equal(restoreSnapshotOutput.session.lastRestoredSnapshotId, snapshotId);
-
-    stdout.data = "";
-
-    code = await runCli(["snapshot", "delete", sessionId, snapshotId, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const deletedSnapshot = JSON.parse(stdout.data.trim());
-    assert.equal(deletedSnapshot.ok, true);
+    const sessionStatus = JSON.parse(stdout.data.trim());
+    assert.equal(sessionStatus.session.id, sessionId);
+    assert.equal(sessionStatus.session.snapshotCount, 1);
 
     stdout.data = "";
 
@@ -615,8 +405,8 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     });
     assert.equal(code, 0);
     const reportOutput = JSON.parse(stdout.data.trim());
-    assert.equal(reportOutput.report.releases, 1);
-    assert.equal(reportOutput.report.buildsQueued, 1);
+    assert.equal(reportOutput.report.releases, 0);
+    assert.equal(reportOutput.report.buildsQueued, 0);
     assert.equal(reportOutput.report.buildsBuilding, 0);
     assert.equal(reportOutput.report.buildsStuck, 0);
     assert.equal(reportOutput.report.buildsDeadLettered, 0);
@@ -639,7 +429,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(exported.export.workspace.id, refreshedConfig.workspaceId);
     assert.equal(exported.export.members.length, 1);
     assert.equal(exported.export.security.runtimeSecrets[0].name, "API_TOKEN");
-    assert.equal(exported.export.artifacts.templateBundles.length >= 1, true);
+    assert.equal(exported.export.artifacts.templateBundles.length, 0);
 
     stdout.data = "";
     stderr.data = "";
@@ -806,7 +596,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     const cleanupOutput = JSON.parse(stdout.data.trim());
     assert.equal(cleanupOutput.recoveredStuckBuilds, 0);
-    assert.equal(cleanupOutput.purgedStaleSleepingSessions, 1);
+    assert.equal(cleanupOutput.purgedStaleSleepingSessions, 0);
 
     stdout.data = "";
 
@@ -816,8 +606,10 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       stderr,
       configPath
     });
-    assert.equal(code, 1);
-    assert.match(stderr.data, /Session not found/);
+    assert.equal(code, 0);
+    const staleStatus = JSON.parse(stdout.data.trim());
+    assert.equal(staleStatus.session.id, staleSessionId);
+    assert.equal(staleStatus.session.state, "sleeping");
 
     stdout.data = "";
     stderr.data = "";
@@ -946,7 +738,6 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
   } finally {
     await rm(configPath, { force: true });
     await rm(bundlePath, { force: true });
-    await rm(restoredPath, { force: true });
     await rm(exportPath, { force: true });
     await rm(toolDir, { force: true, recursive: true });
   }
@@ -969,8 +760,8 @@ test("cli help uses flare branding", async () => {
   assert.match(stdout.data, /^Authentication$/m);
   assert.match(stdout.data, /^  flare auth$/m);
   assert.match(stdout.data, /^    flare auth register --email <email> \[--name <name>\]$/m);
-  assert.match(stdout.data, /^    flare template inspect <templateId>$/m);
-  assert.match(stdout.data, /^    flare session list \[--status <status>\] \[--template <templateId>\]$/m);
+  assert.match(stdout.data, /^    flare instance inspect <instanceId>$/m);
+  assert.match(stdout.data, /^    flare session list \[--status <status>\] \[--instance <instanceId>\]$/m);
   assert.match(stdout.data, /^Shortcuts$/m);
   assert.match(stdout.data, /Use `flare help <topic>` or append `--help`/);
   assert.doesNotMatch(stdout.data, /burstflare auth register/);
@@ -1116,11 +907,7 @@ test("cli supports noun-first aliases and local list filters", async () => {
   const stdout = capture();
   const stderr = capture();
   const configPath = path.join(os.tmpdir(), `flare-cli-aliases-${Date.now()}.json`);
-  const bundlePath = path.join(os.tmpdir(), `flare-alias-bundle-${Date.now()}.txt`);
-
   try {
-    await writeFile(bundlePath, "alias bundle payload");
-
     let code = await runCli(["auth", "register", "--email", "alias-cli@example.com", "--name", "Alias CLI", "--url", "http://local"], {
       fetchImpl,
       stdout,
@@ -1143,124 +930,41 @@ test("cli supports noun-first aliases and local list filters", async () => {
     assert.equal(currentWorkspace.workspace.id, workspaceId);
     stdout.data = "";
 
-    code = await runCli(["template", "create", "alias-active", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "alias-active", "--image", "node:20", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    const activeTemplate = JSON.parse(stdout.data.trim());
+    const activeInstance = JSON.parse(stdout.data.trim());
     stdout.data = "";
 
-    code = await runCli(
-      ["template", "upload", activeTemplate.template.id, "--version", "1.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
-      {
-        fetchImpl,
-        stdout,
-        stderr,
-        configPath
-      }
+    code = await runCli(["instance", "create", "alias-secondary", "--image", "node:22", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const secondaryInstance = JSON.parse(stdout.data.trim());
+    stdout.data = "";
+
+    code = await runCli(["instances", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 0);
+    const instances = JSON.parse(stdout.data.trim());
+    assert.deepEqual(
+      instances.instances.map((entry: any) => entry.id),
+      [activeInstance.instance.id, secondaryInstance.instance.id]
     );
-    assert.equal(code, 0);
-    const uploadedVersion = JSON.parse(stdout.data.trim());
     stdout.data = "";
 
-    code = await runCli(["builds", "--status", "queued", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const queuedBuilds = JSON.parse(stdout.data.trim());
-    assert.equal(queuedBuilds.count, 1);
-    assert.equal(queuedBuilds.filtered, false);
-    stdout.data = "";
-
-    code = await runCli(["build", "process", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["build", "--status", "succeeded", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const succeededBuilds = JSON.parse(stdout.data.trim());
-    assert.equal(succeededBuilds.count, 1);
-    stdout.data = "";
-
-    code = await runCli(["template", "promote", activeTemplate.template.id, uploadedVersion.templateVersion.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["template", "create", "alias-archived", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const archivedTemplate = JSON.parse(stdout.data.trim());
-    stdout.data = "";
-
-    code = await runCli(["template", "archive", archivedTemplate.template.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["templates", "--active", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const activeTemplates = JSON.parse(stdout.data.trim());
-    assert.deepEqual(activeTemplates.templates.map((entry: any) => entry.id), [activeTemplate.template.id]);
-    stdout.data = "";
-
-    code = await runCli(["template", "--archived", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const archivedTemplates = JSON.parse(stdout.data.trim());
-    assert.deepEqual(archivedTemplates.templates.map((entry: any) => entry.id), [archivedTemplate.template.id]);
-    stdout.data = "";
-
-    code = await runCli(["releases", "--template", activeTemplate.template.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const releases = JSON.parse(stdout.data.trim());
-    assert.equal(releases.count, 1);
-    assert.equal(releases.releases[0].templateId, activeTemplate.template.id);
-    stdout.data = "";
-
-    code = await runCli(["session", "up", "alias-session", "--template", activeTemplate.template.id, "--url", "http://local"], {
+    code = await runCli(["session", "up", "alias-session", "--instance", activeInstance.instance.id, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1307,7 +1011,7 @@ test("cli supports noun-first aliases and local list filters", async () => {
       stoppedSession.session.runtime?.status || stoppedSession.session.runtimeStatus || stoppedSession.session.status || "sleeping";
     stdout.data = "";
 
-    code = await runCli(["list", "--status", stoppedStatus, "--template", activeTemplate.template.id, "--url", "http://local"], {
+    code = await runCli(["list", "--status", stoppedStatus, "--instance", activeInstance.instance.id, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1318,7 +1022,6 @@ test("cli supports noun-first aliases and local list filters", async () => {
     assert.deepEqual(sleepingSessions.sessions.map((entry: any) => entry.id), [sessionId]);
   } finally {
     await rm(configPath, { force: true });
-    await rm(bundlePath, { force: true });
   }
 });
 
@@ -1346,62 +1049,17 @@ test("cli exposes targeted operator reconcile commands", async () => {
     assert.equal(code, 0);
     stdout.data = "";
 
-    code = await runCli(["template", "create", "operator-cli-template", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "operator-cli-instance", "--image", "node:20", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    const template = JSON.parse(stdout.data.trim());
+    const instance = JSON.parse(stdout.data.trim());
     stdout.data = "";
 
-    code = await runCli(
-      [
-        "template",
-        "upload",
-        template.template.id,
-        "--version",
-        "1.0.0",
-        "--file",
-        bundlePath,
-        "--content-type",
-        "text/plain",
-        "--sleep-ttl-seconds",
-        "1",
-        "--url",
-        "http://local"
-      ],
-      {
-        fetchImpl,
-        stdout,
-        stderr,
-        configPath
-      }
-    );
-    assert.equal(code, 0);
-    const version = JSON.parse(stdout.data.trim());
-    stdout.data = "";
-
-    code = await runCli(["build", "process", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["template", "promote", template.template.id, version.templateVersion.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["up", "operator-running", "--template", template.template.id, "--url", "http://local"], {
+    code = await runCli(["up", "operator-running", "--instance", instance.instance.id, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1411,7 +1069,7 @@ test("cli exposes targeted operator reconcile commands", async () => {
     const running = JSON.parse(stdout.data.trim());
     stdout.data = "";
 
-    code = await runCli(["up", "operator-stale", "--template", template.template.id, "--url", "http://local"], {
+    code = await runCli(["up", "operator-stale", "--instance", instance.instance.id, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1439,7 +1097,7 @@ test("cli exposes targeted operator reconcile commands", async () => {
     assert.equal(code, 0);
     stdout.data = "";
 
-    code = await runCli(["up", "operator-deleted", "--template", template.template.id, "--url", "http://local"], {
+    code = await runCli(["up", "operator-deleted", "--instance", instance.instance.id, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1481,7 +1139,7 @@ test("cli exposes targeted operator reconcile commands", async () => {
     assert.equal(code, 0);
     const preview = JSON.parse(stdout.data.trim());
     assert.equal(preview.preview.sleptSessions, 1);
-    assert.equal(preview.preview.purgedStaleSleepingSessions, 1);
+    assert.equal(preview.preview.purgedStaleSleepingSessions, 0);
     assert.equal(preview.preview.purgedDeletedSessions, 1);
     assert.deepEqual(preview.preview.sessionIds.running, [running.session.id]);
     stdout.data = "";
@@ -1505,8 +1163,8 @@ test("cli exposes targeted operator reconcile commands", async () => {
     });
     assert.equal(code, 0);
     const purgedSleeping = JSON.parse(stdout.data.trim());
-    assert.equal(purgedSleeping.purgedStaleSleepingSessions, 1);
-    assert.equal(purgedSleeping.purgedSnapshots, 1);
+    assert.equal(purgedSleeping.purgedStaleSleepingSessions, 0);
+    assert.equal(purgedSleeping.purgedSnapshots, 0);
     stdout.data = "";
 
     code = await runCli(["reconcile", "purge-deleted", "--url", "http://local"], {
@@ -1538,21 +1196,33 @@ test("cli exposes targeted operator reconcile commands", async () => {
   }
 });
 
-test("cli can roll back a template to a prior release", async () => {
-  const app = createApp({
-    TEMPLATE_BUCKET: createBucket(),
-    BUILD_BUCKET: createBucket()
-  });
+test("cli can create and rebuild docker-backed instances", async () => {
+  const app = createApp();
   const fetchImpl = createFetch(app);
   const stdout = capture();
   const stderr = capture();
-  const configPath = path.join(os.tmpdir(), `flare-cli-rollback-${Date.now()}.json`);
-  const bundlePath = path.join(os.tmpdir(), `flare-rollback-bundle-${Date.now()}.txt`);
+  const configPath = path.join(os.tmpdir(), `flare-cli-docker-${Date.now()}.json`);
+  const toolDir = path.join(os.tmpdir(), `flare-docker-tools-${Date.now()}`);
+  const spawned: Array<{ command: string; args: string[]; options: any }> = [];
 
   try {
-    await writeFile(bundlePath, "rollback bundle payload");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(path.join(toolDir, "docker"), "#!/bin/sh\nexit 0\n");
+    await chmod(path.join(toolDir, "docker"), 0o755);
 
-    let code = await runCli(["auth", "register", "--email", "rollback-cli@example.com", "--name", "Rollback CLI", "--url", "http://local"], {
+    const spawnImpl = (command: string, args: string[], options: any) => {
+      spawned.push({ command, args, options });
+      return {
+        on(event: string, handler: (code: number | null, signal: NodeJS.Signals | null) => void) {
+          if (event === "exit") {
+            setImmediate(() => handler(0, null));
+          }
+          return this;
+        }
+      };
+    };
+
+    let code = await runCli(["auth", "register", "--email", "docker-cli@example.com", "--name", "Docker CLI", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1561,93 +1231,52 @@ test("cli can roll back a template to a prior release", async () => {
     assert.equal(code, 0);
     stdout.data = "";
 
-    code = await runCli(["template", "create", "rollback-cli", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "docker-cli", "--dockerfile", "./Dockerfile", "--context", ".", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
-      configPath
+      configPath,
+      spawnImpl,
+      env: {
+        PATH: toolDir
+      }
     });
     assert.equal(code, 0);
     const created = JSON.parse(stdout.data.trim());
-    const templateId = created.template.id;
+    assert.equal(created.instance.dockerfilePath, "./Dockerfile");
+    assert.equal(created.instance.dockerContext, ".");
+    assert.match(created.instance.image, /^registry\.cloudflare\.com\/local\/docker-cli:/);
+    assert.equal(spawned.length, 2);
+    assert.equal(spawned[0].command, "docker");
+    assert.deepEqual(spawned[0].args, ["build", "-f", "./Dockerfile", "-t", created.instance.image, "."]);
+    assert.equal(spawned[0].options.stdio, "inherit");
+    assert.equal(spawned[1].command, "docker");
+    assert.deepEqual(spawned[1].args, ["push", created.instance.image]);
     stdout.data = "";
 
-    code = await runCli(
-      ["template", "upload", templateId, "--version", "1.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
-      {
-        fetchImpl,
-        stdout,
-        stderr,
-        configPath
+    code = await runCli(["instance", "rebuild", created.instance.id, "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath,
+      spawnImpl,
+      env: {
+        PATH: toolDir
       }
-    );
-    assert.equal(code, 0);
-    const versionOne = JSON.parse(stdout.data.trim());
-    stdout.data = "";
-
-    code = await runCli(["build", "process", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
     });
     assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["template", "promote", templateId, versionOne.templateVersion.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const firstPromotion = JSON.parse(stdout.data.trim());
-    stdout.data = "";
-
-    code = await runCli(
-      ["template", "upload", templateId, "--version", "2.0.0", "--file", bundlePath, "--content-type", "text/plain", "--url", "http://local"],
-      {
-        fetchImpl,
-        stdout,
-        stderr,
-        configPath
-      }
-    );
-    assert.equal(code, 0);
-    const versionTwo = JSON.parse(stdout.data.trim());
-    stdout.data = "";
-
-    code = await runCli(["build", "process", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["template", "promote", templateId, versionTwo.templateVersion.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    stdout.data = "";
-
-    code = await runCli(["template", "rollback", templateId, firstPromotion.release.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath
-    });
-    assert.equal(code, 0);
-    const rolledBack = JSON.parse(stdout.data.trim());
-    assert.equal(rolledBack.activeVersion.id, versionOne.templateVersion.id);
-    assert.equal(rolledBack.release.mode, "rollback");
-    assert.equal(rolledBack.release.sourceReleaseId, firstPromotion.release.id);
+    const rebuilt = JSON.parse(stdout.data.trim());
+    assert.equal(rebuilt.instance.id, created.instance.id);
+    assert.equal(rebuilt.rebuild.image, created.instance.image);
+    assert.equal(rebuilt.rebuild.dockerfilePath, "./Dockerfile");
+    assert.equal(rebuilt.rebuild.dockerContext, ".");
+    assert.equal(spawned.length, 4);
+    assert.equal(spawned[2].command, "docker");
+    assert.deepEqual(spawned[2].args, ["build", "-f", "./Dockerfile", "-t", created.instance.image, "."]);
+    assert.equal(spawned[3].command, "docker");
+    assert.deepEqual(spawned[3].args, ["push", created.instance.image]);
   } finally {
     await rm(configPath, { force: true });
-    await rm(bundlePath, { force: true });
+    await rm(toolDir, { force: true, recursive: true });
   }
 });
