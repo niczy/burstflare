@@ -160,11 +160,12 @@ export const TABLES: TableDefinition[] = [
     columns: [
       { name: "workspace_id", field: "workspaceId" },
       { name: "template_id", field: "templateId" },
+      { name: "instance_id", field: "instanceId" },
       { name: "state", field: "state" },
       { name: "name", field: "name" },
       { name: "updated_at_field", field: "updatedAt" }
     ],
-    indexes: ["workspace_id", "template_id", "state", "name"]
+    indexes: ["workspace_id", "template_id", "instance_id", "state", "name"]
   },
   {
     source: "sessionEvents",

@@ -1220,6 +1220,7 @@ async function applyRuntimeBootstrapToContainer(container: any, session: any, ru
     sessionId: session.id,
     workspaceId: session.workspaceId || null,
     templateId: session.templateId || null,
+    instanceId: session.instanceId || null,
     templateName: session.templateName || null,
     state: session.state || null,
     previewUrl: session.previewUrl || null,
