@@ -2356,242 +2356,59 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     },
     {
       method: "GET",
-      pattern: "/api/templates",
+      pattern: "/api/instances",
       handler: withErrorHandling(async (request) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.listTemplates(token));
+        return toJson(await service.listInstances(token));
       })
     },
     {
       method: "POST",
-      pattern: "/api/templates",
+      pattern: "/api/instances",
       handler: withErrorHandling(async (request) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
         }
         const body = await parseJson(await request.text());
-        return toJson(await service.createTemplate(token, body));
+        return toJson(await service.createInstance(token, body));
       })
     },
     {
       method: "GET",
-      pattern: "/api/templates/:templateId",
-      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
+      pattern: "/api/instances/:instanceId",
+      handler: withErrorHandling(async (request, { instanceId }: { instanceId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.getTemplate(token, templateId));
+        return toJson(await service.getInstance(token, instanceId));
       })
     },
     {
-      method: "POST",
-      pattern: "/api/templates/:templateId/versions",
-      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
+      method: "PATCH",
+      pattern: "/api/instances/:instanceId",
+      handler: withErrorHandling(async (request, { instanceId }: { instanceId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
         }
         const body = await parseJson(await request.text());
-        return toJson(await service.addTemplateVersion(token, templateId, body));
-      })
-    },
-    {
-      method: "PUT",
-      pattern: "/api/templates/:templateId/versions/:versionId/bundle",
-      handler: withRateLimit(
-        {
-          scope: "template-bundle-upload",
-          limit: 8,
-          windowSeconds: 60,
-          identity: (request) => request.headers.get("authorization") || requestIdentity(request)
-        },
-        withErrorHandling(async (request, { templateId, versionId }: { templateId: string; versionId: string }) => {
-          const token = requireToken(request, service);
-          if (!token) {
-            return unauthorized();
-          }
-          return toJson(
-            await service.uploadTemplateVersionBundle(token, templateId, versionId, {
-              body: await request.arrayBuffer(),
-              contentType: request.headers.get("content-type") || "application/octet-stream"
-            })
-          );
-        })
-      )
-    },
-    {
-      method: "POST",
-      pattern: "/api/templates/:templateId/versions/:versionId/bundle/upload",
-      handler: withErrorHandling(async (request, { templateId, versionId }: { templateId: string; versionId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const body = await parseJson(await request.text());
-        const result = await service.createTemplateVersionBundleUploadGrant(token, templateId, versionId, body);
-        return toJson({
-          ...result,
-          uploadGrant: {
-            ...result.uploadGrant,
-            url: new URL(`/api/uploads/${result.uploadGrant.id}`, request.url).toString()
-          }
-        });
-      })
-    },
-    {
-      method: "GET",
-      pattern: "/api/templates/:templateId/versions/:versionId/bundle",
-      handler: withErrorHandling(async (request, { templateId, versionId }: { templateId: string; versionId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const bundle = await service.getTemplateVersionBundle(token, templateId, versionId);
-        return new Response(bundle.body, {
-          headers: {
-            "content-type": bundle.contentType,
-            "content-disposition": `inline; filename="${bundle.fileName}"`,
-            "content-length": String(bundle.bytes)
-          }
-        });
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/templates/:templateId/promote",
-      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const body = await parseJson(await request.text());
-        return toJson(await service.promoteTemplateVersion(token, templateId, body.versionId));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/templates/:templateId/rollback",
-      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const body = await parseJson(await request.text());
-        return toJson(await service.rollbackTemplate(token, templateId, body.releaseId || null));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/templates/:templateId/archive",
-      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.archiveTemplate(token, templateId));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/templates/:templateId/restore",
-      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.restoreTemplate(token, templateId));
+        return toJson(await service.updateInstance(token, instanceId, body));
       })
     },
     {
       method: "DELETE",
-      pattern: "/api/templates/:templateId",
-      handler: withErrorHandling(async (request, { templateId }: { templateId: string }) => {
+      pattern: "/api/instances/:instanceId",
+      handler: withErrorHandling(async (request, { instanceId }: { instanceId: string }) => {
         const token = requireToken(request, service);
         if (!token) {
           return unauthorized();
         }
-        return toJson(await service.deleteTemplate(token, templateId));
-      })
-    },
-    {
-      method: "GET",
-      pattern: "/api/template-builds",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.listTemplateBuilds(token));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/template-builds/process",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.processTemplateBuilds(token));
-      })
-    },
-    {
-      method: "GET",
-      pattern: "/api/template-builds/:buildId/log",
-      handler: withErrorHandling(async (request, { buildId }: { buildId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const log = await service.getTemplateBuildLog(token, buildId);
-        return new Response(log.text, {
-          headers: {
-            "content-type": log.contentType
-          }
-        });
-      })
-    },
-    {
-      method: "GET",
-      pattern: "/api/template-builds/:buildId/artifact",
-      handler: withErrorHandling(async (request, { buildId }: { buildId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const artifact = await service.getTemplateBuildArtifact(token, buildId);
-        return new Response(artifact.text, {
-          headers: {
-            "content-type": artifact.contentType
-          }
-        });
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/template-builds/:buildId/retry",
-      handler: withErrorHandling(async (request, { buildId }: { buildId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.retryTemplateBuild(token, buildId));
-      })
-    },
-    {
-      method: "GET",
-      pattern: "/api/releases",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.listBindingReleases(token));
+        return toJson(await service.deleteInstance(token, instanceId));
       })
     },
     {
@@ -2617,7 +2434,12 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           return unauthorized();
         }
         const body = await parseJson(await request.text());
-        return toJson(await service.createSession(token, body));
+        return toJson(
+          await service.createSession(token, {
+            name: body.name,
+            instanceId: body.instanceId || null
+          })
+        );
       })
     },
     {
