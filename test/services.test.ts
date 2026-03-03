@@ -586,6 +586,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const emptySnapshot = await service.createSnapshot(switched.token, session.session.id, {
     label: "empty"
   });
+  assert.equal(emptySnapshot.snapshot.id, snapshot.snapshot.id);
   await assert.rejects(
     () => service.restoreSnapshot(switched.token, session.session.id, emptySnapshot.snapshot.id),
     /Snapshot content not uploaded/
@@ -620,7 +621,7 @@ test("service covers invites, queued builds, releases, session events, usage, an
   const cleanup = await service.reconcile(owner.token);
   assert.equal(cleanup.purgedDeletedSessions, 1);
   assert.equal(cleanup.purgedStaleSleepingSessions, 1);
-  assert.equal(cleanup.purgedSnapshots, 2);
+  assert.equal(cleanup.purgedSnapshots, 1);
   await assert.rejects(() => service.getSession(switched.token, session.session.id), /Session not found/);
   await assert.rejects(() => service.getSession(switched.token, staleSession.session.id), /Session not found/);
 
@@ -1204,13 +1205,11 @@ test("service enforces quota overrides and storage limits", async () => {
     label: "quota-snap"
   });
   assert.ok(snapshot.snapshot.id);
-  await assert.rejects(
-    () =>
-      service.createSnapshot(owner.token, session.session.id, {
-        label: "quota-snap-2"
-      }),
-    /Snapshot limit reached/
-  );
+  const replacementSnapshot = await service.createSnapshot(owner.token, session.session.id, {
+    label: "quota-snap-2"
+  });
+  assert.equal(replacementSnapshot.snapshot.id, snapshot.snapshot.id);
+  assert.equal(replacementSnapshot.snapshot.label, "quota-snap-2");
 
   const usage = await service.getUsage(owner.token);
   assert.equal(usage.limits.maxRunningSessions, 1);

@@ -864,6 +864,34 @@ function getSessionInstance(state, session) {
   return state.instances.find((entry) => entry.id === session.instanceId) || null;
 }
 
+function listSessionSnapshots(state, sessionId) {
+  return state.snapshots
+    .filter((entry) => entry.sessionId === sessionId)
+    .sort((left, right) => {
+      const leftStamp = String(left.createdAt || left.uploadedAt || "");
+      const rightStamp = String(right.createdAt || right.uploadedAt || "");
+      if (leftStamp !== rightStamp) {
+        return rightStamp.localeCompare(leftStamp);
+      }
+      return String(right.id || "").localeCompare(String(left.id || ""));
+    });
+}
+
+function getLatestSessionSnapshot(state, sessionId) {
+  return listSessionSnapshots(state, sessionId)[0] || null;
+}
+
+function listVisibleSessionSnapshots(state, sessionId) {
+  const snapshot = getLatestSessionSnapshot(state, sessionId);
+  return snapshot ? [snapshot] : [];
+}
+
+function requireLatestSnapshot(state, sessionId, snapshotId) {
+  const snapshot = getLatestSessionSnapshot(state, sessionId);
+  ensure(snapshot && snapshot.id === snapshotId, "Snapshot not found", 404);
+  return snapshot;
+}
+
 function requireSessionAccess(state, authToken, sessionId, clock) {
   const auth = requireAuth(state, authToken, clock);
   const session = state.sessions.find((entry) => entry.id === sessionId);
@@ -901,8 +929,12 @@ function summarizeStorage(state, workspaceId) {
     storage.templateBundlesBytes += version.bundleBytes || 0;
   }
 
-  for (const snapshot of state.snapshots) {
-    const session = state.sessions.find((entry) => entry.id === snapshot.sessionId);
+  const workspaceSessions = state.sessions.filter((entry) => entry.workspaceId === workspaceId);
+  for (const session of workspaceSessions) {
+    const snapshot = getLatestSessionSnapshot(state, session.id);
+    if (!snapshot) {
+      continue;
+    }
     if (!session || session.workspaceId !== workspaceId) {
       continue;
     }
@@ -946,7 +978,9 @@ function summarizeUsage(state, workspaceId) {
   const templates = state.templates.filter((entry) => entry.workspaceId === workspaceId);
   const templateIds = new Set(templates.map((entry) => entry.id));
   const templateVersions = state.templateVersions.filter((entry) => templateIds.has(entry.templateId));
-  const snapshots = state.snapshots.filter((entry) => sessions.some((session) => session.id === entry.sessionId));
+  const snapshots = sessions
+    .map((session) => getLatestSessionSnapshot(state, session.id))
+    .filter(Boolean);
 
   return {
     ...usage,
@@ -1104,7 +1138,7 @@ function formatSession(state, session, { includeSshKeys = false }: { includeSshK
   const template = state.templates.find((entry) => entry.id === session.templateId);
   const instance = getSessionInstance(state, session);
   const events = state.sessionEvents.filter((entry) => entry.sessionId === session.id);
-  const snapshots = state.snapshots.filter((entry) => entry.sessionId === session.id);
+  const snapshots = listVisibleSessionSnapshots(state, session.id);
   const { sshAuthorizedKeys: _sshAuthorizedKeys, ...baseSession } = session;
   const sshKeyCount = getSessionSshKeys(session).length;
   return {
@@ -4766,7 +4800,7 @@ export function createBurstFlareService(options: any = {}) {
     async getSession(token, sessionId) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        const snapshots = state.snapshots.filter((entry) => entry.sessionId === auth.session.id);
+        const snapshots = listVisibleSessionSnapshots(state, auth.session.id);
         const events = state.sessionEvents.filter((entry) => entry.sessionId === auth.session.id);
         return {
           session: formatSession(state, auth.session),
@@ -4780,24 +4814,31 @@ export function createBurstFlareService(options: any = {}) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
-        const limits = getEffectiveLimits(auth.workspace);
-        ensure(
-          state.snapshots.filter((entry) => entry.sessionId === auth.session.id).length < limits.maxSnapshotsPerSession,
-          "Snapshot limit reached",
-          403
-        );
-        const snapshot = {
-          id: createId("snap"),
-          sessionId: auth.session.id,
-          label,
-          objectKey: `snapshots/${auth.workspace.id}/${auth.session.id}/${createId("obj")}.bin`,
-          uploadedAt: null,
-          contentType: null,
-          bytes: 0,
-          inlineContentBase64: null,
-          createdAt: nowIso(clock)
-        };
-        state.snapshots.push(snapshot);
+        const existing = getLatestSessionSnapshot(state, auth.session.id);
+        const timestamp = nowIso(clock);
+        const snapshot =
+          existing ||
+          ({
+            id: createId("snap"),
+            sessionId: auth.session.id,
+            label,
+            objectKey: `snapshots/${auth.workspace.id}/${auth.session.id}/latest.bin`,
+            uploadedAt: null,
+            contentType: null,
+            bytes: 0,
+            inlineContentBase64: null,
+            createdAt: timestamp
+          } as any);
+        snapshot.label = label;
+        snapshot.objectKey = snapshot.objectKey || `snapshots/${auth.workspace.id}/${auth.session.id}/latest.bin`;
+        snapshot.uploadedAt = null;
+        snapshot.contentType = null;
+        snapshot.bytes = 0;
+        snapshot.inlineContentBase64 = null;
+        snapshot.createdAt = timestamp;
+        if (!existing) {
+          state.snapshots.push(snapshot);
+        }
         writeUsage(state, clock, {
           workspaceId: auth.workspace.id,
           kind: "snapshot",
@@ -4810,7 +4851,7 @@ export function createBurstFlareService(options: any = {}) {
           workspaceId: auth.workspace.id,
           targetType: "snapshot",
           targetId: snapshot.id,
-          details: { label }
+          details: { label, replacedExisting: Boolean(existing) }
         });
         return { snapshot };
       });
@@ -4827,8 +4868,7 @@ export function createBurstFlareService(options: any = {}) {
       return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
-        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
-        ensure(snapshot, "Snapshot not found", 404);
+        const snapshot = requireLatestSnapshot(state, auth.session.id, snapshotId);
         return storeSnapshotUpload({
           state,
           clock,
@@ -4852,8 +4892,7 @@ export function createBurstFlareService(options: any = {}) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
-        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
-        ensure(snapshot, "Snapshot not found", 404);
+        const snapshot = requireLatestSnapshot(state, auth.session.id, snapshotId);
         if (bytes !== null) {
           ensure(Number.isInteger(bytes) && bytes > 0, "Upload bytes must be a positive integer");
           ensure(bytes <= MAX_SNAPSHOT_BYTES, "Snapshot exceeds size limit", 413);
@@ -4952,10 +4991,7 @@ export function createBurstFlareService(options: any = {}) {
           );
           ensure(session, "Session not found", 404);
           ensure(session.state !== "deleted", "Session deleted", 409);
-          const snapshot = state.snapshots.find(
-            (entry) => entry.id === uploadGrant.snapshotId && entry.sessionId === session.id
-          );
-          ensure(snapshot, "Snapshot not found", 404);
+          const snapshot = requireLatestSnapshot(state, session.id, uploadGrant.snapshotId);
           const uploaded = await storeSnapshotUpload({
             state,
             clock,
@@ -4981,7 +5017,7 @@ export function createBurstFlareService(options: any = {}) {
       return transact(SESSION_SCOPE, (state) => {
         requireSessionAccess(state, token, sessionId, clock);
         return {
-          snapshots: state.snapshots.filter((entry) => entry.sessionId === sessionId)
+          snapshots: listVisibleSessionSnapshots(state, sessionId)
         };
       });
     },
@@ -4989,8 +5025,7 @@ export function createBurstFlareService(options: any = {}) {
     async getSnapshotContent(token, sessionId, snapshotId) {
       return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
-        ensure(snapshot, "Snapshot not found", 404);
+        const snapshot = requireLatestSnapshot(state, auth.session.id, snapshotId);
         ensure(snapshot.uploadedAt, "Snapshot content not uploaded", 404);
 
         if (objects?.getSnapshot) {
@@ -5021,8 +5056,7 @@ export function createBurstFlareService(options: any = {}) {
     async getRuntimeSnapshotContent(token, sessionId, snapshotId) {
       return transact(SESSION_SCOPE, async (state) => {
         const access = requireRuntimeToken(state, token, sessionId, clock);
-        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === access.session.id);
-        ensure(snapshot, "Snapshot not found", 404);
+        const snapshot = requireLatestSnapshot(state, access.session.id, snapshotId);
         ensure(snapshot.uploadedAt, "Snapshot content not uploaded", 404);
         const workspace = state.workspaces.find((entry) => entry.id === access.session.workspaceId);
         ensure(workspace, "Workspace not found", 404);
@@ -5057,8 +5091,7 @@ export function createBurstFlareService(options: any = {}) {
         const auth = requireSessionAccess(state, token, sessionId, clock);
         ensure(auth.session.state !== "deleted", "Session deleted", 409);
         ensure(["created", "running", "sleeping"].includes(auth.session.state), "Session cannot restore snapshots", 409);
-        const snapshot = state.snapshots.find((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
-        ensure(snapshot, "Snapshot not found", 404);
+        const snapshot = requireLatestSnapshot(state, auth.session.id, snapshotId);
         ensure(snapshot.uploadedAt, "Snapshot content not uploaded", 404);
 
         auth.session.lastRestoredSnapshotId = snapshot.id;
@@ -5087,9 +5120,7 @@ export function createBurstFlareService(options: any = {}) {
     async deleteSnapshot(token, sessionId, snapshotId) {
       return transact(SESSION_SCOPE, async (state) => {
         const auth = requireSessionAccess(state, token, sessionId, clock);
-        const index = state.snapshots.findIndex((entry) => entry.id === snapshotId && entry.sessionId === auth.session.id);
-        ensure(index >= 0, "Snapshot not found", 404);
-        const snapshot = state.snapshots[index];
+        const snapshot = requireLatestSnapshot(state, auth.session.id, snapshotId);
 
         if (objects?.deleteSnapshot) {
           await objects.deleteSnapshot({
@@ -5099,7 +5130,11 @@ export function createBurstFlareService(options: any = {}) {
           });
         }
 
-        state.snapshots.splice(index, 1);
+        state.snapshots = state.snapshots.filter((entry) => entry.sessionId !== auth.session.id);
+        if (auth.session.lastRestoredSnapshotId === snapshot.id) {
+          auth.session.lastRestoredSnapshotId = null;
+          auth.session.lastRestoredAt = null;
+        }
         writeAudit(state, clock, {
           action: "snapshot.deleted",
           actorUserId: auth.user.id,
@@ -5405,8 +5440,9 @@ export function createBurstFlareService(options: any = {}) {
               bytes: entry.artifactBytes,
               builtAt: entry.artifactBuiltAt
             })),
-          snapshots: state.snapshots
-            .filter((entry) => sessionIds.has(entry.sessionId))
+          snapshots: Array.from(sessionIds)
+            .map((sessionId) => getLatestSessionSnapshot(state, sessionId))
+            .filter(Boolean)
             .map((entry) => ({
               snapshotId: entry.id,
               sessionId: entry.sessionId,
@@ -5443,7 +5479,9 @@ export function createBurstFlareService(options: any = {}) {
             sessions: state.sessions
               .filter((entry) => entry.workspaceId === workspaceId)
               .map((entry) => formatSession(state, entry)),
-            snapshots: state.snapshots.filter((entry) => sessionIds.has(entry.sessionId)),
+            snapshots: Array.from(sessionIds)
+              .map((sessionId) => getLatestSessionSnapshot(state, sessionId))
+              .filter(Boolean),
             artifacts,
             security: {
               runtimeSecrets: listRuntimeSecretMetadata(auth.workspace)
