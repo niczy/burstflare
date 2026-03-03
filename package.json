@@ -28,6 +28,7 @@
     "deploy": "tsx scripts/deploy.ts",
     "deploy:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/deploy.ts",
     "dev": "tsx scripts/dev.ts",
+    "e2e:simplified": "tsx scripts/e2e-simplified.ts",
     "instance:validate": "tsx scripts/instance-validate.ts",
     "lint": "tsx scripts/lint.ts",
     "npm:cli:publish": "npm run build --workspace @burstflare/flare && npm publish --workspace apps/cli --access public --//registry.npmjs.org/:_authToken=$NPM_TOKEN",
