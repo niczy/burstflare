@@ -1,4 +1,4 @@
-import { createCloudflareClient, loadCloudflareConfig } from "./lib/cloudflare.mjs";
+import { createCloudflareClient, loadCloudflareConfig } from "./lib/cloudflare.js";
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {

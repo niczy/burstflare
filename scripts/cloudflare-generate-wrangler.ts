@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type CloudflareConfig, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
+import { type CloudflareConfig, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.js";
 
 interface CloudflareScriptError extends Error {
   payload?: unknown;

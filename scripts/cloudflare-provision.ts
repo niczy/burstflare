@@ -3,7 +3,7 @@ import {
   desiredResourceNames,
   loadCloudflareConfig,
   writeProvisionState
-} from "./lib/cloudflare.mjs";
+} from "./lib/cloudflare.js";
 
 interface CloudflareScriptError extends Error {
   payload?: unknown;

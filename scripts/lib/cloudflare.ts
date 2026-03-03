@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { getRequiredEnv, loadEnv, mergeEnv, slugifyDomain } from "./env.mjs";
+import { getRequiredEnv, loadEnv, mergeEnv, slugifyDomain } from "./env.js";
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
 

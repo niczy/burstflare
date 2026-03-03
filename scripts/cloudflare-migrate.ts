@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { createCloudflareClient, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
+import { createCloudflareClient, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.js";
 
 interface CloudflareScriptError extends Error {
   payload?: unknown;
