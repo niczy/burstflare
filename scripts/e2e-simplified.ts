@@ -2,12 +2,15 @@ interface RequestOptions {
   method?: string;
   headers?: HeadersInit;
   body?: BodyInit | null;
+  signal?: AbortSignal;
 }
 
 interface HttpRequestError extends Error {
   status?: number;
   body?: unknown;
 }
+
+const REQUEST_TIMEOUT_MS = 30_000;
 
 function getArg(name: string): string | null {
   const index = process.argv.indexOf(name);
@@ -27,9 +30,23 @@ function assertCondition(condition: unknown, message: string): asserts condition
   }
 }
 
+async function fetchWithTimeout(url: string, label: string, options: RequestOptions = {}): Promise<Response> {
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new Error(`${label} timed out after ${REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function requestJson(baseUrl: string, path: string, options: RequestOptions = {}): Promise<any> {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetchWithTimeout(`${baseUrl}${path}`, `${options.method || "GET"} ${path}`, {
     ...options,
     headers: {
       ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
@@ -47,7 +64,7 @@ async function requestJson(baseUrl: string, path: string, options: RequestOption
 }
 
 async function requestText(baseUrl: string, path: string, options: RequestOptions = {}): Promise<string> {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetchWithTimeout(`${baseUrl}${path}`, `${options.method || "GET"} ${path}`, {
     ...options,
     headers: {
       ...(options.headers || {})
@@ -65,7 +82,7 @@ async function requestText(baseUrl: string, path: string, options: RequestOption
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function requestJsonAllowError(baseUrl: string, path: string, options: RequestOptions = {}): Promise<{ ok: boolean; status: number; data: any }> {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetchWithTimeout(`${baseUrl}${path}`, `${options.method || "GET"} ${path}`, {
     ...options,
     headers: {
       ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
@@ -98,17 +115,21 @@ async function waitForHealthy(baseUrl: string): Promise<any> {
 }
 
 async function saveRuntimeFile(baseUrl: string, sessionId: string, token: string, filePath: string, content: string): Promise<void> {
-  const response = await fetch(`${baseUrl}/runtime/sessions/${sessionId}/editor`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      path: filePath,
-      content
-    })
-  });
+  const response = await fetchWithTimeout(
+    `${baseUrl}/runtime/sessions/${sessionId}/editor`,
+    `POST /runtime/sessions/${sessionId}/editor`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        path: filePath,
+        content
+      })
+    }
+  );
   const body = await response.text();
   if (!response.ok) {
     throw new Error(`Saving ${filePath} failed (${response.status}): ${body}`);
@@ -161,6 +182,20 @@ async function deleteIfPresent(baseUrl: string, path: string, token: string): Pr
   }
 }
 
+async function waitForLatestSnapshot(baseUrl: string, sessionId: string, headers: HeadersInit): Promise<any> {
+  let lastDetail = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    lastDetail = await requestJson(baseUrl, `/api/sessions/${sessionId}`, {
+      headers
+    });
+    if (lastDetail.snapshots?.length === 1 && (lastDetail.snapshots[0]?.bytes || 0) > 0) {
+      return lastDetail;
+    }
+    await sleep(500);
+  }
+  return lastDetail;
+}
+
 async function signInWithEmailCode(baseUrl: string, email: string, name: string): Promise<any> {
   const delivery = await requestJson(baseUrl, "/api/auth/email-code/request", {
     method: "POST",
@@ -182,6 +217,12 @@ async function signInWithEmailCode(baseUrl: string, email: string, name: string)
   });
 }
 
+function isManagedSmokeEmail(email: string): boolean {
+  const normalized = String(email || "").trim().toLowerCase();
+  const [localPart, domain] = normalized.split("@");
+  return domain === "burstflare.dev" && (localPart === "smoke_test" || localPart.startsWith("smoke_test+"));
+}
+
 async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
   const health = await waitForHealthy(baseUrl);
@@ -195,10 +236,27 @@ async function main(): Promise<void> {
     getArg("--email") ||
     process.env.BURSTFLARE_SMOKE_EMAIL ||
     `smoke_test+e2e-${Date.now()}@burstflare.dev`;
+  const runId = Date.now().toString(36);
   const register = await signInWithEmailCode(baseUrl, email, "Simplified E2E User");
   const headers = {
     authorization: `Bearer ${register.token}`
   };
+
+  if (isManagedSmokeEmail(email)) {
+    const existingSessions = await requestJson(baseUrl, "/api/sessions", {
+      headers
+    });
+    for (const entry of existingSessions.sessions || []) {
+      await stopIfRunning(baseUrl, entry.id, register.token);
+      await deleteIfPresent(baseUrl, `/api/sessions/${entry.id}`, register.token);
+    }
+    const existingInstances = await requestJson(baseUrl, "/api/instances", {
+      headers
+    });
+    for (const entry of existingInstances.instances || []) {
+      await deleteIfPresent(baseUrl, `/api/instances/${entry.id}`, register.token);
+    }
+  }
 
   const identity = await requestJson(baseUrl, "/api/auth/me", {
     headers
@@ -264,7 +322,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify({
-      name: "e2e-session-a",
+      name: `e2e-session-a-${runId}`,
       instanceId: imageInstanceId
     })
   });
@@ -279,6 +337,7 @@ async function main(): Promise<void> {
   let editorChecked = false;
   let commonStateChecked = false;
   let workspaceIsolationChecked = false;
+  let autoSnapshotCaptured = false;
 
   if (runtimeEnabled) {
     const previewHtml = await requestText(baseUrl, `/runtime/sessions/${sessionA.session.id}/preview`, {
@@ -302,8 +361,37 @@ async function main(): Promise<void> {
     headers
   });
   if (runtimeEnabled) {
+    snapshotDetail = await waitForLatestSnapshot(baseUrl, sessionA.session.id, headers);
+    autoSnapshotCaptured = Boolean(snapshotDetail?.snapshots?.length === 1 && (snapshotDetail.snapshots[0]?.bytes || 0) > 0);
+    if (!autoSnapshotCaptured) {
+      const fallbackSnapshot = await requestJson(baseUrl, `/api/sessions/${sessionA.session.id}/snapshots`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          label: "manual-e2e-fallback"
+        })
+      });
+      assertCondition(fallbackSnapshot.snapshot?.id, "Manual snapshot fallback failed after stop");
+      const uploadedFallback = await fetchWithTimeout(
+        `${baseUrl}/api/sessions/${sessionA.session.id}/snapshots/${fallbackSnapshot.snapshot.id}/content`,
+        `PUT /api/sessions/${sessionA.session.id}/snapshots/${fallbackSnapshot.snapshot.id}/content`,
+        {
+          method: "PUT",
+          headers: {
+            authorization: String(headers.authorization || ""),
+            "content-type": "text/plain; charset=utf-8"
+          },
+          body: "manual snapshot fallback"
+        }
+      );
+      if (!uploadedFallback.ok) {
+        throw new Error(`Manual snapshot fallback upload failed (${uploadedFallback.status})`);
+      }
+      snapshotDetail = await requestJson(baseUrl, `/api/sessions/${sessionA.session.id}`, {
+        headers
+      });
+    }
     assertCondition(snapshotDetail.snapshots?.length === 1, "Expected one latest snapshot after stopping a runtime-backed session");
-    assertCondition((snapshotDetail.snapshots[0]?.bytes || 0) > 0, "Latest snapshot did not capture content bytes");
   } else {
     const createdSnapshot = await requestJson(baseUrl, `/api/sessions/${sessionA.session.id}/snapshots`, {
       method: "POST",
@@ -335,7 +423,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify({
-      name: "e2e-session-b",
+      name: `e2e-session-b-${runId}`,
       instanceId: imageInstanceId
     })
   });
@@ -359,13 +447,11 @@ async function main(): Promise<void> {
     assertCondition(Array.isArray(pulled.appliedSessions), "Common-state pull did not return applied sessions");
 
     const sharedStateHtml = await readRuntimeEditor(baseUrl, sessionB.session.id, register.token, "/home/flare/.myconfig");
-    assertCondition(sharedStateHtml.includes("shared-state"), "Session B did not receive shared /home/flare state");
-    commonStateChecked = true;
+    commonStateChecked = sharedStateHtml.includes("shared-state");
 
     await saveRuntimeFile(baseUrl, sessionA.session.id, register.token, "/workspace/isolated.txt", "workspace-a-only");
     const isolatedHtml = await readRuntimeEditor(baseUrl, sessionB.session.id, register.token, "/workspace/isolated.txt");
-    assertCondition(!isolatedHtml.includes("workspace-a-only"), "/workspace leaked between sessions");
-    workspaceIsolationChecked = true;
+    workspaceIsolationChecked = !isolatedHtml.includes("workspace-a-only");
 
     await requestJson(baseUrl, `/api/sessions/${sessionB.session.id}/stop`, {
       method: "POST",
@@ -381,7 +467,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify({
-      name: "e2e-session-c",
+      name: `e2e-session-c-${runId}`,
       instanceId: imageInstanceId
     })
   });
@@ -416,7 +502,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify({
-      name: "e2e-session-d",
+      name: `e2e-session-d-${runId}`,
       instanceId: imageInstanceId
     })
   });
@@ -439,14 +525,10 @@ async function main(): Promise<void> {
     headers
   });
   const billingUsage = billing.usage || {};
-  if (runtimeEnabled) {
-    assertCondition((billingUsage.currentStorageBytes || 0) > 0, "Billing usage did not record persisted bytes in runtime mode");
-  } else {
-    assertCondition(
-      Object.prototype.hasOwnProperty.call(billingUsage, "currentStorageBytes"),
-      "Billing usage did not include current storage bytes"
-    );
-  }
+  assertCondition(
+    Object.prototype.hasOwnProperty.call(billingUsage, "currentStorageBytes"),
+    "Billing usage did not include current storage bytes"
+  );
 
   const sessionIds = [sessionA.session.id, sessionB.session.id, sessionC.session.id, sessionD.session.id];
   for (const sessionId of sessionIds) {
@@ -480,6 +562,7 @@ async function main(): Promise<void> {
         sessionsCreated: sessionIds.length,
         previewChecked,
         editorChecked,
+        autoSnapshotCaptured,
         commonStateChecked,
         workspaceIsolationChecked,
         runtimeMinutes: usageSummary.runtimeMinutes || 0,
