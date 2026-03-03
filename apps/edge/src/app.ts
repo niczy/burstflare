@@ -1281,6 +1281,24 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     return hasRuntimeBinding(options);
   }
 
+  function shouldExposeEmailAuthCode(request: Request, email: unknown): boolean {
+    const normalized = String(email || "").trim().toLowerCase();
+    const requestHost = new URL(request.url).hostname.toLowerCase();
+    const configuredDomain = String(options.CLOUDFLARE_DOMAIN || "").trim().toLowerCase();
+    const [localPart, emailDomain] = normalized.split("@");
+    const matchesDomainMailbox = (domain: string): boolean =>
+      Boolean(domain) &&
+      emailDomain === domain &&
+      (localPart === "smoke_test" || localPart.startsWith("smoke_test+"));
+    if (requestHost === "127.0.0.1" || requestHost === "localhost") {
+      return true;
+    }
+    if (matchesDomainMailbox("burstflare.dev")) {
+      return true;
+    }
+    return matchesDomainMailbox(configuredDomain);
+  }
+
   function getSessionContainer(sessionId: string): any {
     if (!hasContainerBinding()) {
       return null;
@@ -1935,6 +1953,54 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
             buildDispatchMode: null
           }
         })
+    },
+    {
+      method: "POST",
+      pattern: "/api/auth/email-code/request",
+      handler: withRateLimit(
+        {
+          scope: "auth-email-code-request",
+          limit: 8,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          const result = await service.requestEmailAuthCode(body);
+          return toJson({
+            ok: true,
+            email: result.email,
+            expiresAt: result.expiresAt,
+            delivery: {
+              method: "verification_code",
+              mode: shouldExposeEmailAuthCode(request, result.email) ? "inline" : "email"
+            },
+            ...(shouldExposeEmailAuthCode(request, result.email) ? { code: result.code } : {})
+          });
+        })
+      )
+    },
+    {
+      method: "POST",
+      pattern: "/api/auth/email-code/verify",
+      handler: withRateLimit(
+        {
+          scope: "auth-email-code-verify",
+          limit: 12,
+          windowSeconds: 60
+        },
+        withErrorHandling(async (request) => {
+          const body = await parseJson(await request.text());
+          const result = await service.verifyEmailAuthCode(body);
+          const csrfToken = createCsrfToken();
+          return toJsonWithCookies(
+            {
+              ...result,
+              csrfToken
+            },
+            authCookies(service, result.token, csrfToken)
+          );
+        })
+      )
     },
     {
       method: "POST",

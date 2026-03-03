@@ -6,6 +6,7 @@ const TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const REFRESH_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const RUNTIME_TOKEN_TTL_MS = 1000 * 60 * 15;
 const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
+const EMAIL_AUTH_CODE_TTL_MS = 1000 * 60 * 10;
 const UPLOAD_GRANT_TTL_MS = 1000 * 60 * 10;
 const MAX_BUILD_ATTEMPTS = 3;
 const STUCK_BUILD_TTL_MS = 1000 * 60 * 5;
@@ -557,6 +558,10 @@ function createRecoveryCode() {
   return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
 }
 
+function createEmailAuthCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
 function findUserById(state, userId) {
   return state.users.find((user) => user.id === userId) || null;
 }
@@ -616,6 +621,113 @@ function getMembership(state, userId, workspaceId) {
 
 function getTokenRecord(state, token) {
   return state.authTokens.find((entry) => entry.token === token && !entry.revokedAt) || null;
+}
+
+function createOrLoadUserWorkspace(state, clock, { email, name }) {
+  let user = findUserByEmail(state, email);
+  let created = false;
+  if (!user) {
+    created = true;
+    user = {
+      id: createId("usr"),
+      email,
+      name: name || defaultNameFromEmail(email),
+      billing: null,
+      recoveryCodes: [],
+      createdAt: nowIso(clock)
+    };
+    state.users.push(user);
+
+    const workspace = {
+      id: createId("ws"),
+      name: `${user.name}'s Workspace`,
+      ownerUserId: user.id,
+      plan: "free",
+      createdAt: nowIso(clock)
+    };
+    state.workspaces.push(workspace);
+    state.memberships.push({
+      workspaceId: workspace.id,
+      userId: user.id,
+      role: "owner",
+      createdAt: nowIso(clock)
+    });
+    writeAudit(state, clock, {
+      action: "user.registered",
+      actorUserId: user.id,
+      workspaceId: workspace.id,
+      targetType: "user",
+      targetId: user.id,
+      details: { email: user.email }
+    });
+  }
+
+  const workspace = getUserWorkspace(state, user.id);
+  ensure(workspace, "Workspace not found", 500);
+  return {
+    user,
+    workspace,
+    created
+  };
+}
+
+function issueUserSession(state, clock, { email, name = null, kind = "browser", workspaceId = null, writeLoginAudit = true }) {
+  ensure(email, "Email is required");
+  const identity = createOrLoadUserWorkspace(state, clock, { email, name });
+  const workspace = workspaceId
+    ? state.workspaces.find((entry) => entry.id === workspaceId)
+    : identity.workspace;
+  ensure(workspace, "Workspace not found", 404);
+  const membership = getMembership(state, identity.user.id, workspace.id);
+  ensure(membership, "Unauthorized workspace", 403);
+
+  const sessionTokens = issueSessionTokens(state, clock, {
+    userId: identity.user.id,
+    workspaceId: workspace.id,
+    accessKind: kind
+  });
+
+  if (writeLoginAudit && !identity.created) {
+    writeAudit(state, clock, {
+      action: "user.logged_in",
+      actorUserId: identity.user.id,
+      workspaceId: workspace.id,
+      targetType: "workspace",
+      targetId: workspace.id,
+      details: { kind }
+    });
+  }
+
+  return {
+    user: formatUser(identity.user),
+    workspace: formatWorkspace(state, workspace, membership.role),
+    authSessionId: sessionTokens.accessToken.sessionGroupId,
+    token: sessionTokens.accessToken.token,
+    tokenKind: sessionTokens.accessToken.kind,
+    refreshToken: sessionTokens.refreshToken.token,
+    created: identity.created
+  };
+}
+
+function listEmailAuthCodes(state) {
+  if (!Array.isArray(state.deviceCodes)) {
+    state.deviceCodes = [];
+  }
+  return state.deviceCodes;
+}
+
+function pruneEmailAuthCodes(state, clock) {
+  const cutoff = nowMs(clock);
+  state.deviceCodes = listEmailAuthCodes(state).filter((entry) => {
+    if (entry.kind !== "email_auth") {
+      return true;
+    }
+    if (entry.status !== "pending") {
+      return false;
+    }
+    return new Date(entry.expiresAt).getTime() > cutoff;
+  });
+  return state.deviceCodes;
 }
 
 function createToken(state, clock, { userId, workspaceId, kind, sessionId = null, grantKind = null, sessionGroupId = null }) {
@@ -2310,59 +2422,14 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
 
     async registerUser({ email, name }) {
       return transact(AUTH_SCOPE, (state) => {
-        ensure(email, "Email is required");
-        let user = findUserByEmail(state, email);
-        if (!user) {
-          user = {
-            id: createId("usr"),
-            email,
-            name: name || defaultNameFromEmail(email),
-            billing: null,
-            recoveryCodes: [],
-            createdAt: nowIso(clock)
-          };
-          state.users.push(user);
-
-          const workspace = {
-            id: createId("ws"),
-            name: `${user.name}'s Workspace`,
-            ownerUserId: user.id,
-            plan: "free",
-            createdAt: nowIso(clock)
-          };
-          state.workspaces.push(workspace);
-          state.memberships.push({
-            workspaceId: workspace.id,
-            userId: user.id,
-            role: "owner",
-            createdAt: nowIso(clock)
-          });
-          writeAudit(state, clock, {
-            action: "user.registered",
-            actorUserId: user.id,
-            workspaceId: workspace.id,
-            targetType: "user",
-            targetId: user.id,
-            details: { email: user.email }
-          });
-        }
-
-        const workspace = getUserWorkspace(state, user.id);
-        ensure(workspace, "Workspace not found", 500);
-        const sessionTokens = issueSessionTokens(state, clock, {
-          userId: user.id,
-          workspaceId: workspace.id,
-          accessKind: "browser"
+        const result = issueUserSession(state, clock, {
+          email,
+          name,
+          kind: "browser",
+          writeLoginAudit: false
         });
-
-        return {
-          user: formatUser(user),
-          workspace: formatWorkspace(state, workspace, "owner"),
-          authSessionId: sessionTokens.accessToken.sessionGroupId,
-          token: sessionTokens.accessToken.token,
-          tokenKind: sessionTokens.accessToken.kind,
-          refreshToken: sessionTokens.refreshToken.token
-        };
+        delete result.created;
+        return result;
       });
     },
 
@@ -2371,36 +2438,94 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
         ensure(email, "Email is required");
         const user = findUserByEmail(state, email);
         ensure(user, "User not found", 404);
-        const workspace = workspaceId
-          ? state.workspaces.find((entry) => entry.id === workspaceId)
-          : getUserWorkspace(state, user.id);
-        ensure(workspace, "Workspace not found", 404);
-        const membership = getMembership(state, user.id, workspace.id);
-        ensure(membership, "Unauthorized workspace", 403);
-
-        const sessionTokens = issueSessionTokens(state, clock, {
-          userId: user.id,
-          workspaceId: workspace.id,
-          accessKind: kind
+        const result = issueUserSession(state, clock, {
+          email,
+          kind,
+          workspaceId,
+          writeLoginAudit: true
         });
+        delete result.created;
+        return result;
+      });
+    },
 
-        writeAudit(state, clock, {
-          action: "user.logged_in",
-          actorUserId: user.id,
-          workspaceId: workspace.id,
-          targetType: "workspace",
-          targetId: workspace.id,
-          details: { kind }
-        });
-
-        return {
-          user: formatUser(user),
-          workspace: formatWorkspace(state, workspace, membership.role),
-          authSessionId: sessionTokens.accessToken.sessionGroupId,
-          token: sessionTokens.accessToken.token,
-          tokenKind: sessionTokens.accessToken.kind,
-          refreshToken: sessionTokens.refreshToken.token
+    async requestEmailAuthCode({ email, name = null, kind = "browser", workspaceId = null }: any = {}) {
+      return transact(AUTH_DEVICE_SCOPE, (state) => {
+        ensure(email, "Email is required");
+        pruneEmailAuthCodes(state, clock);
+        state.deviceCodes = state.deviceCodes.filter(
+          (entry) =>
+            !(
+              entry.kind === "email_auth" &&
+              entry.status === "pending" &&
+              entry.email?.toLowerCase() === String(email).toLowerCase()
+            )
+        );
+        const record = {
+          code: createEmailAuthCode(),
+          kind: "email_auth",
+          email,
+          name: name || null,
+          accessKind: kind,
+          requestedWorkspaceId: workspaceId || null,
+          userId: null,
+          workspaceId: null,
+          status: "pending",
+          createdAt: nowIso(clock),
+          expiresAt: futureIso(clock, EMAIL_AUTH_CODE_TTL_MS)
         };
+        state.deviceCodes.push(record);
+        writeAudit(state, clock, {
+          action: "auth.email_code_requested",
+          actorUserId: null,
+          workspaceId: null,
+          targetType: "auth_email_code",
+          targetId: record.email,
+          details: {
+            kind: record.accessKind
+          }
+        });
+        return {
+          email: record.email,
+          code: record.code,
+          expiresAt: record.expiresAt
+        };
+      });
+    },
+
+    async verifyEmailAuthCode({ email, code }: any = {}) {
+      return transact(AUTH_DEVICE_SCOPE, (state) => {
+        ensure(email, "Email is required");
+        ensure(code, "Verification code is required");
+        const pending = pruneEmailAuthCodes(state, clock).find(
+          (entry) =>
+            entry.kind === "email_auth" &&
+            entry.status === "pending" &&
+            entry.email?.toLowerCase() === String(email).toLowerCase() &&
+            entry.code === String(code)
+        );
+        ensure(pending, "Verification code is invalid or expired", 401);
+        pending.status = "approved";
+        const result = issueUserSession(state, clock, {
+          email,
+          name: pending.name || null,
+          kind: pending.accessKind || "browser",
+          workspaceId: pending.requestedWorkspaceId || null,
+          writeLoginAudit: true
+        });
+        writeAudit(state, clock, {
+          action: "auth.email_code_verified",
+          actorUserId: result.user.id,
+          workspaceId: result.workspace.id,
+          targetType: "user",
+          targetId: result.user.id,
+          details: {
+            created: result.created,
+            kind: pending.accessKind || "browser"
+          }
+        });
+        delete result.created;
+        return result;
       });
     },
 

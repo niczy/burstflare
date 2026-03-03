@@ -240,6 +240,27 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   });
   assert.equal(strictAllowed.response.status, 200);
 
+  const emailCode = await requestJson(turnstileApp, "/api/auth/email-code/request", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "smoke_test@burstflare.dev",
+      name: "Smoke Test"
+    })
+  });
+  assert.equal(emailCode.response.status, 200);
+  assert.equal(emailCode.data.delivery.mode, "inline");
+  assert.match(emailCode.data.code, /^[0-9]{6}$/);
+
+  const emailVerified = await requestJson(turnstileApp, "/api/auth/email-code/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "smoke_test@burstflare.dev",
+      code: emailCode.data.code
+    })
+  });
+  assert.equal(emailVerified.response.status, 200);
+  assert.ok(emailVerified.data.token);
+
   const invalidJson = await requestJson(app, "/api/auth/register", {
     method: "POST",
     body: "{"
