@@ -176,17 +176,17 @@ async function waitForHealthy(baseUrl: string): Promise<any> {
 
 async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "https://burstflare.dev";
-  const templateId = getArg("--template-id") || process.env.BURSTFLARE_LIVE_SMOKE_TEMPLATE_ID || "";
+  const instanceId = getArg("--instance-id") || process.env.BURSTFLARE_LIVE_SMOKE_INSTANCE_ID || "";
   const providedToken = getArg("--token") || process.env.BURSTFLARE_LIVE_SMOKE_TOKEN || "";
   const refreshToken = getArg("--refresh-token") || process.env.BURSTFLARE_LIVE_SMOKE_REFRESH_TOKEN || "";
 
-  if (!templateId || (!providedToken && !refreshToken)) {
+  if (!instanceId || (!providedToken && !refreshToken)) {
     process.stdout.write(
       `${JSON.stringify(
         {
           ok: true,
           skipped: true,
-          reason: "Missing BURSTFLARE_LIVE_SMOKE_TEMPLATE_ID and auth token/refresh token"
+          reason: "Missing BURSTFLARE_LIVE_SMOKE_INSTANCE_ID and auth token/refresh token"
         },
         null,
         2
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
       method: "POST",
       body: JSON.stringify({
         name: sessionName,
-        templateId
+        instanceId
       })
     });
     sessionId = created?.session?.id || null;
@@ -281,7 +281,7 @@ async function main(): Promise<void> {
           baseUrl,
           sessionId,
           sessionName,
-          templateId,
+          instanceId,
           containersEnabled: Boolean(health?.runtime?.containersEnabled),
           sshOutput: output
         },

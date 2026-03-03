@@ -225,49 +225,36 @@ async function main(): Promise<void> {
     const deviceExchange = runCli(["auth", "device-exchange", "--code", deviceCode], configAux);
     assert(deviceExchange.token, "device exchange failed");
 
-    const template = unwrap(
-      runCli(["template", "create", "npm-cli-smoke-template", "--description", "Published npm CLI smoke"]),
-      "template"
+    const instance = unwrap(
+      runCli([
+        "instance",
+        "create",
+        "npm-cli-smoke-instance",
+        "--description",
+        "Published npm CLI smoke",
+        "--image",
+        "node:20"
+      ]),
+      "instance"
     );
-    assert(template.id, "template create failed");
+    assert(instance.id, "instance create failed");
 
-    const uploadResult = runCli([
-      "template",
-      "upload",
-      template.id,
-      "--version",
-      "1.0.0",
-      "--notes",
-      "npm install smoke",
-      "--persisted-paths",
-      "/workspace"
-    ]);
-    const uploadedVersion = unwrap(uploadResult, "templateVersion");
-    const uploadBuild = unwrap(uploadResult, "build");
-    assert(uploadedVersion?.id && uploadBuild?.id, "template upload failed");
+    const inspect = runCli(["instance", "inspect", instance.id]);
+    assert(unwrap(inspect, "instance").id === instance.id, "instance inspect failed");
 
-    const builds = unwrap(runCli(["builds"]), "builds");
-    assert(Array.isArray(builds) && builds.some((entry) => entry.id === uploadBuild.id), "build list missing new build");
-
-    runCli(["build", "process"]);
-    const buildLog = runCli(["build", "log", uploadBuild.id]);
+    const listedInstances = unwrap(runCli(["instances"]), "instances");
     assert(
-      (typeof buildLog === "string" && buildLog.length > 0) ||
-        (buildLog && typeof buildLog.log === "string" && buildLog.log.length > 0),
-      "build log did not return content"
+      Array.isArray(listedInstances) && listedInstances.some((entry) => entry.id === instance.id),
+      "instance list missing created instance"
     );
-    const buildArtifact = runCli(["build", "artifact", uploadBuild.id]);
-    assert(buildArtifact.imageReference && buildArtifact.imageDigest, "build artifact did not return image metadata");
 
-    const inspect = runCli(["template", "inspect", template.id]);
-    assert(unwrap(inspect, "template").id === template.id, "template inspect failed");
+    const updatedInstance = unwrap(
+      runCli(["instance", "edit", instance.id, "--image", "node:22", "--description", "Updated npm CLI smoke"]),
+      "instance"
+    );
+    assert(updatedInstance.image === "node:22", "instance edit failed");
 
-    const release = unwrap(runCli(["template", "promote", template.id, uploadedVersion.id]), "release");
-    assert(release.id, "template promote failed");
-    const releases = unwrap(runCli(["releases"]), "releases");
-    assert(Array.isArray(releases) && releases.some((entry) => entry.id === release.id), "release list missing promoted release");
-
-    const session = unwrap(runCli(["session", "up", "npm-cli-smoke-session", "--template", template.id]), "session");
+    const session = unwrap(runCli(["session", "up", "npm-cli-smoke-session", "--instance", instance.id]), "session");
     assert(session.id, "session up failed");
 
     const sessionStatus = unwrap(runCli(["session", "status", session.id]), "session");
@@ -306,19 +293,11 @@ async function main(): Promise<void> {
     const snapshots = unwrap(runCli(["snapshot", "list", session.id]), "snapshots");
     assert(Array.isArray(snapshots) && snapshots.some((entry) => entry.id === snapshot.id), "snapshot list missing saved snapshot");
 
-    const snapshotOutput = join(outputDir, "snapshot-restored.bin");
-    const snapshotGet = runCli(["snapshot", "get", session.id, snapshot.id, "--output", snapshotOutput]);
-    assert(typeof snapshotGet.bytes === "number" && snapshotGet.bytes > 0, "snapshot get did not return byte metadata");
-    assert(await readFile(snapshotOutput, "utf8") === "snapshot-content", "snapshot get returned the wrong file contents");
-
-    const snapshotRestore = runCli(["snapshot", "restore", session.id, snapshot.id]);
-    assert(snapshotRestore?.session?.lastRestoredSnapshotId === snapshot.id, "snapshot restore failed");
-
     const usage = unwrap(runCli(["usage"]), "usage");
     assert(typeof usage.runtimeMinutes === "number" && usage.inventory, "usage did not return usage details");
 
     const report = unwrap(runCli(["report"]), "report");
-    assert(typeof report.releases === "number", "report did not return counters");
+    assert(typeof report.sessionsTotal === "number", "report did not return counters");
 
     const exportPath = join(outputDir, "workspace-export.json");
     const exported = runCli(["export", "--output", exportPath]);
@@ -330,11 +309,6 @@ async function main(): Promise<void> {
     assert(typeof reconcilePreview.sleptSessions === "number", "reconcile preview did not return counters");
     const sleepRunning = runCli(["reconcile", "sleep-running"]);
     assert(typeof (sleepRunning.sleptSessions ?? sleepRunning.processed) === "number", "reconcile sleep-running failed");
-    const recoverBuilds = runCli(["reconcile", "recover-builds"]);
-    assert(
-      typeof (recoverBuilds.recoveredStuckBuilds ?? recoverBuilds.recoveredBuilds ?? recoverBuilds.recovered) === "number",
-      "reconcile recover-builds failed"
-    );
     const purgeSleeping = runCli(["reconcile", "purge-sleeping"]);
     assert(
       typeof (purgeSleeping.purgedStaleSleepingSessions ?? purgeSleeping.deleted) === "number",
@@ -345,14 +319,10 @@ async function main(): Promise<void> {
     runCli(["session", "restart", session.id]);
     runCli(["session", "stop", session.id]);
 
-    runCli(["snapshot", "delete", session.id, snapshot.id]);
     runCli(["session", "delete", session.id]);
     const purgeDeleted = runCli(["reconcile", "purge-deleted"]);
     assert(typeof (purgeDeleted.purgedDeletedSessions ?? purgeDeleted.deleted) === "number", "reconcile purge-deleted failed");
-
-    runCli(["template", "archive", template.id]);
-    runCli(["template", "restore", template.id]);
-    runCli(["template", "delete", template.id]);
+    runCli(["instance", "delete", instance.id]);
 
     runCli(["workspace", "delete-secret", "API_KEY"]);
     const secretsAfterDelete = unwrap(runCli(["workspace", "secrets"]), "secrets");
@@ -371,7 +341,7 @@ async function main(): Promise<void> {
       installSpec,
       baseUrl,
       workspaceId: workspace.id,
-      templateId: template.id,
+      instanceId: instance.id,
       sessionId: session.id
     };
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);

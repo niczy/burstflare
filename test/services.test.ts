@@ -122,6 +122,8 @@ test("service supports instance CRUD with write-only secrets", async () => {
     image: "node:20",
     dockerfilePath: "./Dockerfile",
     dockerContext: ".",
+    persistedPaths: ["/workspace", "/home/flare/.cache"],
+    sleepTtlSeconds: 60,
     envVars: {
       NODE_ENV: "development"
     },
@@ -131,6 +133,8 @@ test("service supports instance CRUD with write-only secrets", async () => {
   });
   assert.equal(created.instance.name, "Base Node");
   assert.equal(created.instance.image, "node:20");
+  assert.deepEqual(created.instance.persistedPaths, ["/workspace", "/home/flare/.cache"]);
+  assert.equal(created.instance.sleepTtlSeconds, 60);
   assert.deepEqual(created.instance.envVars, {
     NODE_ENV: "development"
   });
@@ -144,6 +148,8 @@ test("service supports instance CRUD with write-only secrets", async () => {
 
   const updated = await service.updateInstance(owner.token, created.instance.id, {
     image: "node:22",
+    persistedPaths: ["/workspace", "/home/flare"],
+    sleepTtlSeconds: 120,
     envVars: {
       NODE_ENV: "production",
       DEBUG: "0"
@@ -154,6 +160,8 @@ test("service supports instance CRUD with write-only secrets", async () => {
     }
   });
   assert.equal(updated.instance.image, "node:22");
+  assert.deepEqual(updated.instance.persistedPaths, ["/workspace", "/home/flare"]);
+  assert.equal(updated.instance.sleepTtlSeconds, 120);
   assert.deepEqual(updated.instance.envVars, {
     NODE_ENV: "production",
     DEBUG: "0"
@@ -164,6 +172,8 @@ test("service supports instance CRUD with write-only secrets", async () => {
   const fetched = await service.getInstance(owner.token, created.instance.id);
   assert.equal(fetched.instance.id, created.instance.id);
   assert.equal(fetched.instance.image, "node:22");
+  assert.deepEqual(fetched.instance.persistedPaths, ["/workspace", "/home/flare"]);
+  assert.equal(fetched.instance.sleepTtlSeconds, 120);
   assert.equal("secrets" in fetched.instance, false);
 
   const deleted = await service.deleteInstance(owner.token, created.instance.id);
@@ -190,7 +200,9 @@ test("service can create and operate on sessions owned by an instance", async ()
   });
   const instance = await service.createInstance(owner.token, {
     name: "Session Base",
-    image: "node:20"
+    image: "node:20",
+    persistedPaths: ["/workspace", "/home/flare"],
+    sleepTtlSeconds: 30
   });
 
   const created = await service.createSession(owner.token, {
@@ -200,6 +212,8 @@ test("service can create and operate on sessions owned by an instance", async ()
   assert.equal(created.session.instanceId, instance.instance.id);
   assert.equal(created.session.instanceName, "Session Base");
   assert.equal(created.session.templateId, null);
+  assert.deepEqual(created.session.persistedPaths, ["/workspace", "/home/flare"]);
+  assert.equal(created.session.sleepTtlSeconds, 30);
 
   const listed = await service.listSessions(owner.token);
   assert.equal(listed.sessions.length, 1);
@@ -1201,21 +1215,14 @@ test("service can persist runtime state from a durable-object-driven session tra
     email: "runtime-sync@example.com",
     name: "Runtime Sync"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "runtime-sync",
-    description: "Runtime sync template"
+    description: "Runtime sync instance",
+    image: "registry.cloudflare.com/example/runtime-sync:1.0.0"
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/runtime-sync:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
   const created = await service.createSession(owner.token, {
     name: "runtime-sync-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
 
   const started = await service.transitionSessionWithRuntime(owner.token, created.session.id, "start", async () => ({
@@ -1283,22 +1290,15 @@ test("service ignores stale runtime transitions that arrive after a newer runtim
     email: "runtime-stale@example.com",
     name: "Runtime Stale"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "runtime-stale",
-    description: "Runtime stale template"
+    description: "Runtime stale instance",
+    image: "registry.cloudflare.com/example/runtime-stale:1.0.0"
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/runtime-stale:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const created = await service.createSession(owner.token, {
     name: "runtime-stale-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
 
   const started = await service.transitionSessionWithRuntime(owner.token, created.session.id, "start", async () => ({
