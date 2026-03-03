@@ -1287,21 +1287,14 @@ test("runtime-aware reconcile stops running sessions and persists runtime state"
     email: "runtime-reconcile@example.com",
     name: "Runtime Reconcile"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "runtime-reconcile",
-    description: "Runtime reconcile template"
+    description: "Runtime reconcile instance",
+    image: "registry.cloudflare.com/example/runtime-reconcile:1.0.0"
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/runtime-reconcile:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
   const created = await service.createSession(owner.token, {
     name: "runtime-reconcile-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   await service.startSession(owner.token, created.session.id);
 
@@ -1381,22 +1374,15 @@ test("worker proxies runtime SSH websocket upgrades into the session container",
     email: "ssh-proxy@example.com",
     name: "SSH Proxy"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "ssh-proxy",
-    description: "Template for container proxy"
+    description: "Instance for container proxy",
+    image: "registry.cloudflare.com/test/ssh-proxy:1.0.0"
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/ssh-proxy:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const session = await service.createSession(owner.token, {
     name: "container-shell",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   await service.startSession(owner.token, session.session.id);
   await service.upsertSessionSshKey(owner.token, session.session.id, {
@@ -1466,22 +1452,15 @@ test("worker proxies browser terminal websocket upgrades into the session contai
     email: "terminal-proxy@example.com",
     name: "Terminal Proxy"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "terminal-proxy",
-    description: "Template for terminal proxy"
+    description: "Instance for terminal proxy",
+    image: "registry.cloudflare.com/test/terminal-proxy:1.0.0"
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/terminal-proxy:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const session = await service.createSession(owner.token, {
     name: "container-terminal",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   await service.startSession(owner.token, session.session.id);
   await service.upsertSessionSshKey(owner.token, session.session.id, {
@@ -1560,23 +1539,16 @@ test("worker proxies browser editor requests into the session container editor r
     email: "editor-proxy@example.com",
     name: "Editor Proxy"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "editor-proxy",
-    description: "Template for editor proxy"
+    description: "Instance for editor proxy",
+    image: "registry.cloudflare.com/test/editor-proxy:1.0.0",
+    persistedPaths: ["/workspace/project"]
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/editor-proxy:1.0.0",
-      persistedPaths: ["/workspace/project"]
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const session = await service.createSession(owner.token, {
     name: "container-editor",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
 
   const response = await app.fetch(
@@ -1682,23 +1654,16 @@ test("worker bootstraps runtime containers on start and records lifecycle hooks 
     email: "bootstrap-hooks@example.com",
     name: "Bootstrap Hooks"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "bootstrap-hooks",
-    description: "Template for lifecycle hook coverage"
+    description: "Instance for lifecycle hook coverage",
+    image: "registry.cloudflare.com/test/bootstrap-hooks:1.0.0",
+    persistedPaths: ["/workspace/project"]
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/bootstrap-hooks:1.0.0",
-      persistedPaths: ["/workspace/project"]
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const session = await service.createSession(owner.token, {
     name: "bootstrap-hooks-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
 
   const started = await requestJson(app, `/api/sessions/${session.session.id}/start`, {
@@ -1820,21 +1785,14 @@ test("worker coordinates session lifecycle through the session container durable
     email: "runtime-do@example.com",
     name: "Runtime DO"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "runtime-do",
-    description: "Runtime coordination template"
+    description: "Runtime coordination instance",
+    image: "registry.cloudflare.com/test/runtime-do:1.0.0"
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/runtime-do:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
   const createdSession = await service.createSession(owner.token, {
     name: "runtime-coordination",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   const sessionId = createdSession.session.id;
   const authHeaders = {
@@ -2035,23 +1993,16 @@ test("worker replays the latest snapshot into the container runtime on session s
     email: "runtime-restore@example.com",
     name: "Runtime Restore"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "runtime-restore",
-    description: "Runtime restore template"
+    description: "Runtime restore instance",
+    image: "registry.cloudflare.com/example/runtime-restore:1.0.0",
+    persistedPaths: ["/workspace/project"]
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/runtime-restore:1.0.0",
-      persistedPaths: ["/workspace/project"]
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const created = await service.createSession(owner.token, {
     name: "runtime-restore-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   const sessionId = created.session.id;
   const authHeaders = {
@@ -2161,23 +2112,16 @@ test("worker auto-captures snapshot content from a running container", async () 
     email: "runtime-autosave@example.com",
     name: "Runtime Autosave"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "runtime-autosave",
-    description: "Runtime autosave template"
+    description: "Runtime autosave instance",
+    image: "registry.cloudflare.com/example/runtime-autosave:1.0.0",
+    persistedPaths: ["/workspace/project"]
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/runtime-autosave:1.0.0",
-      persistedPaths: ["/workspace/project"]
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const created = await service.createSession(owner.token, {
     name: "runtime-autosave-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   const sessionId = created.session.id;
   const authHeaders = {
@@ -2254,22 +2198,15 @@ test("preview route rehydrates the latest snapshot before proxying", async () =>
     email: "preview-rehydrate@example.com",
     name: "Preview Rehydrate"
   });
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "preview-rehydrate",
-    description: "Preview rehydrate template"
+    description: "Preview rehydrate instance",
+    image: "registry.cloudflare.com/example/preview-rehydrate:1.0.0"
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/preview-rehydrate:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const created = await service.createSession(owner.token, {
     name: "preview-rehydrate-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   await service.startSession(owner.token, created.session.id);
 

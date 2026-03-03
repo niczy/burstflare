@@ -335,6 +335,33 @@ function normalizeInstanceSecrets(value) {
   return secrets;
 }
 
+function normalizePersistedPaths(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  ensure(Array.isArray(value), "Persisted paths must be an array");
+  ensure(value.length <= 8, "Persisted paths exceed limit");
+  const persistedPaths: string[] = [];
+  for (const entry of value) {
+    ensure(typeof entry === "string" && entry.startsWith("/"), "Persisted paths must be absolute");
+    persistedPaths.push(entry);
+  }
+  return persistedPaths;
+}
+
+function normalizeSleepTtlSeconds(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value == null) {
+    return null;
+  }
+  ensure(Number.isInteger(value), "sleepTtlSeconds must be an integer");
+  ensure(value >= 1, "sleepTtlSeconds must be at least 1");
+  ensure(value <= 60 * 60 * 24 * 7, "sleepTtlSeconds exceeds limit");
+  return value;
+}
+
 function getWorkspaceRuntimeSecrets(workspace) {
   if (!Array.isArray(workspace.runtimeSecrets)) {
     workspace.runtimeSecrets = [];
@@ -1168,6 +1195,7 @@ function formatInstance(instance) {
   return {
     ...baseInstance,
     envVars: { ...(instance.envVars || {}) },
+    persistedPaths: Array.isArray(instance.persistedPaths) ? [...instance.persistedPaths] : [],
     secretNames,
     secretCount: secretNames.length
   };
@@ -3509,7 +3537,17 @@ export function createBurstFlareService(options: any = {}) {
 
     async createInstance(
       token,
-      { name, description = "", image, dockerfilePath = null, dockerContext = null, envVars = {}, secrets = {} }
+      {
+        name,
+        description = "",
+        image,
+        dockerfilePath = null,
+        dockerContext = null,
+        envVars = {},
+        secrets = {},
+        persistedPaths = [],
+        sleepTtlSeconds = null
+      }
     ) {
       return transact(INSTANCE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
@@ -3536,6 +3574,8 @@ export function createBurstFlareService(options: any = {}) {
           dockerContext: dockerContext == null ? null : String(dockerContext),
           envVars: normalizeInstanceEnvVars(envVars),
           secrets: normalizeInstanceSecrets(secrets),
+          persistedPaths: normalizePersistedPaths(persistedPaths) || [],
+          sleepTtlSeconds: normalizeSleepTtlSeconds(sleepTtlSeconds),
           createdAt: timestamp,
           updatedAt: timestamp
         };
@@ -3614,6 +3654,12 @@ export function createBurstFlareService(options: any = {}) {
         }
         if (Object.prototype.hasOwnProperty.call(updates, "secrets")) {
           auth.instance.secrets = normalizeInstanceSecrets(updates.secrets);
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "persistedPaths")) {
+          auth.instance.persistedPaths = normalizePersistedPaths(updates.persistedPaths) || [];
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "sleepTtlSeconds")) {
+          auth.instance.sleepTtlSeconds = normalizeSleepTtlSeconds(updates.sleepTtlSeconds);
         }
         auth.instance.updatedAt = nowIso(clock);
         writeAudit(state, clock, {
@@ -4430,8 +4476,8 @@ export function createBurstFlareService(options: any = {}) {
           runtimeVersion: 0,
           runtimeOperationId: null,
           runtimeUpdatedAt: null,
-          persistedPaths: [...(activeVersion?.manifest?.persistedPaths || [])],
-          sleepTtlSeconds: activeVersion?.manifest?.sleepTtlSeconds || null,
+          persistedPaths: instance ? [...(instance.persistedPaths || [])] : [...(activeVersion?.manifest?.persistedPaths || [])],
+          sleepTtlSeconds: instance ? instance.sleepTtlSeconds || null : activeVersion?.manifest?.sleepTtlSeconds || null,
           sshAuthorizedKeys: [],
           previewUrl: null
         };

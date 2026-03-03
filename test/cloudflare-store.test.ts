@@ -452,6 +452,8 @@ test("cloudflare store can persist scoped instance rows", async () => {
     image: "node:20",
     dockerfilePath: "./Dockerfile",
     dockerContext: ".",
+    persistedPaths: ["/workspace", "/home/flare"],
+    sleepTtlSeconds: 60,
     envVars: {
       NODE_ENV: "development"
     },
@@ -468,5 +470,7 @@ test("cloudflare store can persist scoped instance rows", async () => {
   assert.equal(reloaded.instances.length, 1);
   assert.equal(reloaded.instances[0].id, "ins_1");
   assert.equal(reloaded.instances[0].image, "node:20");
+  assert.deepEqual(reloaded.instances[0].persistedPaths, ["/workspace", "/home/flare"]);
+  assert.equal(reloaded.instances[0].sleepTtlSeconds, 60);
   assert.equal(reloaded.instances[0].envVars.NODE_ENV, "development");
 });
