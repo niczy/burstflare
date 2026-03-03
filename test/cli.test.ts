@@ -721,7 +721,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
       "PreferredAuthentications=publickey",
       "-p",
       "4123",
-      "dev@127.0.0.1"
+      "flare@127.0.0.1"
     ]);
     assert.equal(spawned.options.stdio, "inherit");
     assert.equal(tunnelClosed, true);
@@ -751,7 +751,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     assert.equal(code, 0);
     const printedSsh = JSON.parse(stdout.data.trim());
     assert.match(printedSsh.sshUrl, new RegExp(`^ws://local/runtime/sessions/${sessionId}/ssh\\?token=runtime_`));
-    assert.equal(printedSsh.sshUser, "dev");
+    assert.equal(printedSsh.sshUser, "flare");
     assert.equal(printedSsh.sshPrivateKeyPath, path.join(path.dirname(configPath), "ssh", `${sessionId}.ed25519`));
     assert.match(printedSsh.localCommand, /-i .*\.ed25519/);
     assert.match(printedSsh.localCommand, /<local-port>/);

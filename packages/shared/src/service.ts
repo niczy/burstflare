@@ -4966,10 +4966,10 @@ export function createBurstFlareService(options: any = {}) {
         });
         return {
           token: runtimeToken.token,
-          sshUser: "dev",
+          sshUser: "flare",
           sshCommand:
             "ssh -i <local-key-path> -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null " +
-            "-o IdentitiesOnly=yes -o PreferredAuthentications=publickey -p <local-port> dev@127.0.0.1",
+            "-o IdentitiesOnly=yes -o PreferredAuthentications=publickey -p <local-port> flare@127.0.0.1",
           sshKeyCount: listSessionAuthorizedPublicKeys(auth.session).length
         };
       });

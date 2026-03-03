@@ -141,7 +141,7 @@ function createSmokeSshServer() {
     },
     (client) => {
       client.on("authentication", (context) => {
-        if (context.method === "password" && context.username === "dev" && context.password === "burstflare") {
+        if (context.method === "password" && context.username === "flare" && context.password === "burstflare") {
           context.accept();
           return;
         }
@@ -154,7 +154,7 @@ function createSmokeSshServer() {
           session.on("exec", (acceptExec, _rejectExec, info) => {
             const stream = acceptExec();
             if (info.command === "whoami") {
-              stream.write("dev\n");
+              stream.write("flare\n");
               stream.exit(0);
               stream.end();
               return;
@@ -278,7 +278,7 @@ async function runSshCommand(port: number, auth: Record<string, unknown> = {}): 
       .connect({
         host: "127.0.0.1",
         port,
-        username: "dev",
+        username: "flare",
         readyTimeout: 5000,
         ...auth
       });
@@ -350,7 +350,7 @@ async function runContainerSshSmoke() {
         "PreferredAuthentications=publickey",
         "-p",
         String(tunnel.port),
-        "dev@127.0.0.1",
+        "flare@127.0.0.1",
         "whoami"
       ],
       {
@@ -358,7 +358,7 @@ async function runContainerSshSmoke() {
       }
     );
     const output = sshResult.stdout.trim();
-    assert(output === "dev", `Expected container ssh to return 'dev', received '${output}'`);
+    assert(output === "flare", `Expected container ssh to return 'flare', received '${output}'`);
     return {
       ok: true,
       skipped: false,
@@ -393,7 +393,7 @@ async function main(): Promise<void> {
     const output = await runSshCommand(tunnel.port, {
       password: "burstflare"
     });
-    assert(output === "dev", `Expected ssh to return 'dev', received '${output}'`);
+    assert(output === "flare", `Expected ssh to return 'flare', received '${output}'`);
 
     const container = await runContainerSshSmoke();
 
