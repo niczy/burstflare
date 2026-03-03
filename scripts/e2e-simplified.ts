@@ -21,10 +21,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getTurnstileToken(): string | null {
-  return getArg("--turnstile-token") || process.env.BURSTFLARE_TURNSTILE_TOKEN || process.env.TURNSTILE_TOKEN || null;
-}
-
 function assertCondition(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
@@ -165,41 +161,41 @@ async function deleteIfPresent(baseUrl: string, path: string, token: string): Pr
   }
 }
 
-async function main(): Promise<void> {
-  const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
-  const turnstileToken = getTurnstileToken();
-  const health = await waitForHealthy(baseUrl);
-  const runtimeEnabled = Boolean(health.runtime?.containersEnabled);
-
-  if (health.runtime?.turnstileEnabled && !turnstileToken) {
-    const homepage = await requestText(baseUrl, "/");
-    if (!homepage.includes("BurstFlare") || !homepage.includes("Instances first.")) {
-      throw new Error("Frontend shell did not render expected simplified markup");
-    }
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          baseUrl,
-          limited: true,
-          reason: "Turnstile is enabled; pass --turnstile-token for authenticated simplified E2E coverage",
-          publicChecks: ["health", "homepage"]
-        },
-        null,
-        2
-      )}\n`
-    );
-    return;
-  }
-
-  const email = `e2e-simplified-${Date.now()}@example.com`;
-  const register = await requestJson(baseUrl, "/api/auth/register", {
+async function signInWithEmailCode(baseUrl: string, email: string, name: string): Promise<any> {
+  const delivery = await requestJson(baseUrl, "/api/auth/email-code/request", {
     method: "POST",
     body: JSON.stringify({
       email,
-      name: "Simplified E2E User",
-      ...(turnstileToken ? { turnstileToken } : {})
+      name,
+      kind: "browser"
     })
   });
+  if (!delivery.code) {
+    throw new Error(`Email code was not exposed for ${email}`);
+  }
+  return requestJson(baseUrl, "/api/auth/email-code/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      code: delivery.code
+    })
+  });
+}
+
+async function main(): Promise<void> {
+  const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
+  const health = await waitForHealthy(baseUrl);
+  const runtimeEnabled = Boolean(health.runtime?.containersEnabled);
+  const homepage = await requestText(baseUrl, "/");
+  if (!homepage.includes("BurstFlare") || !homepage.includes('rel="modulepreload"')) {
+    throw new Error("Frontend shell did not render expected simplified SSR markup");
+  }
+
+  const email =
+    getArg("--email") ||
+    process.env.BURSTFLARE_SMOKE_EMAIL ||
+    `smoke_test+e2e-${Date.now()}@burstflare.dev`;
+  const register = await signInWithEmailCode(baseUrl, email, "Simplified E2E User");
   const headers = {
     authorization: `Bearer ${register.token}`
   };
@@ -209,14 +205,7 @@ async function main(): Promise<void> {
   });
   assertCondition(identity.user?.email === email, "Authenticated identity did not match the registered user");
 
-  const secondLogin = await requestJson(baseUrl, "/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({
-      email,
-      kind: "browser",
-      ...(turnstileToken ? { turnstileToken } : {})
-    })
-  });
+  const secondLogin = await signInWithEmailCode(baseUrl, email, "Simplified E2E User");
   assertCondition(secondLogin.authSessionId, "Second login did not return an auth session id");
 
   const authSessions = await requestJson(baseUrl, "/api/auth/sessions", {

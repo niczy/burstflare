@@ -21,10 +21,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getTurnstileToken(): string | null {
-  return getArg("--turnstile-token") || process.env.BURSTFLARE_TURNSTILE_TOKEN || process.env.TURNSTILE_TOKEN || null;
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function requestJson(baseUrl: string, path: string, options: RequestOptions = {}): Promise<any> {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -78,40 +74,40 @@ async function waitForHealthy(baseUrl: string): Promise<any> {
   throw lastError || new Error("Health check did not become ready");
 }
 
-async function main(): Promise<void> {
-  const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
-  const turnstileToken = getTurnstileToken();
-  const health = await waitForHealthy(baseUrl);
-
-  if (health.runtime?.turnstileEnabled && !turnstileToken) {
-    const homepage = await requestText(baseUrl, "/");
-    if (!homepage.includes("BurstFlare") || !homepage.includes('type="module"')) {
-      throw new Error("Frontend shell did not render expected vinext markup");
-    }
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          baseUrl,
-          limited: true,
-          reason: "Turnstile is enabled; pass --turnstile-token for authenticated instance validation",
-          publicChecks: ["health", "homepage"]
-        },
-        null,
-        2
-      )}\n`
-    );
-    return;
-  }
-
-  const email = `instance-validate-${Date.now()}@example.com`;
-  const register = await requestJson(baseUrl, "/api/auth/register", {
+async function signInWithEmailCode(baseUrl: string, email: string, name: string): Promise<any> {
+  const delivery = await requestJson(baseUrl, "/api/auth/email-code/request", {
     method: "POST",
     body: JSON.stringify({
       email,
-      name: "Instance Validator",
-      ...(turnstileToken ? { turnstileToken } : {})
+      name,
+      kind: "browser"
     })
   });
+  if (!delivery.code) {
+    throw new Error(`Email code was not exposed for ${email}`);
+  }
+  return requestJson(baseUrl, "/api/auth/email-code/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      code: delivery.code
+    })
+  });
+}
+
+async function main(): Promise<void> {
+  const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
+  await waitForHealthy(baseUrl);
+  const homepage = await requestText(baseUrl, "/");
+  if (!homepage.includes("BurstFlare") || !homepage.includes('rel="modulepreload"')) {
+    throw new Error("Frontend shell did not render expected simplified SSR markup");
+  }
+
+  const email =
+    getArg("--email") ||
+    process.env.BURSTFLARE_SMOKE_EMAIL ||
+    `smoke_test+instance-${Date.now()}@burstflare.dev`;
+  const register = await signInWithEmailCode(baseUrl, email, "Instance Validator");
   const headers = {
     authorization: `Bearer ${register.token}`
   };

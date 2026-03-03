@@ -210,6 +210,41 @@ test("service supports instance CRUD with write-only secrets", async () => {
   assert.deepEqual(empty.instances, []);
 });
 
+test("service issues and verifies email auth codes", async () => {
+  let tick = Date.parse("2026-03-03T00:00:00.000Z");
+  const service = createBurstFlareService({
+    store: createMemoryStore(),
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const requested = await service.requestEmailAuthCode({
+    email: "smoke_test@burstflare.dev",
+    name: "Smoke Test"
+  });
+  assert.equal(requested.email, "smoke_test@burstflare.dev");
+  assert.match(requested.code, /^[0-9]{6}$/);
+
+  const verified = await service.verifyEmailAuthCode({
+    email: "smoke_test@burstflare.dev",
+    code: requested.code
+  });
+  assert.equal(verified.user.email, "smoke_test@burstflare.dev");
+  assert.equal(verified.workspace.plan, "free");
+  assert.ok(verified.token);
+
+  await assert.rejects(
+    () =>
+      service.verifyEmailAuthCode({
+        email: "smoke_test@burstflare.dev",
+        code: requested.code
+      }),
+    /Verification code is invalid or expired/
+  );
+});
+
 test("service can persist instance common state", async () => {
   let tick = Date.parse("2026-03-03T00:00:00.000Z");
   const objects = createObjectStore();
