@@ -93,54 +93,6 @@ export const TABLES: TableDefinition[] = [
     indexes: ["user_id", "name", "image"]
   },
   {
-    source: "templates",
-    table: "bf_templates",
-    keyOf: (row) => row.id,
-    columns: [
-      { name: "workspace_id", field: "workspaceId" },
-      { name: "active_version_id", field: "activeVersionId" },
-      { name: "archived_at", field: "archivedAt" },
-      { name: "created_by_user_id", field: "createdByUserId" }
-    ],
-    indexes: ["workspace_id", "active_version_id", "archived_at"]
-  },
-  {
-    source: "templateVersions",
-    table: "bf_template_versions",
-    keyOf: (row) => row.id,
-    columns: [
-      { name: "template_id", field: "templateId" },
-      { name: "version", field: "version" },
-      { name: "status", field: "status" },
-      { name: "created_at", field: "createdAt" }
-    ],
-    indexes: ["template_id", "version", "status"]
-  },
-  {
-    source: "templateBuilds",
-    table: "bf_template_builds",
-    keyOf: (row) => row.id,
-    columns: [
-      { name: "template_version_id", field: "templateVersionId" },
-      { name: "status", field: "status" },
-      { name: "created_at", field: "createdAt" },
-      { name: "updated_at_field", field: "updatedAt" }
-    ],
-    indexes: ["template_version_id", "status"]
-  },
-  {
-    source: "bindingReleases",
-    table: "bf_binding_releases",
-    keyOf: (row) => row.id,
-    columns: [
-      { name: "workspace_id", field: "workspaceId" },
-      { name: "template_id", field: "templateId" },
-      { name: "template_version_id", field: "templateVersionId" },
-      { name: "created_at", field: "createdAt" }
-    ],
-    indexes: ["workspace_id", "template_id", "template_version_id"]
-  },
-  {
     source: "sessions",
     table: "bf_sessions",
     keyOf: (row) => row.id,

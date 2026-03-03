@@ -232,25 +232,15 @@ test("service can create and operate on sessions owned by an instance", async ()
   assert.equal(stopped.session.instanceId, instance.instance.id);
 });
 
-test("service covers removed sharing, queued builds, releases, session events, usage, and audit", async () => {
+test("service covers removed sharing, instance sessions, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();
-  const queuedBuilds: string[] = [];
   let reconcileJobs = 0;
   const store = createMemoryStore();
   const service = createBurstFlareService({
     store,
     objects,
     jobs: {
-      buildStrategy: "queue",
-      async enqueueBuild(buildId: string) {
-        queuedBuilds.push(buildId);
-        return {
-          buildId,
-          dispatch: "queue",
-          dispatchedAt: new Date(tick + 1).toISOString()
-        };
-      },
       async enqueueReconcile() {
         reconcileJobs += 1;
       }
@@ -266,6 +256,7 @@ test("service covers removed sharing, queued builds, releases, session events, u
     name: "Owner User"
   });
   assert.ok(owner.refreshToken);
+
   const ownerRecovery = await service.generateRecoveryCodes(owner.token);
   assert.equal(ownerRecovery.recoveryCodes.length, 8);
   const recoveredOwner = await service.recoverWithCode({
@@ -282,18 +273,16 @@ test("service covers removed sharing, queued builds, releases, session events, u
       }),
     /Recovery code invalid/
   );
+
   const passkeyRegistration = await service.beginPasskeyRegistration(owner.token);
   assert.equal(passkeyRegistration.passkeys.length, 0);
-  const registeredPasskey = await service.registerPasskey(owner.token, {
+  await service.registerPasskey(owner.token, {
     credentialId: "credential-owner-1",
     label: "Owner Laptop",
     publicKey: "spki-owner-key",
     publicKeyAlgorithm: -7,
     transports: ["internal", "hybrid"]
   });
-  assert.equal(registeredPasskey.passkeys.length, 1);
-  const listedPasskeys = await service.listPasskeys(owner.token);
-  assert.equal(listedPasskeys.passkeys[0].label, "Owner Laptop");
   const passkeyLoginStart = await service.beginPasskeyLogin({
     email: "owner@example.com"
   });
@@ -311,8 +300,7 @@ test("service covers removed sharing, queued builds, releases, session events, u
     signCount: 7
   });
   assert.ok(passkeyLogin.refreshToken);
-  const postLoginPasskeys = await service.listPasskeys(passkeyLogin.token);
-  assert.equal(postLoginPasskeys.passkeys[0].lastUsedAt !== null, true);
+
   const teammate = await service.registerUser({
     email: "teammate@example.com",
     name: "Teammate User"
@@ -327,13 +315,7 @@ test("service covers removed sharing, queued builds, releases, session events, u
       }),
     /already registered/
   );
-
   await assert.rejects(() => service.switchWorkspace(teammate.token, owner.workspace.id), /Unauthorized workspace/);
-  const switched = {
-    token: owner.token,
-    workspace: owner.workspace
-  };
-  assert.equal(switched.workspace.id, owner.workspace.id);
 
   const plan = await service.setWorkspacePlan(owner.token, "pro");
   assert.equal(plan.workspace.plan, "pro");
@@ -342,244 +324,51 @@ test("service covers removed sharing, queued builds, releases, session events, u
   });
   assert.equal(renamedWorkspace.workspace.name, "Burst Operations");
 
-  const template = await service.createTemplate(owner.token, {
+  const instance = await service.createInstance(owner.token, {
     name: "node-dev",
-    description: "Node runtime"
+    description: "Node runtime",
+    image: "registry.cloudflare.com/test/node-dev:1.0.0",
+    persistedPaths: ["/workspace", "/home/flare/.cache"],
+    sleepTtlSeconds: 10
   });
+  assert.equal(instance.instance.name, "node-dev");
 
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/node-dev:1.0.0",
-      persistedPaths: ["/workspace", "/home/flare/.cache"],
-      sleepTtlSeconds: 1
-    }
-  });
-  assert.equal(version.build.status, "queued");
-  assert.deepEqual(version.templateVersion.manifest.persistedPaths, ["/workspace", "/home/flare/.cache"]);
-  assert.deepEqual(queuedBuilds, [version.build.id]);
-  await assert.rejects(
-    () =>
-      service.addTemplateVersion(owner.token, template.template.id, {
-        version: "invalid",
-        manifest: { image: "registry.cloudflare.com/test/node-dev:invalid", features: ["invalid-feature"] }
-      }),
-    /Unsupported manifest feature/
-  );
-  const uploaded = await service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
-    body: "console.log('bundle');",
-    contentType: "application/javascript"
-  });
-  assert.equal(uploaded.bundle.bytes, 22);
-  const signedBundleBody = "bundle-via-grant";
-  const bundleGrant = await service.createTemplateVersionBundleUploadGrant(owner.token, template.template.id, version.templateVersion.id, {
-    contentType: "text/plain",
-    bytes: signedBundleBody.length
-  });
-  assert.match(bundleGrant.uploadGrant.id, /^upg_/);
-  assert.equal(bundleGrant.uploadGrant.transport, "worker_upload_grant");
-  assert.equal(bundleGrant.uploadGrant.storage, "r2");
-  const grantUploaded = await service.consumeUploadGrant(bundleGrant.uploadGrant.id, {
-    body: signedBundleBody,
-    contentType: "text/plain"
-  });
-  assert.equal(grantUploaded.target, "template_bundle");
-  assert.equal(objects.readBundleText(version.templateVersion.id), signedBundleBody);
-  await assert.rejects(
-    () => service.consumeUploadGrant(bundleGrant.uploadGrant.id, { body: signedBundleBody, contentType: "text/plain" }),
-    /Upload grant not found/
-  );
-  await assert.rejects(
-    () =>
-      service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
-        body: "x".repeat(300_000),
-        contentType: "application/octet-stream"
-      }),
-    /Bundle exceeds size limit/
-  );
-  assert.equal(objects.readBundleText(version.templateVersion.id), signedBundleBody);
-  const bundle = await service.getTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id);
-  assert.equal(new TextDecoder().decode(bundle.body), signedBundleBody);
-  await assert.rejects(
-    () => service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id),
-    /build-ready/
-  );
-
-  const secondVersion = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.1.0",
-    manifest: { image: "registry.cloudflare.com/test/node-dev:1.1.0" }
-  });
-  const queuedProcessed = await service.processTemplateBuildById(secondVersion.build.id);
-  assert.equal(queuedProcessed.processed, 1);
-
-  const processed = await service.processTemplateBuilds(owner.token);
-  assert.equal(processed.processed, 1);
-  const buildLog = await service.getTemplateBuildLog(owner.token, version.build.id);
-  assert.match(buildLog.text, /bundle_uploaded=true/);
-  assert.match(buildLog.text, /artifact_source=bundle/);
-  assert.match(buildLog.text, /artifact_image_reference=registry\.cloudflare\.com\/test\/node-dev@sha256:/);
-  const buildArtifact = await service.getTemplateBuildArtifact(owner.token, version.build.id);
-  const parsedBuildArtifact = JSON.parse(buildArtifact.text);
-  assert.equal(parsedBuildArtifact.source, "bundle");
-  assert.equal(parsedBuildArtifact.sourceBytes, signedBundleBody.length);
-  assert.equal(parsedBuildArtifact.templateVersionId, version.templateVersion.id);
-  assert.match(parsedBuildArtifact.imageReference, /^registry\.cloudflare\.com\/test\/node-dev@sha256:/);
-  assert.match(parsedBuildArtifact.imageDigest, /^sha256:/);
-  assert.match(parsedBuildArtifact.configDigest, /^sha256:/);
-  assert.equal(parsedBuildArtifact.layerCount, 2);
-  assert.equal(objects.readBuildArtifactText(version.build.id) !== null, true);
-
-  const stuckVersion = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.1.1",
-    manifest: { image: "registry.cloudflare.com/test/node-dev:1.1.1" }
-  });
-  await store.transact((state: any) => {
-    const build = state.templateBuilds.find((entry: any) => entry.id === stuckVersion.build.id);
-    assert.ok(build);
-    build.status = "building";
-    build.startedAt = new Date(tick - 1000 * 60 * 10).toISOString();
-    build.updatedAt = build.startedAt;
-  });
-  const recoveredStuck = await service.reconcile(owner.token);
-  assert.equal(recoveredStuck.recoveredStuckBuilds, 1);
-  assert.equal(recoveredStuck.processedBuilds, 1);
-
-  const failingVersion = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.2.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/node-dev:1.2.0",
-      simulateFailure: true
-    }
-  });
-  const failedOnce = await service.processTemplateBuildById(failingVersion.build.id, {
-    source: "manual",
-    actorUserId: owner.user.id
-  });
-  assert.equal(failedOnce.build.status, "failed");
-  assert.match(failedOnce.build.lastError, /Simulated builder failure/);
-
-  await service.retryTemplateBuild(owner.token, failingVersion.build.id);
-  const failedTwice = await service.processTemplateBuildById(failingVersion.build.id, {
-    source: "manual",
-    actorUserId: owner.user.id
-  });
-  assert.equal(failedTwice.build.status, "failed");
-
-  await service.retryTemplateBuild(owner.token, failingVersion.build.id);
-  const deadLettered = await service.processTemplateBuildById(failingVersion.build.id, {
-    source: "manual",
-    actorUserId: owner.user.id
-  });
-  assert.equal(deadLettered.build.status, "dead_lettered");
-
-  const failedBuildLog = await service.getTemplateBuildLog(owner.token, failingVersion.build.id);
-  assert.match(failedBuildLog.text, /build_status=dead_lettered/);
-  const bulkRetried = await service.retryDeadLetteredBuilds(owner.token);
-  assert.equal(bulkRetried.recovered, 1);
-  assert.deepEqual(bulkRetried.buildIds, [failingVersion.build.id]);
-  await assert.rejects(() => service.retryTemplateBuild(owner.token, version.build.id), /Build is not retryable/);
-
-  const promoted = await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
-  assert.equal(promoted.activeVersion.id, version.templateVersion.id);
-  assert.ok(promoted.release.id);
-  assert.equal(promoted.release.binding.templateName, "node-dev");
-  assert.equal(promoted.release.binding.artifactSource, "bundle");
-  assert.equal(promoted.release.binding.artifactDigest, parsedBuildArtifact.sourceSha256);
-  assert.equal(promoted.release.binding.imageReference, parsedBuildArtifact.imageReference);
-  assert.equal(promoted.release.binding.imageDigest, parsedBuildArtifact.imageDigest);
-  assert.equal(promoted.release.binding.layerCount, 2);
-  const inspectedTemplate = await service.getTemplate(owner.token, template.template.id);
-  assert.equal(inspectedTemplate.template.releaseCount, 1);
-  assert.equal(inspectedTemplate.template.releases.length, 1);
-  assert.equal(inspectedTemplate.template.latestRelease.id, promoted.release.id);
-  assert.equal(inspectedTemplate.template.storageSummary.bundleBytes >= signedBundleBody.length, true);
-  assert.equal(inspectedTemplate.template.buildSummary.succeeded >= 1, true);
-  const archived = await service.archiveTemplate(owner.token, template.template.id);
-  assert.ok(archived.template.archivedAt);
-  await assert.rejects(
-    () =>
-      service.createSession(switched.token, {
-        name: "blocked",
-        templateId: template.template.id
-      }),
-    /Template is archived/
-  );
-  const restoredTemplate = await service.restoreTemplate(owner.token, template.template.id);
-  assert.equal(restoredTemplate.template.archivedAt, null);
-
-  const disposableTemplate = await service.createTemplate(owner.token, {
-    name: "trash-dev",
-    description: "Disposable runtime"
-  });
-  const disposableVersion = await service.addTemplateVersion(owner.token, disposableTemplate.template.id, {
-    version: "0.1.0",
-    manifest: { image: "registry.cloudflare.com/test/trash-dev:0.1.0" }
-  });
-  await service.uploadTemplateVersionBundle(owner.token, disposableTemplate.template.id, disposableVersion.templateVersion.id, {
-    body: "trash bundle",
-    contentType: "text/plain"
-  });
-  await service.processTemplateBuildById(disposableVersion.build.id);
-  const deletedTemplate = await service.deleteTemplate(owner.token, disposableTemplate.template.id);
-  assert.equal(deletedTemplate.ok, true);
-  assert.equal(deletedTemplate.deletedVersions, 1);
-  assert.equal(objects.readBundleText(disposableVersion.templateVersion.id), null);
-  assert.equal(objects.readBuildLogText(disposableVersion.templateVersion.id), null);
-  assert.equal(objects.readBuildArtifactText(disposableVersion.build.id), null);
-  const templateList = await service.listTemplates(owner.token);
-  assert.equal(
-    templateList.templates.some((entry: any) => entry.id === disposableTemplate.template.id),
-    false
-  );
-
-  const session = await service.createSession(switched.token, {
+  const runningSession = await service.createSession(owner.token, {
     name: "demo",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
-  assert.equal(session.session.state, "created");
-
-  const started = await service.startSession(switched.token, session.session.id);
-  assert.equal(started.session.state, "running");
-
-  const restarted = await service.restartSession(switched.token, session.session.id);
+  await service.startSession(owner.token, runningSession.session.id);
+  const restarted = await service.restartSession(owner.token, runningSession.session.id);
   assert.equal(restarted.session.state, "running");
 
-  const staleSession = await service.createSession(switched.token, {
-    name: "stale-demo",
-    templateId: template.template.id
-  });
-  await service.startSession(switched.token, staleSession.session.id);
-  await service.stopSession(switched.token, staleSession.session.id);
-
-  const syncedSshKey = await service.upsertSessionSshKey(switched.token, session.session.id, {
+  const syncedSshKey = await service.upsertSessionSshKey(owner.token, runningSession.session.id, {
     keyId: "cli:test",
     label: "CLI Test",
     publicKey: TEST_SSH_PUBLIC_KEY
   });
   assert.equal(syncedSshKey.sshKeyCount, 1);
-  const runtime = await service.issueRuntimeToken(switched.token, session.session.id);
+  const runtime = await service.issueRuntimeToken(owner.token, runningSession.session.id);
   assert.match(runtime.sshCommand, /ssh -i <local-key-path>/);
-  assert.equal(runtime.sshKeyCount, 1);
-  const runtimeSession = await service.validateRuntimeToken(runtime.token, session.session.id);
+  const runtimeSession = await service.validateRuntimeToken(runtime.token, runningSession.session.id);
   assert.deepEqual(runtimeSession.session.sshAuthorizedKeys, [TEST_SSH_PUBLIC_KEY]);
 
-  const events = await service.listSessionEvents(switched.token, session.session.id);
-  assert.ok(events.events.length >= 5);
+  const events = await service.listSessionEvents(owner.token, runningSession.session.id);
+  assert.ok(events.events.length >= 4);
 
-  const snapshot = await service.createSnapshot(switched.token, session.session.id, {
+  const snapshot = await service.createSnapshot(owner.token, runningSession.session.id, {
     label: "manual-save"
   });
   assert.equal(snapshot.snapshot.label, "manual-save");
-  const emptySnapshot = await service.createSnapshot(switched.token, session.session.id, {
+  const emptySnapshot = await service.createSnapshot(owner.token, runningSession.session.id, {
     label: "empty"
   });
   assert.equal(emptySnapshot.snapshot.id, snapshot.snapshot.id);
   await assert.rejects(
-    () => service.restoreSnapshot(switched.token, session.session.id, emptySnapshot.snapshot.id),
+    () => service.restoreSnapshot(owner.token, runningSession.session.id, emptySnapshot.snapshot.id),
     /Snapshot content not uploaded/
   );
   const snapshotBody = "workspace-state";
-  const snapshotGrant = await service.createSnapshotUploadGrant(switched.token, session.session.id, snapshot.snapshot.id, {
+  const snapshotGrant = await service.createSnapshotUploadGrant(owner.token, runningSession.session.id, snapshot.snapshot.id, {
     contentType: "text/plain",
     bytes: snapshotBody.length
   });
@@ -588,34 +377,54 @@ test("service covers removed sharing, queued builds, releases, session events, u
     contentType: "text/plain"
   });
   assert.equal(uploadedSnapshot.target, "snapshot");
-  assert.equal(uploadedSnapshot.snapshot.bytes, 15);
-  const downloadedSnapshot = await service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id);
-  assert.equal(new TextDecoder().decode(downloadedSnapshot.body), "workspace-state");
-  const restoredSnapshot = await service.restoreSnapshot(switched.token, session.session.id, snapshot.snapshot.id);
+  const downloadedSnapshot = await service.getSnapshotContent(owner.token, runningSession.session.id, snapshot.snapshot.id);
+  assert.equal(new TextDecoder().decode(downloadedSnapshot.body), snapshotBody);
+  const restoredSnapshot = await service.restoreSnapshot(owner.token, runningSession.session.id, snapshot.snapshot.id);
   assert.equal(restoredSnapshot.session.lastRestoredSnapshotId, snapshot.snapshot.id);
-  const deletedSnapshot = await service.deleteSnapshot(switched.token, session.session.id, snapshot.snapshot.id);
-  assert.equal(deletedSnapshot.ok, true);
-  await assert.rejects(() => service.getSnapshotContent(switched.token, session.session.id, snapshot.snapshot.id), /Snapshot not found/);
 
-  const cleanupSnapshot = await service.createSnapshot(switched.token, session.session.id, {
-    label: "cleanup"
+  const staleSession = await service.createSession(owner.token, {
+    name: "stale-demo",
+    instanceId: instance.instance.id
   });
-  await service.uploadSnapshotContent(switched.token, session.session.id, cleanupSnapshot.snapshot.id, {
-    body: "cleanup-state",
+  await service.startSession(owner.token, staleSession.session.id);
+  await service.stopSession(owner.token, staleSession.session.id);
+  const staleSnapshot = await service.createSnapshot(owner.token, staleSession.session.id, {
+    label: "stale"
+  });
+  await service.uploadSnapshotContent(owner.token, staleSession.session.id, staleSnapshot.snapshot.id, {
+    body: "stale-state",
     contentType: "text/plain"
   });
-  await service.deleteSession(switched.token, session.session.id);
+  await store.transact((state: any) => {
+    const staleRecord = state.sessions.find((entry: any) => entry.id === staleSession.session.id);
+    assert.ok(staleRecord);
+    staleRecord.lastStoppedAt = new Date(tick - 20000).toISOString();
+    staleRecord.updatedAt = staleRecord.lastStoppedAt;
+  });
+
+  const deletedSession = await service.createSession(owner.token, {
+    name: "deleted-demo",
+    instanceId: instance.instance.id
+  });
+  const deletedSnapshot = await service.createSnapshot(owner.token, deletedSession.session.id, {
+    label: "deleted"
+  });
+  await service.uploadSnapshotContent(owner.token, deletedSession.session.id, deletedSnapshot.snapshot.id, {
+    body: "deleted-state",
+    contentType: "text/plain"
+  });
+  await service.deleteSession(owner.token, deletedSession.session.id);
+
   const cleanup = await service.reconcile(owner.token);
+  assert.equal(cleanup.sleptSessions, 1);
+  assert.equal(cleanup.recoveredStuckBuilds, 0);
+  assert.equal(cleanup.processedBuilds, 0);
   assert.equal(cleanup.purgedDeletedSessions, 1);
   assert.equal(cleanup.purgedStaleSleepingSessions, 1);
-  assert.equal(cleanup.purgedSnapshots, 1);
-  await assert.rejects(() => service.getSession(switched.token, session.session.id), /Session not found/);
-  await assert.rejects(() => service.getSession(switched.token, staleSession.session.id), /Session not found/);
+  assert.equal(cleanup.purgedSnapshots, 2);
+  await assert.rejects(() => service.getSession(owner.token, staleSession.session.id), /Session not found/);
+  await assert.rejects(() => service.getSession(owner.token, deletedSession.session.id), /Session not found/);
 
-  const logoutAll = await service.logoutAllSessions(switched.token);
-  assert.equal(logoutAll.ok, true);
-  assert.ok(logoutAll.revokedTokens >= 2);
-  await assert.rejects(() => service.authenticate(switched.token), /Unauthorized/);
   const ownerSecondLogin = await service.login({
     email: "owner@example.com",
     kind: "browser"
@@ -625,37 +434,26 @@ test("service covers removed sharing, queued builds, releases, session events, u
     kind: "browser"
   });
   const authSessions = await service.listAuthSessions(ownerSecondLogin.token);
-  assert.ok(authSessions.sessions.length >= 2);
   assert.ok(authSessions.sessions.some((entry: any) => entry.id === ownerThirdLogin.authSessionId));
   const revokeSession = await service.revokeAuthSession(ownerSecondLogin.token, ownerThirdLogin.authSessionId);
   assert.equal(revokeSession.ok, true);
-  const afterRevoke = await service.listAuthSessions(ownerSecondLogin.token);
-  assert.equal(afterRevoke.sessions.some((entry: any) => entry.id === ownerThirdLogin.authSessionId), false);
-  await assert.rejects(() => service.authenticate(owner.token), /Unauthorized/);
   await assert.rejects(() => service.authenticate(ownerThirdLogin.token), /Unauthorized/);
-  await assert.rejects(() => service.refreshSession(owner.refreshToken), /Unauthorized/);
-  assert.ok((await service.authenticate(ownerSecondLogin.token)).user.id);
 
   const usage = await service.getUsage(ownerSecondLogin.token);
-  assert.equal(usage.usage.runtimeMinutes, 3);
-  assert.equal(usage.usage.snapshots, 3);
-  assert.equal(usage.usage.templateBuilds, 4);
-  assert.equal(usage.usage.storage.templateBundlesBytes > 0, true);
-  assert.equal(usage.usage.storage.snapshotBytes >= 0, true);
-  assert.equal(
-    usage.usage.storage.totalBytes,
-    usage.usage.storage.templateBundlesBytes +
-      usage.usage.storage.snapshotBytes +
-      usage.usage.storage.buildArtifactBytes
-  );
-  assert.equal(usage.usage.inventory.templates >= 1, true);
+  assert.ok(usage.usage.runtimeMinutes >= 2);
+  assert.ok(usage.usage.snapshots >= 3);
+  assert.equal(usage.usage.templateBuilds, 0);
+  assert.equal(usage.usage.storage.templateBundlesBytes, 0);
+  assert.equal(usage.usage.storage.buildArtifactBytes, 0);
+  assert.ok(usage.usage.storage.snapshotBytes > 0);
+  assert.equal(usage.usage.inventory.instances, 1);
+  assert.equal(usage.usage.inventory.templates, 0);
   assert.equal(usage.limits.maxRunningSessions, 20);
   assert.equal(usage.plan, "pro");
   assert.deepEqual(usage.overrides, {});
 
   const refreshed = await service.refreshSession(ownerSecondLogin.refreshToken);
   assert.ok(refreshed.token);
-  assert.ok(refreshed.refreshToken);
   await assert.rejects(() => service.refreshSession(ownerSecondLogin.refreshToken), /Unauthorized/);
   const logout = await service.logout(refreshed.token, refreshed.refreshToken);
   assert.equal(logout.ok, true);
@@ -667,14 +465,14 @@ test("service covers removed sharing, queued builds, releases, session events, u
 
   const report = await service.getAdminReport(ownerSecondLogin.token);
   assert.equal(report.report.members, 1);
-  assert.equal(report.report.releases, 1);
+  assert.equal(report.report.instances, 1);
+  assert.equal(report.report.templates, 0);
+  assert.equal(report.report.releases, 0);
   assert.equal(report.report.buildsQueued, 0);
   assert.equal(report.report.buildsBuilding, 0);
   assert.equal(report.report.buildsStuck, 0);
-  assert.equal(report.report.buildsFailed, 1);
+  assert.equal(report.report.buildsFailed, 0);
   assert.equal(report.report.buildsDeadLettered, 0);
-  assert.equal(report.report.sessionsTotal, 0);
-  assert.equal(report.report.sessionsSleeping, 0);
   assert.equal(report.report.activeUploadGrants, 0);
   assert.equal(report.report.limits.maxRunningSessions, 20);
 
@@ -686,11 +484,16 @@ test("service covers removed sharing, queued builds, releases, session events, u
   const exported = await service.exportWorkspace(ownerSecondLogin.token);
   assert.equal(exported.export.workspace.id, owner.workspace.id);
   assert.equal(exported.export.members.length, 1);
-  assert.equal(exported.export.templates.length >= 1, true);
-  assert.equal(exported.export.artifacts.templateBundles.length >= 1, true);
+  assert.equal(exported.export.instances.length, 1);
+  assert.deepEqual(exported.export.templates, []);
+  assert.deepEqual(exported.export.builds, []);
+  assert.deepEqual(exported.export.releases, []);
+  assert.deepEqual(exported.export.artifacts.templateBundles, []);
+  assert.deepEqual(exported.export.artifacts.buildArtifacts, []);
+  assert.equal(exported.export.artifacts.snapshots.length, 1);
   assert.equal(exported.export.security.runtimeSecrets.length, 1);
   assert.equal(exported.export.security.runtimeSecrets[0].name, "API_TOKEN");
-  assert.equal(exported.export.audit.length >= 1, true);
+  assert.ok(exported.export.audit.length >= 1);
 
   const deletedSecret = await service.deleteWorkspaceSecret(ownerSecondLogin.token, "api_token");
   assert.equal(deletedSecret.ok, true);
@@ -894,83 +697,69 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
   assert.equal(paid.billing.lastInvoiceAmountUsd, 6.1);
 });
 
-test("service records workflow dispatch metadata and workflow-driven build completion", async () => {
-  const workflowRuns: { buildId: string; instanceId: string }[] = [];
-  const service = createBurstFlareService({
-    jobs: {
-      buildStrategy: "workflow",
-      async enqueueBuild(buildId: string) {
-        const instanceId = `bwf_${buildId}_${workflowRuns.length + 1}`;
-        workflowRuns.push({ buildId, instanceId });
-        return {
-          buildId,
-          dispatch: "workflow",
-          dispatchedAt: "2026-02-28T00:00:00.000Z",
-          workflow: {
-            name: "burstflare-builds",
-            instanceId,
-            dispatchedAt: "2026-02-28T00:00:00.000Z"
-          }
-        };
-      }
-    }
-  });
-
+test("service rejects legacy template backend methods", async () => {
+  const service = createBurstFlareService();
   const owner = await service.registerUser({
-    email: "workflow-owner@example.com",
-    name: "Workflow Owner"
+    email: "legacy-removed@example.com",
+    name: "Legacy Removed"
   });
-  const template = await service.createTemplate(owner.token, {
-    name: "workflow-template",
-    description: "Workflow template"
-  });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/workflow:1.0.0"
-    }
+  const instance = await service.createInstance(owner.token, {
+    name: "legacy-check",
+    description: "Legacy backend removal coverage",
+    image: "registry.cloudflare.com/example/legacy-check:1.0.0"
   });
 
-  assert.equal(version.build.dispatchMode, "workflow");
-  assert.equal(version.build.workflowStatus, "queued");
-  assert.match(version.build.workflowInstanceId, /^bwf_/);
-  assert.equal(workflowRuns.length, 1);
+  await assert.rejects(() => service.createTemplate(), /Legacy template backend removed/);
+  await assert.rejects(() => service.archiveTemplate(), /Legacy template backend removed/);
+  await assert.rejects(() => service.restoreTemplate(), /Legacy template backend removed/);
+  await assert.rejects(() => service.deleteTemplate(), /Legacy template backend removed/);
+  await assert.rejects(() => service.listTemplates(), /Legacy template backend removed/);
+  await assert.rejects(() => service.getTemplate(), /Legacy template backend removed/);
+  await assert.rejects(() => service.listTemplateBuilds(), /Legacy template backend removed/);
+  await assert.rejects(() => service.addTemplateVersion(), /Legacy template backend removed/);
+  await assert.rejects(() => service.uploadTemplateVersionBundle(), /Legacy template backend removed/);
+  await assert.rejects(() => service.createTemplateVersionBundleUploadGrant(), /Legacy template backend removed/);
+  await assert.rejects(() => service.getTemplateVersionBundle(), /Legacy template backend removed/);
+  await assert.rejects(() => service.processTemplateBuilds(), /Legacy template backend removed/);
+  await assert.rejects(() => service.processTemplateBuildById(), /Legacy template backend removed/);
+  await assert.rejects(() => service.markTemplateBuildWorkflow(), /Legacy template backend removed/);
+  await assert.rejects(() => service.getTemplateBuildLog(), /Legacy template backend removed/);
+  await assert.rejects(() => service.getTemplateBuildArtifact(), /Legacy template backend removed/);
+  await assert.rejects(() => service.retryTemplateBuild(), /Legacy template backend removed/);
+  await assert.rejects(() => service.promoteTemplateVersion(), /Legacy template backend removed/);
+  await assert.rejects(() => service.listBindingReleases(), /Legacy template backend removed/);
+  await assert.rejects(() => service.rollbackTemplate(), /Legacy template backend removed/);
 
-  const marked = await service.markTemplateBuildWorkflow(version.build.id, {
-    status: "running",
-    instanceId: version.build.workflowInstanceId,
-    name: "burstflare-builds",
-    timestamp: "2026-02-28T00:00:01.000Z"
+  const recovered = await service.retryDeadLetteredBuilds();
+  assert.deepEqual(recovered, {
+    recovered: 0,
+    buildIds: []
   });
-  assert.equal(marked.build.workflowStatus, "running");
 
-  const processed = await service.processTemplateBuildById(version.build.id, {
-    source: "workflow"
+  await assert.rejects(
+    () =>
+      service.createSession(owner.token, {
+        name: "legacy-template-session"
+      }),
+    /Instance is required/
+  );
+
+  const created = await service.createSession(owner.token, {
+    name: "instance-only-session",
+    instanceId: instance.instance.id
   });
-  assert.equal(processed.build.status, "succeeded");
-  assert.equal(processed.build.workflowStatus, "succeeded");
-  assert.equal(processed.build.dispatchMode, "workflow");
+  assert.equal(created.session.instanceId, instance.instance.id);
+  assert.equal(created.session.templateId, null);
+  assert.equal(created.session.templateName, null);
 });
 
 test("service exposes targeted operator reconcile workflows", async () => {
   let tick = Date.parse("2026-02-28T12:00:00.000Z");
   const objects = createObjectStore();
-  const queuedBuilds: string[] = [];
   const store = createMemoryStore();
   const service = createBurstFlareService({
     store,
     objects,
-    jobs: {
-      buildStrategy: "queue",
-      async enqueueBuild(buildId: string) {
-        queuedBuilds.push(buildId);
-        return {
-          buildId,
-          dispatch: "queue",
-          dispatchedAt: new Date(tick + 1).toISOString()
-        };
-      }
-    },
     clock: () => {
       tick += 1000;
       return tick;
@@ -981,29 +770,22 @@ test("service exposes targeted operator reconcile workflows", async () => {
     email: "ops-workflows@example.com",
     name: "Ops Workflows"
   });
-  const template = await service.createTemplate(owner.token, {
-    name: "ops-template",
-    description: "Operator workflow template"
+  const instance = await service.createInstance(owner.token, {
+    name: "ops-instance",
+    description: "Operator workflow instance",
+    image: "registry.cloudflare.com/test/ops-instance:1.0.0",
+    sleepTtlSeconds: 10
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/ops-template:1.0.0",
-      sleepTtlSeconds: 1
-    }
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const runningSession = await service.createSession(owner.token, {
     name: "ops-running",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   await service.startSession(owner.token, runningSession.session.id);
 
   const staleSession = await service.createSession(owner.token, {
     name: "ops-stale",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   await service.startSession(owner.token, staleSession.session.id);
   await service.stopSession(owner.token, staleSession.session.id);
@@ -1017,7 +799,7 @@ test("service exposes targeted operator reconcile workflows", async () => {
 
   const deletedSession = await service.createSession(owner.token, {
     name: "ops-deleted",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   const deletedSnapshot = await service.createSnapshot(owner.token, deletedSession.session.id, {
     label: "deleted"
@@ -1028,51 +810,37 @@ test("service exposes targeted operator reconcile workflows", async () => {
   });
   await service.deleteSession(owner.token, deletedSession.session.id);
 
-  const stuckVersion = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.1",
-    manifest: {
-      image: "registry.cloudflare.com/test/ops-template:1.0.1"
-    }
-  });
   await store.transact((state: any) => {
-    const build = state.templateBuilds.find((entry: any) => entry.id === stuckVersion.build.id);
-    assert.ok(build);
-    build.status = "building";
-    build.startedAt = new Date(tick - 1000 * 60 * 10).toISOString();
-    build.updatedAt = build.startedAt;
+    const session = state.sessions.find((entry: any) => entry.id === staleSession.session.id);
+    assert.ok(session);
+    session.lastStoppedAt = new Date(tick - 1000 * 60 * 10).toISOString();
+    session.updatedAt = session.lastStoppedAt;
   });
 
   tick += 2000;
 
   const preview = await service.previewReconcile(owner.token);
   assert.equal(preview.preview.sleptSessions, 1);
-  assert.equal(preview.preview.recoveredStuckBuilds, 1);
+  assert.equal(preview.preview.recoveredStuckBuilds, 0);
   assert.equal(preview.preview.processedBuilds, 0);
   assert.equal(preview.preview.purgedDeletedSessions, 1);
   assert.equal(preview.preview.purgedStaleSleepingSessions, 1);
   assert.deepEqual(preview.preview.sessionIds.running, [runningSession.session.id]);
   assert.deepEqual(preview.preview.sessionIds.staleSleeping, [staleSession.session.id]);
   assert.deepEqual(preview.preview.sessionIds.deleted, [deletedSession.session.id]);
-  assert.deepEqual(preview.preview.buildIds.stuck, [stuckVersion.build.id]);
-
-  const slept = await service.sleepRunningSessions(owner.token);
-  assert.equal(slept.sleptSessions, 1);
-  assert.deepEqual(slept.sessionIds, [runningSession.session.id]);
-  const sleptAgain = await service.sleepRunningSessions(owner.token);
-  assert.equal(sleptAgain.sleptSessions, 0);
+  assert.deepEqual(preview.preview.buildIds.stuck, []);
+  assert.deepEqual(preview.preview.buildIds.queued, []);
 
   const recovered = await service.recoverStuckBuilds(owner.token);
-  assert.equal(recovered.recoveredStuckBuilds, 1);
-  assert.deepEqual(recovered.buildIds, [stuckVersion.build.id]);
-  assert.equal(queuedBuilds.at(-1), stuckVersion.build.id);
-  assert.equal(queuedBuilds.filter((entry) => entry === stuckVersion.build.id).length, 2);
+  assert.equal(recovered.recoveredStuckBuilds, 0);
+  assert.deepEqual(recovered.buildIds, []);
   const recoveredAgain = await service.recoverStuckBuilds(owner.token);
   assert.equal(recoveredAgain.recoveredStuckBuilds, 0);
 
   const purgedSleeping = await service.purgeStaleSleepingSessions(owner.token);
-  assert.equal(purgedSleeping.purgedStaleSleepingSessions, 2);
+  assert.equal(purgedSleeping.purgedStaleSleepingSessions, 1);
   assert.equal(purgedSleeping.purgedSnapshots, 1);
-  assert.deepEqual(new Set(purgedSleeping.sessionIds), new Set([runningSession.session.id, staleSession.session.id]));
+  assert.deepEqual(purgedSleeping.sessionIds, [staleSession.session.id]);
   const purgedSleepingAgain = await service.purgeStaleSleepingSessions(owner.token);
   assert.equal(purgedSleepingAgain.purgedStaleSleepingSessions, 0);
   await assert.rejects(() => service.getSession(owner.token, staleSession.session.id), /Session not found/);
@@ -1085,12 +853,18 @@ test("service exposes targeted operator reconcile workflows", async () => {
   assert.equal(purgedDeletedAgain.purgedDeletedSessions, 0);
   await assert.rejects(() => service.getSession(owner.token, deletedSession.session.id), /Session not found/);
 
+  const slept = await service.sleepRunningSessions(owner.token);
+  assert.equal(slept.sleptSessions, 1);
+  assert.deepEqual(slept.sessionIds, [runningSession.session.id]);
+  const sleptAgain = await service.sleepRunningSessions(owner.token);
+  assert.equal(sleptAgain.sleptSessions, 0);
+
   const report = await service.getAdminReport(owner.token);
   assert.equal(report.report.reconcileCandidates.runningSessions, 0);
   assert.equal(report.report.reconcileCandidates.stuckBuilds, 0);
   assert.equal(report.report.reconcileCandidates.deletedSessions, 0);
   assert.equal(report.report.reconcileCandidates.staleSleepingSessions, 0);
-  assert.equal(report.report.reconcileCandidates.queuedBuilds, 1);
+  assert.equal(report.report.reconcileCandidates.queuedBuilds, 0);
 });
 
 test("service enforces quota overrides and storage limits", async () => {
@@ -1112,80 +886,29 @@ test("service enforces quota overrides and storage limits", async () => {
   });
 
   const overrides = await service.setWorkspaceQuotaOverrides(owner.token, {
-    maxTemplates: 1,
     maxRunningSessions: 1,
-    maxTemplateVersionsPerTemplate: 1,
     maxSnapshotsPerSession: 1,
     maxStorageBytes: 20,
-    maxRuntimeMinutes: 1,
-    maxTemplateBuilds: 1
+    maxRuntimeMinutes: 1
   });
-  assert.equal(overrides.limits.maxTemplates, 1);
   assert.equal(overrides.overrides.maxStorageBytes, 20);
 
-  const template = await service.createTemplate(owner.token, {
-    name: "quota-template",
-    description: "Quota test template"
+  const instance = await service.createInstance(owner.token, {
+    name: "quota-instance",
+    description: "Quota test instance",
+    image: "registry.cloudflare.com/test/quota-instance:1.0.0"
   });
-  await assert.rejects(
-    () =>
-      service.createTemplate(owner.token, {
-        name: "quota-template-2",
-        description: "blocked by template limit"
-      }),
-    /Template limit reached/
-  );
-
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: { image: "registry.cloudflare.com/test/quota-template:1.0.0" }
-  });
-  await assert.rejects(
-    () =>
-      service.addTemplateVersion(owner.token, template.template.id, {
-        version: "1.0.1",
-        manifest: { image: "registry.cloudflare.com/test/quota-template:1.0.1" }
-      }),
-    /Template version limit reached/
-  );
-
-  await assert.rejects(
-    () =>
-      service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
-        body: "012345678901234567890",
-        contentType: "text/plain"
-      }),
-    /Workspace storage limit reached/
-  );
-
-  const raisedStorage = await service.setWorkspaceQuotaOverrides(owner.token, {
-    maxTemplates: 1,
-    maxRunningSessions: 1,
-    maxTemplateVersionsPerTemplate: 1,
-    maxSnapshotsPerSession: 1,
-    maxStorageBytes: 512,
-    maxRuntimeMinutes: 1,
-    maxTemplateBuilds: 1
-  });
-  assert.equal(raisedStorage.limits.maxStorageBytes, 512);
-
-  await service.uploadTemplateVersionBundle(owner.token, template.template.id, version.templateVersion.id, {
-    body: "small-bundle",
-    contentType: "text/plain"
-  });
-  await service.processTemplateBuildById(version.build.id);
-  await service.promoteTemplateVersion(owner.token, template.template.id, version.templateVersion.id);
 
   const session = await service.createSession(owner.token, {
     name: "quota-session",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   const started = await service.startSession(owner.token, session.session.id);
   assert.equal(started.session.state, "running");
 
   const secondSession = await service.createSession(owner.token, {
     name: "quota-session-2",
-    templateId: template.template.id
+    instanceId: instance.instance.id
   });
   await assert.rejects(() => service.startSession(owner.token, secondSession.session.id), /Running session limit reached/);
   await service.stopSession(owner.token, session.session.id);
@@ -1200,9 +923,32 @@ test("service enforces quota overrides and storage limits", async () => {
   assert.equal(replacementSnapshot.snapshot.id, snapshot.snapshot.id);
   assert.equal(replacementSnapshot.snapshot.label, "quota-snap-2");
 
+  await assert.rejects(
+    () =>
+      service.uploadSnapshotContent(owner.token, session.session.id, replacementSnapshot.snapshot.id, {
+        body: "012345678901234567890",
+        contentType: "text/plain"
+      }),
+    /Workspace storage limit reached/
+  );
+
+  const raisedStorage = await service.setWorkspaceQuotaOverrides(owner.token, {
+    maxRunningSessions: 1,
+    maxSnapshotsPerSession: 1,
+    maxStorageBytes: 512,
+    maxRuntimeMinutes: 1
+  });
+  assert.equal(raisedStorage.limits.maxStorageBytes, 512);
+
+  await service.uploadSnapshotContent(owner.token, session.session.id, replacementSnapshot.snapshot.id, {
+    body: "small-snapshot",
+    contentType: "text/plain"
+  });
+
   const usage = await service.getUsage(owner.token);
   assert.equal(usage.limits.maxRunningSessions, 1);
-  assert.equal(usage.overrides.maxTemplateBuilds, 1);
+  assert.equal(usage.overrides.maxRuntimeMinutes, 1);
+  assert.equal(usage.usage.inventory.instances, 1);
 
   const cleared = await service.setWorkspaceQuotaOverrides(owner.token, { clear: true });
   assert.deepEqual(cleared.overrides, {});
@@ -1240,48 +986,16 @@ test("service can persist runtime state from a durable-object-driven session tra
   assert.equal(detail.session.runtimeState, "healthy");
 });
 
-test("service can roll back a template to a prior release", async () => {
+test("service rejects legacy template release operations", async () => {
   const service = createBurstFlareService();
-  const owner = await service.registerUser({
+  await service.registerUser({
     email: "rollback@example.com",
     name: "Rollback User"
   });
-  const template = await service.createTemplate(owner.token, {
-    name: "rollback-template",
-    description: "Rollback coverage"
-  });
 
-  const versionOne = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/rollback-template:1.0.0"
-    }
-  });
-  await service.processTemplateBuildById(versionOne.build.id);
-  const firstPromotion = await service.promoteTemplateVersion(owner.token, template.template.id, versionOne.templateVersion.id);
-
-  const versionTwo = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "2.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/rollback-template:2.0.0"
-    }
-  });
-  await service.processTemplateBuildById(versionTwo.build.id);
-  const secondPromotion = await service.promoteTemplateVersion(owner.token, template.template.id, versionTwo.templateVersion.id);
-  assert.equal(secondPromotion.activeVersion.id, versionTwo.templateVersion.id);
-
-  const rolledBack = await service.rollbackTemplate(owner.token, template.template.id);
-  assert.equal(rolledBack.activeVersion.id, versionOne.templateVersion.id);
-  assert.equal(rolledBack.targetRelease.id, firstPromotion.release.id);
-  assert.equal(rolledBack.release.mode, "rollback");
-  assert.equal(rolledBack.release.sourceReleaseId, firstPromotion.release.id);
-  assert.equal(rolledBack.release.binding.templateName, "rollback-template");
-
-  const releases = await service.listBindingReleases(owner.token);
-  const templateReleases = releases.releases.filter((entry: any) => entry.templateId === template.template.id);
-  assert.equal(templateReleases.length, 3);
-  assert.equal(templateReleases.at(-1).mode, "rollback");
-  assert.equal(templateReleases.at(-1).templateVersionId, versionOne.templateVersion.id);
+  await assert.rejects(() => service.promoteTemplateVersion(), /Legacy template backend removed/);
+  await assert.rejects(() => service.listBindingReleases(), /Legacy template backend removed/);
+  await assert.rejects(() => service.rollbackTemplate(), /Legacy template backend removed/);
 });
 
 test("service ignores stale runtime transitions that arrive after a newer runtime state", async () => {

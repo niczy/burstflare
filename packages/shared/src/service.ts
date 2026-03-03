@@ -474,6 +474,10 @@ function fail(message, status = 400) {
   throw error;
 }
 
+function failLegacyTemplateBackendRemoved() {
+  fail("Legacy template backend removed. Use instances instead.", 410);
+}
+
 function auditAndThrow(_state, _clock, audit, message, status = 400) {
   const error = new Error(message) as ServiceError;
   error.status = status;
@@ -966,14 +970,6 @@ function summarizeStorage(state, workspaceId) {
     totalBytes: 0
   };
 
-  for (const version of state.templateVersions) {
-    const template = state.templates.find((entry) => entry.id === version.templateId);
-    if (!template || template.workspaceId !== workspaceId) {
-      continue;
-    }
-    storage.templateBundlesBytes += version.bundleBytes || 0;
-  }
-
   const workspaceSessions = state.sessions.filter((entry) => entry.workspaceId === workspaceId);
   for (const session of workspaceSessions) {
     const snapshot = getLatestSessionSnapshot(state, session.id);
@@ -984,15 +980,6 @@ function summarizeStorage(state, workspaceId) {
       continue;
     }
     storage.snapshotBytes += snapshot.bytes || 0;
-  }
-
-  for (const build of state.templateBuilds) {
-    const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-    const template = version ? state.templates.find((entry) => entry.id === version.templateId) : null;
-    if (!template || template.workspaceId !== workspaceId) {
-      continue;
-    }
-    storage.buildArtifactBytes += build.artifactBytes || 0;
   }
 
   storage.totalBytes = storage.templateBundlesBytes + storage.snapshotBytes + storage.buildArtifactBytes;
@@ -1020,9 +1007,8 @@ function summarizeUsage(state, workspaceId) {
     }
   }
   const sessions = state.sessions.filter((entry) => entry.workspaceId === workspaceId && entry.state !== "deleted");
-  const templates = state.templates.filter((entry) => entry.workspaceId === workspaceId);
-  const templateIds = new Set(templates.map((entry) => entry.id));
-  const templateVersions = state.templateVersions.filter((entry) => templateIds.has(entry.templateId));
+  const workspace = state.workspaces.find((entry) => entry.id === workspaceId) || null;
+  const instances = workspace ? state.instances.filter((entry) => entry.userId === workspace.ownerUserId) : [];
   const snapshots = sessions
     .map((session) => getLatestSessionSnapshot(state, session.id))
     .filter(Boolean);
@@ -1031,8 +1017,9 @@ function summarizeUsage(state, workspaceId) {
     ...usage,
     storage: summarizeStorage(state, workspaceId),
     inventory: {
-      templates: templates.length,
-      templateVersions: templateVersions.length,
+      instances: instances.length,
+      templates: 0,
+      templateVersions: 0,
       sessions: sessions.length,
       snapshots: snapshots.length
     }
@@ -1202,7 +1189,6 @@ function formatInstance(instance) {
 }
 
 function formatSession(state, session, { includeSshKeys = false }: { includeSshKeys?: boolean } = {}) {
-  const template = state.templates.find((entry) => entry.id === session.templateId);
   const instance = getSessionInstance(state, session);
   const events = state.sessionEvents.filter((entry) => entry.sessionId === session.id);
   const snapshots = listVisibleSessionSnapshots(state, session.id);
@@ -1212,7 +1198,7 @@ function formatSession(state, session, { includeSshKeys = false }: { includeSshK
     ...baseSession,
     instanceId: session.instanceId || null,
     instanceName: instance?.name || null,
-    templateName: template?.name || "unknown",
+    templateName: null,
     eventsCount: events.length,
     snapshotCount: snapshots.length,
     sshKeyCount,
@@ -1952,23 +1938,10 @@ export function createBurstFlareService(options: any = {}) {
     );
   }
 
-  function getWorkspaceBuildRecords(state, workspaceId = null) {
-    const records = [];
-    for (const build of state.templateBuilds) {
-      const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-      if (!version) {
-        continue;
-      }
-      const template = state.templates.find((entry) => entry.id === version.templateId);
-      if (!template) {
-        continue;
-      }
-      if (workspaceId && template.workspaceId !== workspaceId) {
-        continue;
-      }
-      records.push({ build, version, template });
-    }
-    return records;
+function getWorkspaceBuildRecords(state, workspaceId = null) {
+    void state;
+    void workspaceId;
+    return [];
   }
 
   function getReconcileCandidates(state, workspaceId = null, checkedAtMs = nowMs(clock)) {
@@ -3695,761 +3668,101 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
-    async createTemplate(token, { name, description = "" }) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireWriteAccess(state, token, clock);
-        ensure(name, "Template name is required");
-        const limits = getEffectiveLimits(auth.workspace);
-        ensure(
-          state.templates.filter((entry) => entry.workspaceId === auth.workspace.id).length < limits.maxTemplates,
-          "Template limit reached",
-          403
-        );
-        ensure(
-          !state.templates.some(
-            (entry) => entry.workspaceId === auth.workspace.id && entry.name.toLowerCase() === name.toLowerCase()
-          ),
-          "Template name already exists"
-        );
-
-        const template = {
-          id: createId("tpl"),
-          workspaceId: auth.workspace.id,
-          name,
-          description,
-          activeVersionId: null,
-          archivedAt: null,
-          archivedByUserId: null,
-          createdByUserId: auth.user.id,
-          createdAt: nowIso(clock)
-        };
-        state.templates.push(template);
-        writeAudit(state, clock, {
-          action: "template.created",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template",
-          targetId: template.id,
-          details: { name }
-        });
-        return { template: formatTemplate(state, template) };
-      });
+    async createTemplate() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async archiveTemplate(token, templateId) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
-        ensure(!auth.template.archivedAt, "Template already archived", 409);
-        auth.template.archivedAt = nowIso(clock);
-        auth.template.archivedByUserId = auth.user.id;
-        writeAudit(state, clock, {
-          action: "template.archived",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template",
-          targetId: auth.template.id
-        });
-        return {
-          template: formatTemplate(state, auth.template)
-        };
-      });
+    async archiveTemplate() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async restoreTemplate(token, templateId) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
-        ensure(auth.template.archivedAt, "Template is not archived", 409);
-        auth.template.archivedAt = null;
-        auth.template.archivedByUserId = null;
-        writeAudit(state, clock, {
-          action: "template.restored",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template",
-          targetId: auth.template.id
-        });
-        return {
-          template: formatTemplate(state, auth.template)
-        };
-      });
+    async restoreTemplate() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async deleteTemplate(token, templateId) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
-        ensure(
-          !state.sessions.some((entry) => entry.templateId === auth.template.id && entry.state !== "deleted"),
-          "Template still has active sessions",
-          409
-        );
-
-        const templateVersions = state.templateVersions.filter((entry) => entry.templateId === auth.template.id);
-        const templateVersionIds = new Set(templateVersions.map((entry) => entry.id));
-
-        for (const templateVersion of templateVersions) {
-          const build = state.templateBuilds.find((entry) => entry.templateVersionId === templateVersion.id);
-          if (objects?.deleteTemplateVersionBundle) {
-            await objects.deleteTemplateVersionBundle({
-              workspace: auth.workspace,
-              template: auth.template,
-              templateVersion
-            });
-          }
-          if (objects?.deleteBuildLog) {
-            await objects.deleteBuildLog({
-              workspace: auth.workspace,
-              template: auth.template,
-              templateVersion
-            });
-          }
-          if (build && objects?.deleteBuildArtifact) {
-            await objects.deleteBuildArtifact({
-              workspace: auth.workspace,
-              template: auth.template,
-              templateVersion,
-              build
-            });
-          }
-        }
-
-        const deletedBuilds = state.templateBuilds.filter((entry) => templateVersionIds.has(entry.templateVersionId)).length;
-        const deletedReleases = state.bindingReleases.filter((entry) => entry.templateId === auth.template.id).length;
-
-        state.templates = state.templates.filter((entry) => entry.id !== auth.template.id);
-        state.templateVersions = state.templateVersions.filter((entry) => !templateVersionIds.has(entry.id));
-        state.templateBuilds = state.templateBuilds.filter((entry) => !templateVersionIds.has(entry.templateVersionId));
-        state.bindingReleases = state.bindingReleases.filter((entry) => entry.templateId !== auth.template.id);
-        state.uploadGrants = getUploadGrants(state).filter(
-          (entry) => entry.templateId !== auth.template.id && !templateVersionIds.has(entry.templateVersionId)
-        );
-
-        writeAudit(state, clock, {
-          action: "template.deleted",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template",
-          targetId: auth.template.id,
-          details: {
-            deletedVersions: templateVersions.length,
-            deletedBuilds,
-            deletedReleases
-          }
-        });
-
-        return {
-          ok: true,
-          templateId: auth.template.id,
-          deletedVersions: templateVersions.length,
-          deletedBuilds,
-          deletedReleases
-        };
-      });
+    async deleteTemplate() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async listTemplates(token) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireAuth(state, token, clock);
-        const templates = state.templates
-          .filter((entry) => entry.workspaceId === auth.workspace.id)
-          .map((template) => formatTemplate(state, template));
-        return { templates };
-      });
+    async listTemplates() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async getTemplate(token, templateId) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        return {
-          template: formatTemplateDetail(state, auth.template)
-        };
-      });
+    async getTemplate() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async listTemplateBuilds(token) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireAuth(state, token, clock);
-        const builds = state.templateBuilds
-          .map((build) => {
-            const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-            if (!version) {
-              return null;
-            }
-            const template = state.templates.find((entry) => entry.id === version.templateId);
-            if (!template || template.workspaceId !== auth.workspace.id) {
-              return null;
-            }
-            return {
-              ...build,
-              templateId: template.id,
-              templateName: template.name,
-              templateVersion: version.version,
-              templateVersionId: version.id,
-              versionStatus: version.status
-            };
-          })
-          .filter(Boolean)
-          .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-        return { builds };
-      });
+    async listTemplateBuilds() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async addTemplateVersion(token, templateId, { version, manifest = {}, notes = "" }) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
-        ensure(version, "Version is required");
-        const limits = getEffectiveLimits(auth.workspace);
-        const usage = summarizeUsage(state, auth.workspace.id);
-        validateTemplateManifest(manifest);
-        ensure(
-          !state.templateVersions.some((entry) => entry.templateId === templateId && entry.version === version),
-          "Version already exists"
-        );
-        ensure(
-          state.templateVersions.filter((entry) => entry.templateId === templateId).length < limits.maxTemplateVersionsPerTemplate,
-          "Template version limit reached",
-          403
-        );
-        ensure(usage.templateBuilds < limits.maxTemplateBuilds, "Template build limit reached", 403);
-
-        const templateVersion = {
-          id: createId("tplv"),
-          templateId,
-          version,
-          status: "queued",
-          notes,
-          manifest,
-          bundleKey: null,
-          bundleUploadedAt: null,
-          bundleContentType: null,
-          bundleBytes: 0,
-          buildLogKey: `builds/${templateId}/${version}.log`,
-          createdAt: nowIso(clock),
-          builtAt: null
-        };
-        const build = {
-          id: createId("bld"),
-          templateVersionId: templateVersion.id,
-          status: "queued",
-          builderImage: "burstflare/builder:local",
-          artifactKey: `artifacts/${templateId}/${version}.json`,
-          artifactSource: null,
-          artifactDigest: null,
-          artifactImageReference: null,
-          artifactImageDigest: null,
-          artifactConfigDigest: null,
-          artifactLayerCount: 0,
-          artifactBytes: 0,
-          artifactBuiltAt: null,
-          dispatchMode: jobs?.buildStrategy || null,
-          executionSource: null,
-          lastQueuedAt: null,
-          workflowName: null,
-          workflowInstanceId: null,
-          workflowStatus: null,
-          workflowQueuedAt: null,
-          workflowStartedAt: null,
-          workflowFinishedAt: null,
-          attempts: 0,
-          lastError: null,
-          lastFailureAt: null,
-          deadLetteredAt: null,
-          createdAt: nowIso(clock),
-          updatedAt: nowIso(clock),
-          startedAt: null,
-          finishedAt: null
-        };
-
-        state.templateVersions.push(templateVersion);
-        state.templateBuilds.push(build);
-        writeAudit(state, clock, {
-          action: "template.version_added",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template_version",
-          targetId: templateVersion.id,
-          details: { version }
-        });
-
-        await enqueueBuildDispatch({ jobs, build, clock });
-
-        return { templateVersion, build };
-      });
+    async addTemplateVersion() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    /**
-     * @param {string} token
-     * @param {string} templateId
-     * @param {string} versionId
-     * @param {UploadBodyOptions} [options]
-     */
-    async uploadTemplateVersionBundle(token: string, templateId: string, versionId: string, options: UploadBodyOptions = {}) {
-      const { body, contentType = "application/octet-stream" } = options;
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
-        const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
-        ensure(templateVersion, "Template version not found", 404);
-        return storeTemplateBundleUpload({
-          state,
-          clock,
-          objects,
-          workspace: auth.workspace,
-          template: auth.template,
-          templateVersion,
-          actorUserId: auth.user.id,
-          body,
-          contentType
-        });
-      });
+    async uploadTemplateVersionBundle() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async createTemplateVersionBundleUploadGrant(
-      token,
-      templateId,
-      versionId,
-      { contentType = "application/octet-stream", bytes = null }: any = {}
-    ) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canWrite(auth.membership.role), "Insufficient permissions", 403);
-        const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
-        ensure(templateVersion, "Template version not found", 404);
-        if (bytes !== null) {
-          ensure(Number.isInteger(bytes) && bytes > 0, "Upload bytes must be a positive integer");
-          ensure(bytes <= MAX_TEMPLATE_BUNDLE_BYTES, "Bundle exceeds size limit", 413);
-          const currentStorage = summarizeStorage(state, auth.workspace.id);
-          ensureStorageWithinLimit(state, auth.workspace, currentStorage.totalBytes - (templateVersion.bundleBytes || 0) + bytes);
-        }
-
-        const uploadGrant = createUploadGrant(state, clock, {
-          kind: "template_bundle",
-          workspaceId: auth.workspace.id,
-          templateId: auth.template.id,
-          templateVersionId: templateVersion.id,
-          actorUserId: auth.user.id,
-          contentType,
-          expectedBytes: bytes
-        });
-
-        writeAudit(state, clock, {
-          action: "template.bundle_upload_grant_created",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template_version",
-          targetId: templateVersion.id,
-          details: {
-            contentType,
-            bytes,
-            uploadGrantId: uploadGrant.id
-          }
-        });
-
-        return {
-          uploadGrant: {
-            id: uploadGrant.id,
-            method: "PUT",
-            transport: "worker_upload_grant",
-            storage: "r2",
-            expiresAt: uploadGrant.expiresAt,
-            contentType: uploadGrant.contentType,
-            expectedBytes: uploadGrant.expectedBytes
-          }
-        };
-      });
+    async createTemplateVersionBundleUploadGrant() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async getTemplateVersionBundle(token, templateId, versionId) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        const templateVersion = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
-        ensure(templateVersion, "Template version not found", 404);
-        ensure(templateVersion.bundleUploadedAt, "Template bundle not uploaded", 404);
-
-        if (objects?.getTemplateVersionBundle) {
-          const bundle = await objects.getTemplateVersionBundle({
-            workspace: auth.workspace,
-            template: auth.template,
-            templateVersion
-          });
-          ensure(bundle, "Template bundle not found", 404);
-          return {
-            body: bundle.body,
-            contentType: bundle.contentType || templateVersion.bundleContentType || "application/octet-stream",
-            bytes: bundle.bytes ?? templateVersion.bundleBytes,
-            fileName: `${templateVersion.version}.bundle`
-          };
-        }
-
-        const fallbackBody = JSON.stringify({ manifest: templateVersion.manifest }, null, 2);
-        return {
-          body: fallbackBody,
-          contentType: "application/json; charset=utf-8",
-          bytes: fallbackBody.length,
-          fileName: `${templateVersion.version}.json`
-        };
-      });
+    async getTemplateVersionBundle() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async processTemplateBuilds(token) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireManageWorkspace(state, token, clock);
-        const builds = [];
-        for (const build of state.templateBuilds) {
-          const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-          if (!version) {
-            continue;
-          }
-          const template = state.templates.find((entry) => entry.id === version.templateId);
-          if (!template || template.workspaceId !== auth.workspace.id) {
-            continue;
-          }
-          const processedBuild = await processBuildRecord({
-            state,
-            clock,
-            objects,
-            jobs,
-            build,
-            template,
-            templateVersion: version,
-            source: "manual",
-            actorUserId: auth.user.id
-          });
-          if (processedBuild) {
-            builds.push(processedBuild);
-          }
-        }
-        return { builds, processed: builds.length };
-      });
+    async processTemplateBuilds() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async processTemplateBuildById(buildId, { source = "queue", actorUserId = null }: any = {}) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const build = state.templateBuilds.find((entry) => entry.id === buildId);
-        ensure(build, "Build not found", 404);
-        const templateVersion = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-        ensure(templateVersion, "Template version missing", 404);
-        const template = state.templates.find((entry) => entry.id === templateVersion.templateId);
-        ensure(template, "Template missing", 404);
-
-        const processedBuild = await processBuildRecord({
-          state,
-          clock,
-          objects,
-          jobs,
-          build,
-          template,
-          templateVersion,
-          source,
-          actorUserId
-        });
-
-        return {
-          build: processedBuild,
-          processed: processedBuild ? 1 : 0
-        };
-      });
+    async processTemplateBuildById() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async markTemplateBuildWorkflow(buildId, patch: any = {}) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const build = state.templateBuilds.find((entry) => entry.id === buildId);
-        ensure(build, "Build not found", 404);
-        const timestamp = patch.timestamp || nowIso(clock);
-        if (patch.instanceId !== undefined) {
-          build.workflowInstanceId = patch.instanceId;
-        }
-        if (patch.name !== undefined) {
-          build.workflowName = patch.name;
-        }
-        if (patch.status) {
-          markBuildWorkflowState(build, patch.status, clock);
-        }
-        if (patch.status === "running") {
-          build.executionSource = "workflow";
-          build.dispatchMode = "workflow";
-          build.workflowQueuedAt = build.workflowQueuedAt || timestamp;
-          build.workflowStartedAt = timestamp;
-          build.workflowFinishedAt = null;
-        }
-        if (["succeeded", "failed", "dead_lettered"].includes(patch.status)) {
-          build.workflowFinishedAt = timestamp;
-        }
-        build.updatedAt = timestamp;
-        return { build };
-      });
+    async markTemplateBuildWorkflow() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async getTemplateBuildLog(token, buildId) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireAuth(state, token, clock);
-        const build = state.templateBuilds.find((entry) => entry.id === buildId);
-        ensure(build, "Build not found", 404);
-        const templateVersion = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-        ensure(templateVersion, "Template version missing", 404);
-        const template = state.templates.find((entry) => entry.id === templateVersion.templateId);
-        ensure(template && template.workspaceId === auth.workspace.id, "Build not found", 404);
-
-        if (objects?.getBuildLog) {
-          const log = await objects.getBuildLog({
-            workspace: auth.workspace,
-            template,
-            templateVersion,
-            build
-          });
-          if (log?.text) {
-            return {
-              buildId,
-              buildLogKey: templateVersion.buildLogKey,
-              contentType: log.contentType || "text/plain; charset=utf-8",
-              text: log.text
-            };
-          }
-        }
-
-        return {
-          buildId,
-          buildLogKey: templateVersion.buildLogKey,
-          contentType: "text/plain; charset=utf-8",
-          text: buildTemplateBuildLog(build, template, templateVersion)
-        };
-      });
+    async getTemplateBuildLog() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async getTemplateBuildArtifact(token, buildId) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireAuth(state, token, clock);
-        const build = state.templateBuilds.find((entry) => entry.id === buildId);
-        ensure(build, "Build not found", 404);
-        const templateVersion = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-        ensure(templateVersion, "Template version missing", 404);
-        const template = state.templates.find((entry) => entry.id === templateVersion.templateId);
-        ensure(template && template.workspaceId === auth.workspace.id, "Build not found", 404);
-
-        if (objects?.getBuildArtifact) {
-          const artifact = await objects.getBuildArtifact({
-            workspace: auth.workspace,
-            template,
-            templateVersion,
-            build
-          });
-          if (artifact?.text) {
-            return {
-              buildId,
-              artifactKey: build.artifactKey,
-              contentType: artifact.contentType || "application/json; charset=utf-8",
-              text: artifact.text
-            };
-          }
-        }
-
-        const fallback = JSON.stringify(
-          {
-            buildId,
-            templateId: template.id,
-            templateVersionId: templateVersion.id,
-            source: build.artifactSource || "unknown",
-            sourceSha256: build.artifactDigest || null,
-            imageReference: build.artifactImageReference || null,
-            imageDigest: build.artifactImageDigest || null,
-            configDigest: build.artifactConfigDigest || null,
-            layerCount: build.artifactLayerCount || 0,
-            builtAt: build.artifactBuiltAt || null
-          },
-          null,
-          2
-        );
-        return {
-          buildId,
-          artifactKey: build.artifactKey,
-          contentType: "application/json; charset=utf-8",
-          text: fallback
-        };
-      });
+    async getTemplateBuildArtifact() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async retryTemplateBuild(token, buildId) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireManageWorkspace(state, token, clock);
-        const build = state.templateBuilds.find((entry) => entry.id === buildId);
-        ensure(build, "Build not found", 404);
-        const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-        ensure(version, "Template version missing", 404);
-        const template = state.templates.find((entry) => entry.id === version.templateId);
-        ensure(template && template.workspaceId === auth.workspace.id, "Build not found", 404);
-        ensure(["failed", "dead_lettered"].includes(build.status), "Build is not retryable", 409);
-        build.status = "retrying";
-        build.updatedAt = nowIso(clock);
-        build.deadLetteredAt = null;
-        version.status = "queued";
-        writeAudit(state, clock, {
-          action: "template.build_retried",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template_build",
-          targetId: build.id
-        });
-        await enqueueBuildDispatch({ jobs, build, clock });
-        return { build };
-      });
+    async retryTemplateBuild() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async retryDeadLetteredBuilds(token) {
-      return transact(TEMPLATE_SCOPE, async (state) => {
-        const auth = requireManageWorkspace(state, token, clock);
-        const buildIds = [];
-        for (const build of state.templateBuilds) {
-          if (build.status !== "dead_lettered") {
-            continue;
-          }
-          const version = state.templateVersions.find((entry) => entry.id === build.templateVersionId);
-          if (!version) {
-            continue;
-          }
-          const template = state.templates.find((entry) => entry.id === version.templateId);
-          if (!template || template.workspaceId !== auth.workspace.id) {
-            continue;
-          }
-          build.status = "retrying";
-          build.attempts = 0;
-          build.updatedAt = nowIso(clock);
-          build.deadLetteredAt = null;
-          version.status = "queued";
-          buildIds.push(build.id);
-          writeAudit(state, clock, {
-            action: "template.build_retried_bulk",
-            actorUserId: auth.user.id,
-            workspaceId: auth.workspace.id,
-            targetType: "template_build",
-            targetId: build.id
-          });
-          await enqueueBuildDispatch({ jobs, build, clock });
-        }
-        return {
-          recovered: buildIds.length,
-          buildIds
-        };
-      });
+    async retryDeadLetteredBuilds() {
+      return {
+        recovered: 0,
+        buildIds: []
+      };
     },
 
-    async promoteTemplateVersion(token, templateId, versionId) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
-        const version = state.templateVersions.find((entry) => entry.id === versionId && entry.templateId === templateId);
-        ensure(version, "Template version not found", 404);
-        ensure(version.status === "ready", "Template version is not build-ready", 409);
-        const build = state.templateBuilds.find((entry) => entry.templateVersionId === version.id) || null;
-        auth.template.activeVersionId = version.id;
-        const release = writeBindingRelease(
-          state,
-          clock,
-          auth.workspace.id,
-          auth.template.id,
-          version.id,
-          createBindingManifest(auth.template, version, build)
-        );
-        writeAudit(state, clock, {
-          action: "template.promoted",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template",
-          targetId: auth.template.id,
-          details: { versionId, releaseId: release.id }
-        });
-        return {
-          template: formatTemplate(state, auth.template),
-          activeVersion: version,
-          release
-        };
-      });
+    async promoteTemplateVersion() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async listBindingReleases(token) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireAuth(state, token, clock);
-        const releases = state.bindingReleases
-          .filter((entry) => entry.workspaceId === auth.workspace.id)
-          .map((entry) => formatBindingRelease(state, entry));
-        return { releases };
-      });
+    async listBindingReleases() {
+      failLegacyTemplateBackendRemoved();
     },
 
-    async rollbackTemplate(token, templateId, releaseId = null) {
-      return transact(TEMPLATE_SCOPE, (state) => {
-        const auth = requireTemplateAccess(state, token, templateId, clock);
-        ensure(canManageWorkspace(auth.membership.role), "Insufficient permissions", 403);
-        const releases = state.bindingReleases.filter(
-          (entry) => entry.workspaceId === auth.workspace.id && entry.templateId === auth.template.id
-        );
-        ensure(releases.length > 0, "Template has no releases", 409);
-        const targetRelease = releaseId
-          ? releases.find((entry) => entry.id === releaseId)
-          : [...releases].reverse().find((entry) => entry.templateVersionId !== auth.template.activeVersionId);
-        ensure(targetRelease, releaseId ? "Release not found" : "No prior release available for rollback", releaseId ? 404 : 409);
-        ensure(targetRelease.templateVersionId !== auth.template.activeVersionId, "Release is already active", 409);
-        const version = state.templateVersions.find(
-          (entry) => entry.id === targetRelease.templateVersionId && entry.templateId === auth.template.id
-        );
-        ensure(version, "Template version not found", 404);
-        const build = state.templateBuilds.find((entry) => entry.templateVersionId === version.id) || null;
-        const previousVersionId = auth.template.activeVersionId || null;
-        auth.template.activeVersionId = version.id;
-        const release = writeBindingRelease(
-          state,
-          clock,
-          auth.workspace.id,
-          auth.template.id,
-          version.id,
-          targetRelease.binding || createBindingManifest(auth.template, version, build),
-          {
-            mode: "rollback",
-            sourceReleaseId: targetRelease.id
-          }
-        );
-        writeAudit(state, clock, {
-          action: "template.rolled_back",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "template",
-          targetId: auth.template.id,
-          details: {
-            previousVersionId,
-            versionId: version.id,
-            sourceReleaseId: targetRelease.id,
-            releaseId: release.id
-          }
-        });
-        return {
-          template: formatTemplate(state, auth.template),
-          activeVersion: version,
-          targetRelease: formatBindingRelease(state, targetRelease),
-          release: formatBindingRelease(state, release)
-        };
-      });
+    async rollbackTemplate() {
+      failLegacyTemplateBackendRemoved();
     },
 
     async createSession(token, { name, templateId = null, instanceId = null }) {
       return transact(SESSION_SCOPE, (state) => {
         let auth: any;
-        let template: any = null;
-        let activeVersion: any = null;
         let instance: any = null;
         ensure(name, "Session name is required");
-        if (instanceId) {
-          auth = requireInstanceAccess(state, token, instanceId, clock);
-          instance = auth.instance;
-        } else {
-          auth = requireWriteAccess(state, token, clock);
-          template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
-          ensure(template, "Template not found", 404);
-          ensure(!template.archivedAt, "Template is archived", 409);
-          activeVersion = getActiveVersion(state, template.id);
-          ensure(activeVersion, "Template has no promoted version", 409);
-        }
+        ensure(instanceId, "Instance is required");
+        auth = requireInstanceAccess(state, token, instanceId, clock);
+        instance = auth.instance;
         ensure(
           !state.sessions.some(
             (entry) => entry.workspaceId === auth.workspace.id && entry.name.toLowerCase() === name.toLowerCase() && entry.state !== "deleted"
@@ -4461,7 +3774,7 @@ export function createBurstFlareService(options: any = {}) {
         const session = {
           id: createId("ses"),
           workspaceId: auth.workspace.id,
-          templateId: template?.id || null,
+          templateId: null,
           instanceId: instance?.id || null,
           name,
           state: "created",
@@ -4476,8 +3789,8 @@ export function createBurstFlareService(options: any = {}) {
           runtimeVersion: 0,
           runtimeOperationId: null,
           runtimeUpdatedAt: null,
-          persistedPaths: instance ? [...(instance.persistedPaths || [])] : [...(activeVersion?.manifest?.persistedPaths || [])],
-          sleepTtlSeconds: instance ? instance.sleepTtlSeconds || null : activeVersion?.manifest?.sleepTtlSeconds || null,
+          persistedPaths: [...(instance.persistedPaths || [])],
+          sleepTtlSeconds: instance.sleepTtlSeconds || null,
           sshAuthorizedKeys: [],
           previewUrl: null
         };
@@ -4492,7 +3805,7 @@ export function createBurstFlareService(options: any = {}) {
           targetId: session.id,
           details: {
             name,
-            templateId: template?.id || null,
+            templateId: null,
             instanceId: instance?.id || null
           }
         });
@@ -5130,10 +4443,9 @@ export function createBurstFlareService(options: any = {}) {
         const report = {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           members: state.memberships.filter((entry) => entry.workspaceId === auth.workspace.id).length,
-          templates: state.templates.filter((entry) => entry.workspaceId === auth.workspace.id).length,
-          templatesArchived: state.templates.filter(
-            (entry) => entry.workspaceId === auth.workspace.id && entry.archivedAt
-          ).length,
+          instances: state.instances.filter((entry) => entry.userId === auth.workspace.ownerUserId).length,
+          templates: 0,
+          templatesArchived: 0,
           buildsQueued: workspaceBuilds.filter((entry) => ["queued", "retrying"].includes(entry.build.status)).length,
           buildsBuilding: workspaceBuilds.filter((entry) => entry.build.status === "building").length,
           buildsStuck: reconcileCandidates.stuckBuilds.length,
@@ -5153,7 +4465,7 @@ export function createBurstFlareService(options: any = {}) {
             }
             return new Date(entry.expiresAt).getTime() > reportAt;
           }).length,
-          releases: state.bindingReleases.filter((entry) => entry.workspaceId === auth.workspace.id).length,
+          releases: 0,
           limits: getEffectiveLimits(auth.workspace),
           reconcileCandidates: {
             runningSessions: reconcileCandidates.runningSessions.length,
@@ -5250,35 +4562,12 @@ export function createBurstFlareService(options: any = {}) {
       return transact(ADMIN_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
         const workspaceId = auth.workspace.id;
-        const templateIds = new Set(
-          state.templates.filter((entry) => entry.workspaceId === workspaceId).map((entry) => entry.id)
-        );
-        const templateVersionIds = new Set(
-          state.templateVersions.filter((entry) => templateIds.has(entry.templateId)).map((entry) => entry.id)
-        );
         const sessionIds = new Set(
           state.sessions.filter((entry) => entry.workspaceId === workspaceId).map((entry) => entry.id)
         );
         const artifacts = {
-          templateBundles: state.templateVersions
-            .filter((entry) => templateIds.has(entry.templateId) && entry.bundleUploadedAt)
-            .map((entry) => ({
-              templateVersionId: entry.id,
-              bundleKey: entry.bundleKey,
-              contentType: entry.bundleContentType,
-              bytes: entry.bundleBytes,
-              uploadedAt: entry.bundleUploadedAt
-            })),
-          buildArtifacts: state.templateBuilds
-            .filter((entry) => templateVersionIds.has(entry.templateVersionId) && entry.artifactBuiltAt)
-            .map((entry) => ({
-              buildId: entry.id,
-              artifactKey: entry.artifactKey,
-              imageReference: entry.artifactImageReference,
-              imageDigest: entry.artifactImageDigest,
-              bytes: entry.artifactBytes,
-              builtAt: entry.artifactBuiltAt
-            })),
+          templateBundles: [],
+          buildArtifacts: [],
           snapshots: Array.from(sessionIds)
             .map((sessionId) => getLatestSessionSnapshot(state, sessionId))
             .filter(Boolean)
@@ -5298,8 +4587,7 @@ export function createBurstFlareService(options: any = {}) {
           targetType: "workspace",
           targetId: workspaceId,
           details: {
-            templates: templateIds.size,
-            templateVersions: templateVersionIds.size,
+            instances: state.instances.filter((entry) => entry.userId === auth.workspace.ownerUserId).length,
             sessions: sessionIds.size
           }
         });
@@ -5309,11 +4597,12 @@ export function createBurstFlareService(options: any = {}) {
             exportedAt: nowIso(clock),
             workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
             members: state.memberships.filter((entry) => entry.workspaceId === workspaceId),
-            templates: state.templates
-              .filter((entry) => entry.workspaceId === workspaceId)
-              .map((entry) => formatTemplate(state, entry)),
-            builds: state.templateBuilds.filter((entry) => templateVersionIds.has(entry.templateVersionId)),
-            releases: state.bindingReleases.filter((entry) => entry.workspaceId === workspaceId),
+            instances: state.instances
+              .filter((entry) => entry.userId === auth.workspace.ownerUserId)
+              .map((entry) => formatInstance(entry)),
+            templates: [],
+            builds: [],
+            releases: [],
             sessions: state.sessions
               .filter((entry) => entry.workspaceId === workspaceId)
               .map((entry) => formatSession(state, entry)),

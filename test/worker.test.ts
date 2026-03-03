@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createMemoryStore } from "@burstflare/shared";
 import { createApp, createWorkerService, handleQueueBatch, handleScheduled, runReconcile } from "../apps/edge/src/app.js";
 
 function toBytes(value: Uint8Array | ArrayBuffer | string | unknown): Uint8Array {
@@ -888,30 +889,32 @@ test("worker scheduled handler enqueues reconcile jobs", async () => {
   ]);
 });
 
-test("worker queue consumer processes queued builds with the shared service state", async () => {
+test("worker queue consumer ignores legacy build jobs and still runs reconcile", async () => {
+  let tick = Date.parse("2026-03-03T00:00:00.000Z");
+  const store = createMemoryStore();
   const service = createWorkerService({
-    BUILD_QUEUE: {
-      async send() {}
-    },
-    TEMPLATE_BUCKET: createBucket(),
-    BUILD_BUCKET: createBucket()
+    store,
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
   });
 
   const owner = await service.registerUser({
     email: "queue-consumer@example.com",
     name: "Queue Consumer"
   });
-  const template = await service.createTemplate(owner.token, {
-    name: "queue-template",
-    description: "queue test"
+  const instance = await service.createInstance(owner.token, {
+    name: "queue-instance",
+    description: "queue reconcile coverage",
+    image: "registry.cloudflare.com/test/queue-instance:1.0.0",
+    sleepTtlSeconds: 1
   });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/test/queue-template:1.0.0"
-    }
+  const session = await service.createSession(owner.token, {
+    name: "queue-session",
+    instanceId: instance.instance.id
   });
-  assert.equal(version.build.status, "queued");
+  await service.startSession(owner.token, session.session.id);
 
   await handleQueueBatch(
     {
@@ -919,7 +922,12 @@ test("worker queue consumer processes queued builds with the shared service stat
         {
           body: {
             type: "build",
-            buildId: version.build.id
+            buildId: "bld_removed"
+          }
+        },
+        {
+          body: {
+            type: "reconcile"
           }
         }
       ]
@@ -927,11 +935,8 @@ test("worker queue consumer processes queued builds with the shared service stat
     { service }
   );
 
-  const builds = await service.listTemplateBuilds(owner.token);
-  const processedBuild = builds.builds.find((entry: any) => entry.id === version.build.id);
-  assert.ok(processedBuild);
-  assert.equal(processedBuild.status, "succeeded");
-  assert.equal(processedBuild.executionSource, "queue");
+  const detail = await service.getSession(owner.token, session.session.id);
+  assert.equal(detail.session.state, "sleeping");
 });
 
 test("worker exposes targeted operator reconcile endpoints", async () => {
@@ -1872,8 +1877,13 @@ test("worker coordinates session lifecycle through the session container durable
   ]);
 });
 
-test("worker exposes workflow-backed build dispatch", async () => {
+test("worker health reports build dispatch removed", async () => {
   const healthApp = createApp({
+    BUILD_QUEUE: {
+      async send() {
+        return null;
+      }
+    },
     BUILD_WORKFLOW_NAME: "burstflare-builds",
     BUILD_WORKFLOW: {
       async create() {
@@ -1883,53 +1893,8 @@ test("worker exposes workflow-backed build dispatch", async () => {
   });
   const health = await requestJson(healthApp, "/api/health");
   assert.equal(health.response.status, 200);
-  assert.equal(health.data.runtime.workflowEnabled, true);
-  assert.equal(health.data.runtime.buildDispatchMode, "workflow");
-
-  const workflowRuns: any[] = [];
-  const service = createWorkerService({
-    BUILD_WORKFLOW_NAME: "burstflare-builds",
-    BUILD_WORKFLOW: {
-      async create(payload: any) {
-        workflowRuns.push(payload);
-        return {
-          id: payload.id
-        };
-      }
-    }
-  });
-
-  const owner = await service.registerUser({
-    email: "workflow-worker@example.com",
-    name: "Workflow Worker"
-  });
-  const template = await service.createTemplate(owner.token, {
-    name: "workflow-worker",
-    description: "Workflow worker template"
-  });
-  const version = await service.addTemplateVersion(owner.token, template.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/workflow-worker:1.0.0"
-    }
-  });
-
-  assert.equal(version.build.dispatchMode, "workflow");
-  assert.equal(version.build.workflowStatus, "queued");
-  assert.equal(workflowRuns.length, 1);
-  assert.equal(workflowRuns[0].params.buildId, version.build.id);
-  assert.equal(workflowRuns[0].params.workflowName, "burstflare-builds");
-
-  await service.markTemplateBuildWorkflow(version.build.id, {
-    status: "running",
-    instanceId: version.build.workflowInstanceId,
-    name: "burstflare-builds"
-  });
-  const processed = await service.processTemplateBuildById(version.build.id, {
-    source: "workflow"
-  });
-  assert.equal(processed.build.status, "succeeded");
-  assert.equal(processed.build.workflowStatus, "succeeded");
+  assert.equal(health.data.runtime.workflowEnabled, false);
+  assert.equal(health.data.runtime.buildDispatchMode, null);
 });
 
 test("worker replays the latest snapshot into the container runtime on session start", async () => {

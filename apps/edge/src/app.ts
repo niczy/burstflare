@@ -346,110 +346,11 @@ function devicePage(code: string | null): string {
 }
 
 function createObjectStore(options: any): any {
-  if (!options.TEMPLATE_BUCKET && !options.BUILD_BUCKET && !options.SNAPSHOT_BUCKET) {
+  if (!options.SNAPSHOT_BUCKET) {
     return null;
   }
 
   return {
-    async putTemplateVersionBundle({ templateVersion, body, contentType }: { templateVersion: any; body: any; contentType: string }) {
-      if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
-        return null;
-      }
-      await options.TEMPLATE_BUCKET.put(templateVersion.bundleKey, body, {
-        httpMetadata: { contentType }
-      });
-      return { key: templateVersion.bundleKey };
-    },
-
-    async getTemplateVersionBundle({ templateVersion }: { templateVersion: any }) {
-      if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
-        return null;
-      }
-      const object = await options.TEMPLATE_BUCKET.get(templateVersion.bundleKey);
-      if (!object) {
-        return null;
-      }
-      return {
-        body: await object.arrayBuffer(),
-        contentType: object.httpMetadata?.contentType || templateVersion.bundleContentType || "application/octet-stream",
-        bytes: object.size ?? templateVersion.bundleBytes
-      };
-    },
-
-    async deleteTemplateVersionBundle({ templateVersion }: { templateVersion: any }) {
-      if (!options.TEMPLATE_BUCKET || !templateVersion.bundleKey) {
-        return null;
-      }
-      await options.TEMPLATE_BUCKET.delete(templateVersion.bundleKey);
-      return { key: templateVersion.bundleKey };
-    },
-
-    async putBuildLog({ templateVersion, log }: { templateVersion: any; log: any }) {
-      if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
-        return null;
-      }
-      await options.BUILD_BUCKET.put(templateVersion.buildLogKey, log, {
-        httpMetadata: { contentType: "text/plain; charset=utf-8" }
-      });
-      return { key: templateVersion.buildLogKey };
-    },
-
-    async getBuildLog({ templateVersion }: { templateVersion: any }) {
-      if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
-        return null;
-      }
-      const object = await options.BUILD_BUCKET.get(templateVersion.buildLogKey);
-      if (!object) {
-        return null;
-      }
-      return {
-        text: await object.text(),
-        contentType: object.httpMetadata?.contentType || "text/plain; charset=utf-8",
-        bytes: object.size ?? 0
-      };
-    },
-
-    async deleteBuildLog({ templateVersion }: { templateVersion: any }) {
-      if (!options.BUILD_BUCKET || !templateVersion.buildLogKey) {
-        return null;
-      }
-      await options.BUILD_BUCKET.delete(templateVersion.buildLogKey);
-      return { key: templateVersion.buildLogKey };
-    },
-
-    async putBuildArtifact({ build, artifact }: { build: any; artifact: any }) {
-      if (!options.BUILD_BUCKET || !build.artifactKey) {
-        return null;
-      }
-      await options.BUILD_BUCKET.put(build.artifactKey, artifact, {
-        httpMetadata: { contentType: "application/json; charset=utf-8" }
-      });
-      return { key: build.artifactKey };
-    },
-
-    async getBuildArtifact({ build }: { build: any }) {
-      if (!options.BUILD_BUCKET || !build.artifactKey) {
-        return null;
-      }
-      const object = await options.BUILD_BUCKET.get(build.artifactKey);
-      if (!object) {
-        return null;
-      }
-      return {
-        text: await object.text(),
-        contentType: object.httpMetadata?.contentType || "application/json; charset=utf-8",
-        bytes: object.size ?? 0
-      };
-    },
-
-    async deleteBuildArtifact({ build }: { build: any }) {
-      if (!options.BUILD_BUCKET || !build.artifactKey) {
-        return null;
-      }
-      await options.BUILD_BUCKET.delete(build.artifactKey);
-      return { key: build.artifactKey };
-    },
-
     async putSnapshot({ snapshot, body, contentType }: { snapshot: any; body: any; contentType: string }) {
       if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
         return null;
@@ -815,52 +716,11 @@ async function parseStripeWebhookEvent(request: Request, options: any): Promise<
 }
 
 function createJobQueue(options: any): any {
-  if (!options.BUILD_QUEUE && !options.RECONCILE_QUEUE && !options.BUILD_WORKFLOW) {
+  if (!options.RECONCILE_QUEUE) {
     return null;
   }
 
   return {
-    buildStrategy: options.BUILD_WORKFLOW ? "workflow" : options.BUILD_QUEUE ? "queue" : null,
-    async enqueueBuild(buildId: string) {
-      const dispatchedAt = new Date().toISOString();
-      if (options.BUILD_WORKFLOW && typeof options.BUILD_WORKFLOW.create === "function") {
-        const instanceId = `bwf_${buildId}_${globalThis.crypto.randomUUID()}`;
-        const workflowName = options.BUILD_WORKFLOW_NAME || "burstflare-builds";
-        await options.BUILD_WORKFLOW.create({
-          id: instanceId,
-          params: {
-            buildId,
-            instanceId,
-            workflowName,
-            dispatchedAt
-          }
-        });
-        return {
-          buildId,
-          dispatch: "workflow",
-          dispatchedAt,
-          workflow: {
-            name: workflowName,
-            instanceId,
-            dispatchedAt
-          }
-        };
-      }
-      if (!options.BUILD_QUEUE) {
-        return null;
-      }
-      await options.BUILD_QUEUE.send({
-        type: "build",
-        buildId,
-        dispatchedAt
-      });
-      return {
-        buildId,
-        dispatch: "queue",
-        dispatchedAt
-      };
-    },
-
     async enqueueReconcile() {
       if (!options.RECONCILE_QUEUE) {
         return null;
@@ -1342,12 +1202,6 @@ export async function handleQueueBatch(batch: any, options: any = {}): Promise<v
   const service = createWorkerService(options);
   for (const message of batch.messages) {
     const body = message.body || {};
-    if (body.type === "build" && body.buildId) {
-      await service.processTemplateBuildById(body.buildId, {
-        source: "queue"
-      });
-      continue;
-    }
     if (body.type === "reconcile") {
       await runReconcile({
         ...options,
@@ -1875,8 +1729,8 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           runtime: {
             containersEnabled: hasContainerBinding(),
             turnstileEnabled: turnstile.enabled,
-            workflowEnabled: jobs?.buildStrategy === "workflow",
-            buildDispatchMode: jobs?.buildStrategy || "manual"
+            workflowEnabled: false,
+            buildDispatchMode: null
           }
         })
     },
