@@ -1087,7 +1087,7 @@ flare ssh &lt;sessionId&gt;</pre>
           </div>
           <div>
             <label for="persistedPaths">Persisted Paths</label>
-            <input id="persistedPaths" type="text" placeholder="/workspace,/home/dev/.cache" />
+            <input id="persistedPaths" type="text" placeholder="/workspace,/home/flare/.cache" />
           </div>
           <div class="row">
             <button class="secondary" id="addVersionButton">Queue Build</button>

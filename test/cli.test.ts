@@ -259,7 +259,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
         "--sleep-ttl-seconds",
         "1",
         "--persisted-paths",
-        "/workspace,/home/dev/.cache",
+        "/workspace,/home/flare/.cache",
         "--url",
         "http://local"
       ],
@@ -274,7 +274,7 @@ test("cli can run device flow, build processing, session lifecycle, and reportin
     const versionOutput = JSON.parse(stdout.data.trim());
     const versionId = versionOutput.templateVersion.id;
     assert.equal(versionOutput.bundle.contentType, "text/plain");
-    assert.deepEqual(versionOutput.templateVersion.manifest.persistedPaths, ["/workspace", "/home/dev/.cache"]);
+    assert.deepEqual(versionOutput.templateVersion.manifest.persistedPaths, ["/workspace", "/home/flare/.cache"]);
 
     stdout.data = "";
 
