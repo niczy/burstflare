@@ -48,15 +48,13 @@ const PLANS = {
 const DEFAULT_BILLING_CATALOG = {
   currency: "usd",
   runtimeMinuteUsd: 0.03,
-  snapshotUsd: 0.02,
-  templateBuildUsd: 0.1
+  storageGbMonthUsd: 0.015
 };
 
 type BillingCatalogInput = {
   currency?: string;
   runtimeMinuteUsd?: number;
-  snapshotUsd?: number;
-  templateBuildUsd?: number;
+  storageGbMonthUsd?: number;
 };
 
 type ServiceError = Error & {
@@ -135,8 +133,7 @@ function normalizeUsageTotals(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     runtimeMinutes: Number.isFinite(source.runtimeMinutes) ? Math.max(0, Number(source.runtimeMinutes)) : 0,
-    snapshots: Number.isFinite(source.snapshots) ? Math.max(0, Number(source.snapshots)) : 0,
-    templateBuilds: Number.isFinite(source.templateBuilds) ? Math.max(0, Number(source.templateBuilds)) : 0
+    storageGbDays: Number.isFinite(source.storageGbDays) ? Math.max(0, Number(source.storageGbDays)) : 0
   };
 }
 
@@ -243,17 +240,13 @@ function normalizeBillingCatalog(catalog: BillingCatalogInput | null | undefined
   const runtimeMinuteUsd = Number.isFinite(source.runtimeMinuteUsd)
     ? Math.max(0, Number(source.runtimeMinuteUsd))
     : DEFAULT_BILLING_CATALOG.runtimeMinuteUsd;
-  const snapshotUsd = Number.isFinite(source.snapshotUsd)
-    ? Math.max(0, Number(source.snapshotUsd))
-    : DEFAULT_BILLING_CATALOG.snapshotUsd;
-  const templateBuildUsd = Number.isFinite(source.templateBuildUsd)
-    ? Math.max(0, Number(source.templateBuildUsd))
-    : DEFAULT_BILLING_CATALOG.templateBuildUsd;
+  const storageGbMonthUsd = Number.isFinite(source.storageGbMonthUsd)
+    ? Math.max(0, Number(source.storageGbMonthUsd))
+    : DEFAULT_BILLING_CATALOG.storageGbMonthUsd;
   return {
     currency,
     runtimeMinuteUsd,
-    snapshotUsd,
-    templateBuildUsd
+    storageGbMonthUsd
   };
 }
 
@@ -261,16 +254,18 @@ function priceUsageSummary(usage, catalog) {
   const normalizedUsage = normalizeUsageTotals(usage);
   const normalizedCatalog = normalizeBillingCatalog(catalog);
   const runtimeUsd = normalizedUsage.runtimeMinutes * normalizedCatalog.runtimeMinuteUsd;
-  const snapshotsUsd = normalizedUsage.snapshots * normalizedCatalog.snapshotUsd;
-  const templateBuildsUsd = normalizedUsage.templateBuilds * normalizedCatalog.templateBuildUsd;
-  const totalUsd = runtimeUsd + snapshotsUsd + templateBuildsUsd;
+  const storageGbMonths = Number((normalizedUsage.storageGbDays / 30).toFixed(4));
+  const storageUsd = storageGbMonths * normalizedCatalog.storageGbMonthUsd;
+  const totalUsd = runtimeUsd + storageUsd;
   return {
     currency: normalizedCatalog.currency,
-    usage: normalizedUsage,
+    usage: {
+      ...normalizedUsage,
+      storageGbMonths
+    },
     rates: {
       runtimeMinuteUsd: normalizedCatalog.runtimeMinuteUsd,
-      snapshotUsd: normalizedCatalog.snapshotUsd,
-      templateBuildUsd: normalizedCatalog.templateBuildUsd
+      storageGbMonthUsd: normalizedCatalog.storageGbMonthUsd
     },
     lineItems: [
       {
@@ -280,16 +275,10 @@ function priceUsageSummary(usage, catalog) {
         amountUsd: Number(runtimeUsd.toFixed(4))
       },
       {
-        metric: "snapshots",
-        quantity: normalizedUsage.snapshots,
-        unitAmountUsd: normalizedCatalog.snapshotUsd,
-        amountUsd: Number(snapshotsUsd.toFixed(4))
-      },
-      {
-        metric: "templateBuilds",
-        quantity: normalizedUsage.templateBuilds,
-        unitAmountUsd: normalizedCatalog.templateBuildUsd,
-        amountUsd: Number(templateBuildsUsd.toFixed(4))
+        metric: "storageGbMonths",
+        quantity: storageGbMonths,
+        unitAmountUsd: normalizedCatalog.storageGbMonthUsd,
+        amountUsd: Number(storageUsd.toFixed(4))
       }
     ],
     totalUsd: Number(totalUsd.toFixed(4))
@@ -538,6 +527,35 @@ function createRecoveryCode() {
 
 function findUserById(state, userId) {
   return state.users.find((user) => user.id === userId) || null;
+}
+
+function getWorkspaceBillingOwner(state, workspace) {
+  if (!workspace?.ownerUserId) {
+    return null;
+  }
+  return findUserById(state, workspace.ownerUserId);
+}
+
+function getWorkspaceBillingSource(state, workspace, fallbackUser = null) {
+  const owner = getWorkspaceBillingOwner(state, workspace) || fallbackUser || null;
+  if (owner?.billing !== undefined) {
+    return owner;
+  }
+  if (workspace?.billing !== undefined) {
+    return workspace;
+  }
+  return owner || workspace || null;
+}
+
+function ensureWorkspaceBillingOwner(state, workspace, fallbackUser = null) {
+  const owner = getWorkspaceBillingOwner(state, workspace) || fallbackUser || null;
+  if (!owner) {
+    return workspace || null;
+  }
+  if (owner.billing === undefined && workspace?.billing !== undefined) {
+    owner.billing = normalizeWorkspaceBilling(workspace.billing);
+  }
+  return owner;
 }
 
 function formatUser(user) {
@@ -995,8 +1013,29 @@ function summarizeUsage(state, workspaceId) {
 }
 
 function summarizeBillableUsage(state, workspaceId) {
-  const usage = summarizeUsage(state, workspaceId);
-  return normalizeUsageTotals(usage);
+  const usage = {
+    runtimeMinutes: 0,
+    storageGbDays: 0
+  };
+  for (const event of state.usageEvents) {
+    if (event.workspaceId !== workspaceId) {
+      continue;
+    }
+    if (event.kind === "runtime_minutes") {
+      usage.runtimeMinutes += event.value;
+    }
+    if (event.kind === "storage_gb_day") {
+      usage.storageGbDays += event.value;
+    }
+  }
+  const storage = summarizeStorage(state, workspaceId);
+  const currentStorageBytes = storage.snapshotBytes;
+  return {
+    ...normalizeUsageTotals(usage),
+    storageGbMonths: Number((usage.storageGbDays / 30).toFixed(4)),
+    currentStorageBytes,
+    currentStorageGb: Number((currentStorageBytes / (1024 * 1024 * 1024)).toFixed(4))
+  };
 }
 
 function diffBillableUsageTotals(current, previous) {
@@ -1004,8 +1043,7 @@ function diffBillableUsageTotals(current, previous) {
   const prior = normalizeUsageTotals(previous);
   return {
     runtimeMinutes: Math.max(0, next.runtimeMinutes - prior.runtimeMinutes),
-    snapshots: Math.max(0, next.snapshots - prior.snapshots),
-    templateBuilds: Math.max(0, next.templateBuilds - prior.templateBuilds)
+    storageGbDays: Math.max(0, Number((next.storageGbDays - prior.storageGbDays).toFixed(6)))
   };
 }
 
@@ -1028,12 +1066,13 @@ function getRunningSessionCount(state, workspaceId) {
 
 function formatWorkspace(state, workspace, role) {
   const memberCount = state.memberships.filter((entry) => entry.workspaceId === workspace.id).length;
+  const billingSource = getWorkspaceBillingSource(state, workspace);
   return {
     id: workspace.id,
     name: workspace.name,
     ownerUserId: workspace.ownerUserId,
     plan: workspace.plan,
-    billing: formatWorkspaceBilling(workspace),
+    billing: formatWorkspaceBilling(billingSource),
     createdAt: workspace.createdAt,
     quotaOverrides: getWorkspaceQuotaOverrides(workspace),
     role,
@@ -1851,6 +1890,23 @@ export function createBurstFlareService(options: any = {}) {
       }
     }
 
+    const billingUser = state.users.find((entry) => {
+      const billing = normalizeWorkspaceBilling(entry.billing);
+      if (subscriptionId && billing.subscriptionId === subscriptionId) {
+        return true;
+      }
+      if (customerId && billing.customerId === customerId) {
+        return true;
+      }
+      if (checkoutSessionId && billing.lastCheckoutSessionId === checkoutSessionId) {
+        return true;
+      }
+      return false;
+    });
+    if (billingUser) {
+      return getUserWorkspace(state, billingUser.id);
+    }
+
     return (
       state.workspaces.find((entry) => {
         const billing = normalizeWorkspaceBilling(entry.billing);
@@ -2186,6 +2242,7 @@ export function createBurstFlareService(options: any = {}) {
             id: createId("usr"),
             email,
             name: name || defaultNameFromEmail(email),
+            billing: null,
             recoveryCodes: [],
             createdAt: nowIso(clock)
           };
@@ -3165,14 +3222,14 @@ export function createBurstFlareService(options: any = {}) {
     async getWorkspaceBilling(token) {
       return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
-        const usage = summarizeUsage(state, auth.workspace.id);
         const billableUsage = summarizeBillableUsage(state, auth.workspace.id);
-        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billingSource = getWorkspaceBillingSource(state, auth.workspace, auth.user);
+        const billing = normalizeWorkspaceBilling(billingSource?.billing);
         const pendingUsage = diffBillableUsageTotals(billableUsage, billing.billedUsageTotals);
         return {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
-          billing: formatWorkspaceBilling(auth.workspace),
-          usage,
+          billing: formatWorkspaceBilling(billingSource),
+          usage: billableUsage,
           pricing: priceUsageSummary(billableUsage, billingCatalog),
           pendingInvoiceEstimate: priceUsageSummary(pendingUsage, billingCatalog)
         };
@@ -3189,21 +3246,22 @@ export function createBurstFlareService(options: any = {}) {
         const auth = requireManageWorkspace(state, token, clock);
         const provider = requireBillingProvider();
         ensure(typeof provider.createCheckoutSession === "function", "Billing provider does not support checkout", 501);
-        const currentBilling = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billingOwner = ensureWorkspaceBillingOwner(state, auth.workspace, auth.user);
+        const currentBilling = normalizeWorkspaceBilling(billingOwner?.billing);
         const session = await provider.createCheckoutSession({
           successUrl: ensureAbsoluteHttpUrl(successUrl, "Success URL"),
           cancelUrl: ensureAbsoluteHttpUrl(cancelUrl, "Cancel URL"),
-          user: formatUser(auth.user),
+          user: formatUser(billingOwner),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           membership: auth.membership,
-          billing: formatWorkspaceBilling(auth.workspace),
+          billing: formatWorkspaceBilling(billingOwner),
           pricing: priceUsageSummary(summarizeBillableUsage(state, auth.workspace.id), billingCatalog)
         });
         ensure(session && typeof session === "object", "Billing provider returned an invalid checkout session", 502);
         ensure(typeof session.id === "string" && session.id, "Billing checkout session id missing", 502);
         ensure(typeof session.url === "string" && session.url, "Billing checkout session URL missing", 502);
 
-        writeWorkspaceBilling(auth.workspace, clock, {
+        writeWorkspaceBilling(billingOwner, clock, {
           provider: session.provider || provider.providerName || currentBilling.provider || "external",
           customerId:
             typeof session.customerId === "string" && session.customerId ? session.customerId : currentBilling.customerId,
@@ -3236,7 +3294,7 @@ export function createBurstFlareService(options: any = {}) {
             url: session.url
           },
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
-          billing: formatWorkspaceBilling(auth.workspace)
+          billing: formatWorkspaceBilling(billingOwner)
         };
       });
     },
@@ -3251,21 +3309,22 @@ export function createBurstFlareService(options: any = {}) {
         const auth = requireManageWorkspace(state, token, clock);
         const provider = requireBillingProvider();
         ensure(typeof provider.createPortalSession === "function", "Billing provider does not support billing portal", 501);
-        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billingOwner = ensureWorkspaceBillingOwner(state, auth.workspace, auth.user);
+        const billing = normalizeWorkspaceBilling(billingOwner?.billing);
         ensure(billing.customerId, "Workspace is not linked to a billing customer", 409);
 
         const session = await provider.createPortalSession({
           returnUrl: ensureAbsoluteHttpUrl(returnUrl, "Return URL"),
-          user: formatUser(auth.user),
+          user: formatUser(billingOwner),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           membership: auth.membership,
-          billing: formatWorkspaceBilling(auth.workspace)
+          billing: formatWorkspaceBilling(billingOwner)
         });
         ensure(session && typeof session === "object", "Billing provider returned an invalid portal session", 502);
         ensure(typeof session.id === "string" && session.id, "Billing portal session id missing", 502);
         ensure(typeof session.url === "string" && session.url, "Billing portal session URL missing", 502);
 
-        writeWorkspaceBilling(auth.workspace, clock, {
+        writeWorkspaceBilling(billingOwner, clock, {
           provider: session.provider || provider.providerName || billing.provider || "external",
           lastPortalSessionId: session.id
         });
@@ -3287,7 +3346,7 @@ export function createBurstFlareService(options: any = {}) {
             url: session.url
           },
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
-          billing: formatWorkspaceBilling(auth.workspace)
+          billing: formatWorkspaceBilling(billingOwner)
         };
       });
     },
@@ -3297,7 +3356,8 @@ export function createBurstFlareService(options: any = {}) {
         const auth = requireManageWorkspace(state, token, clock);
         const provider = requireBillingProvider();
         ensure(typeof provider.createUsageInvoice === "function", "Billing provider does not support usage invoices", 501);
-        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billingOwner = ensureWorkspaceBillingOwner(state, auth.workspace, auth.user);
+        const billing = normalizeWorkspaceBilling(billingOwner?.billing);
         ensure(billing.customerId, "Workspace is not linked to a billing customer", 409);
 
         const currentUsage = summarizeBillableUsage(state, auth.workspace.id);
@@ -3308,24 +3368,24 @@ export function createBurstFlareService(options: any = {}) {
         if (!hasBillableUsage) {
           return {
             invoice: null,
-            billing: formatWorkspaceBilling(auth.workspace),
-            usage: summarizeUsage(state, auth.workspace.id),
+            billing: formatWorkspaceBilling(billingOwner),
+            usage: currentUsage,
             pendingInvoiceEstimate: estimate
           };
         }
 
         const invoice = await provider.createUsageInvoice({
-          user: formatUser(auth.user),
+          user: formatUser(billingOwner),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
           membership: auth.membership,
-          billing: formatWorkspaceBilling(auth.workspace),
+          billing: formatWorkspaceBilling(billingOwner),
           usage: pendingUsage,
           pricing: estimate
         });
         ensure(invoice && typeof invoice === "object", "Billing provider returned an invalid invoice", 502);
         ensure(typeof invoice.id === "string" && invoice.id, "Billing invoice id missing", 502);
 
-        writeWorkspaceBilling(auth.workspace, clock, {
+        writeWorkspaceBilling(billingOwner, clock, {
           provider: invoice.provider || provider.providerName || billing.provider || "external",
           billingStatus:
             typeof invoice.billingStatus === "string" && invoice.billingStatus
@@ -3348,8 +3408,7 @@ export function createBurstFlareService(options: any = {}) {
           details: {
             amountUsd: Number(estimate.totalUsd.toFixed(4)),
             runtimeMinutes: pendingUsage.runtimeMinutes,
-            snapshots: pendingUsage.snapshots,
-            templateBuilds: pendingUsage.templateBuilds
+            storageGbDays: pendingUsage.storageGbDays
           }
         });
 
@@ -3363,10 +3422,10 @@ export function createBurstFlareService(options: any = {}) {
             ),
             currency: invoice.currency || estimate.currency
           },
-          billing: formatWorkspaceBilling(auth.workspace),
-          usage: summarizeUsage(state, auth.workspace.id),
+          billing: formatWorkspaceBilling(billingOwner),
+          usage: currentUsage,
           pendingInvoiceEstimate: priceUsageSummary(
-            diffBillableUsageTotals(currentUsage, normalizeWorkspaceBilling(auth.workspace.billing).billedUsageTotals),
+            diffBillableUsageTotals(currentUsage, normalizeWorkspaceBilling(billingOwner?.billing).billedUsageTotals),
             billingCatalog
           )
         };
@@ -3379,11 +3438,12 @@ export function createBurstFlareService(options: any = {}) {
         const provider = requireBillingProvider();
         ensure(typeof provider.addPaymentMethod === "function", "Billing provider does not support adding payment methods", 501);
         ensure(typeof input?.paymentMethodId === "string" && input.paymentMethodId, "Payment method id is required", 400);
+        const billingOwner = ensureWorkspaceBillingOwner(state, auth.workspace, auth.user);
 
         const customerId = await provider.ensureCustomer({
-          user: formatUser(auth.user),
+          user: formatUser(billingOwner),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
-          billing: formatWorkspaceBilling(auth.workspace)
+          billing: formatWorkspaceBilling(billingOwner)
         });
 
         const result = await provider.addPaymentMethod({
@@ -3392,7 +3452,7 @@ export function createBurstFlareService(options: any = {}) {
         });
         ensure(result && typeof result === "object", "Billing provider returned an invalid payment method result", 502);
 
-        writeWorkspaceBilling(auth.workspace, clock, {
+        writeWorkspaceBilling(billingOwner, clock, {
           provider: result.provider || provider.providerName || "external",
           customerId,
           billingStatus: "active",
@@ -3409,7 +3469,7 @@ export function createBurstFlareService(options: any = {}) {
         });
 
         return {
-          billing: formatWorkspaceBilling(auth.workspace),
+          billing: formatWorkspaceBilling(billingOwner),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
         };
       });
@@ -3420,7 +3480,8 @@ export function createBurstFlareService(options: any = {}) {
         const auth = requireManageWorkspace(state, token, clock);
         const provider = requireBillingProvider();
         ensure(typeof provider.chargeCustomer === "function", "Billing provider does not support direct charges", 501);
-        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billingOwner = ensureWorkspaceBillingOwner(state, auth.workspace, auth.user);
+        const billing = normalizeWorkspaceBilling(billingOwner?.billing);
         ensure(billing.customerId, "Workspace is not linked to a billing customer", 409);
         ensure(billing.defaultPaymentMethodId, "No default payment method on file. Add a card first.", 409);
         const amountUsd = Number(input?.amountUsd);
@@ -3438,7 +3499,7 @@ export function createBurstFlareService(options: any = {}) {
         const currentBalance = billing.creditBalanceUsd;
         const nextBalance = Number((currentBalance + amountUsd).toFixed(4));
 
-        writeWorkspaceBilling(auth.workspace, clock, {
+        writeWorkspaceBilling(billingOwner, clock, {
           provider: charge.provider || provider.providerName || billing.provider || "external",
           billingStatus: charge.billingStatus || billing.billingStatus || "active",
           creditBalanceUsd: nextBalance
@@ -3465,7 +3526,7 @@ export function createBurstFlareService(options: any = {}) {
             currency: charge.currency || "usd"
           },
           creditBalanceUsd: nextBalance,
-          billing: formatWorkspaceBilling(auth.workspace),
+          billing: formatWorkspaceBilling(billingOwner),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
         };
       });
@@ -3474,7 +3535,8 @@ export function createBurstFlareService(options: any = {}) {
     async getWorkspaceBalance(token: string) {
       return transact(WORKSPACE_SCOPE, (state) => {
         const auth = requireManageWorkspace(state, token, clock);
-        const billing = normalizeWorkspaceBilling(auth.workspace.billing);
+        const billingSource = getWorkspaceBillingSource(state, auth.workspace, auth.user);
+        const billing = normalizeWorkspaceBilling(billingSource?.billing);
         const billableUsage = summarizeBillableUsage(state, auth.workspace.id);
         const pendingUsage = diffBillableUsageTotals(billableUsage, billing.billedUsageTotals);
         const pendingCost = priceUsageSummary(pendingUsage, billingCatalog);
@@ -3482,7 +3544,7 @@ export function createBurstFlareService(options: any = {}) {
           creditBalanceUsd: billing.creditBalanceUsd,
           pendingUsageCostUsd: Number(pendingCost.totalUsd.toFixed(4)),
           estimatedRemainingBalanceUsd: Number(Math.max(0, billing.creditBalanceUsd - pendingCost.totalUsd).toFixed(4)),
-          billing: formatWorkspaceBilling(auth.workspace),
+          billing: formatWorkspaceBilling(billingSource),
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
         };
       });
@@ -3505,7 +3567,9 @@ export function createBurstFlareService(options: any = {}) {
         });
         ensure(workspace, "Workspace not found for billing event", 404);
 
-        const eventState = trackBillingWebhookEvent(workspace, clock, event.id);
+        const billingOwner = ensureWorkspaceBillingOwner(state, workspace);
+        const billingTarget = billingOwner || workspace;
+        const eventState = trackBillingWebhookEvent(billingTarget, clock, event.id);
         if (eventState.duplicate) {
           return {
             ok: true,
@@ -3513,14 +3577,14 @@ export function createBurstFlareService(options: any = {}) {
             eventId: event.id,
             eventType: event.type,
             workspace: formatWorkspace(state, workspace, getMembership(state, workspace.ownerUserId, workspace.id)?.role || "owner"),
-            billing: formatWorkspaceBilling(workspace)
+            billing: formatWorkspaceBilling(billingTarget)
           };
         }
 
-        const currentBilling = normalizeWorkspaceBilling(workspace.billing);
+        const currentBilling = normalizeWorkspaceBilling(billingTarget?.billing);
 
         if (event.type.startsWith("checkout.session.")) {
-          writeWorkspaceBilling(workspace, clock, {
+          writeWorkspaceBilling(billingTarget, clock, {
             provider: currentBilling.provider || "stripe",
             customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
             billingStatus:
@@ -3543,7 +3607,7 @@ export function createBurstFlareService(options: any = {}) {
             pendingPlan: null
           });
         } else if (event.type.startsWith("customer.subscription.")) {
-          writeWorkspaceBilling(workspace, clock, {
+          writeWorkspaceBilling(billingTarget, clock, {
             provider: currentBilling.provider || "stripe",
             customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
             subscriptionId: typeof payload.id === "string" && payload.id ? payload.id : currentBilling.subscriptionId,
@@ -3553,7 +3617,7 @@ export function createBurstFlareService(options: any = {}) {
             cancelAtPeriodEnd: Boolean(payload.cancel_at_period_end)
           });
         } else if (event.type === "invoice.paid") {
-          writeWorkspaceBilling(workspace, clock, {
+          writeWorkspaceBilling(billingTarget, clock, {
             provider: currentBilling.provider || "stripe",
             customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
             billingStatus: "active",
@@ -3565,7 +3629,7 @@ export function createBurstFlareService(options: any = {}) {
               Number.isFinite(payload.amount_paid) ? Number((Number(payload.amount_paid) / 100).toFixed(4)) : currentBilling.lastInvoiceAmountUsd
           });
         } else if (event.type === "invoice.payment_failed") {
-          writeWorkspaceBilling(workspace, clock, {
+          writeWorkspaceBilling(billingTarget, clock, {
             provider: currentBilling.provider || "stripe",
             customerId: typeof payload.customer === "string" && payload.customer ? payload.customer : currentBilling.customerId,
             billingStatus: "delinquent",
@@ -3595,7 +3659,7 @@ export function createBurstFlareService(options: any = {}) {
           eventId: event.id,
           eventType: event.type,
           workspace: formatWorkspace(state, workspace, getMembership(state, workspace.ownerUserId, workspace.id)?.role || "owner"),
-          billing: formatWorkspaceBilling(workspace)
+          billing: formatWorkspaceBilling(billingTarget)
         };
       });
     },
