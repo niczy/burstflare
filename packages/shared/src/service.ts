@@ -17,6 +17,7 @@ const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
 
 const PLANS = {
   free: {
+    maxInstances: 10,
     maxTemplates: 10,
     maxRunningSessions: 3,
     maxTemplateVersionsPerTemplate: 25,
@@ -26,6 +27,7 @@ const PLANS = {
     maxTemplateBuilds: 100
   },
   pro: {
+    maxInstances: 100,
     maxTemplates: 100,
     maxRunningSessions: 20,
     maxTemplateVersionsPerTemplate: 250,
@@ -35,6 +37,7 @@ const PLANS = {
     maxTemplateBuilds: 2_000
   },
   enterprise: {
+    maxInstances: 1000,
     maxTemplates: 1000,
     maxRunningSessions: 200,
     maxTemplateVersionsPerTemplate: 2500,
@@ -48,15 +51,13 @@ const PLANS = {
 const DEFAULT_BILLING_CATALOG = {
   currency: "usd",
   runtimeMinuteUsd: 0.03,
-  snapshotUsd: 0.02,
-  templateBuildUsd: 0.1
+  storageGbMonthUsd: 0.015
 };
 
 type BillingCatalogInput = {
   currency?: string;
   runtimeMinuteUsd?: number;
-  snapshotUsd?: number;
-  templateBuildUsd?: number;
+  storageGbMonthUsd?: number;
 };
 
 type ServiceError = Error & {
@@ -135,8 +136,7 @@ function normalizeUsageTotals(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     runtimeMinutes: Number.isFinite(source.runtimeMinutes) ? Math.max(0, Number(source.runtimeMinutes)) : 0,
-    snapshots: Number.isFinite(source.snapshots) ? Math.max(0, Number(source.snapshots)) : 0,
-    templateBuilds: Number.isFinite(source.templateBuilds) ? Math.max(0, Number(source.templateBuilds)) : 0
+    storageGbDays: Number.isFinite(source.storageGbDays) ? Math.max(0, Number(source.storageGbDays)) : 0
   };
 }
 
@@ -243,17 +243,13 @@ function normalizeBillingCatalog(catalog: BillingCatalogInput | null | undefined
   const runtimeMinuteUsd = Number.isFinite(source.runtimeMinuteUsd)
     ? Math.max(0, Number(source.runtimeMinuteUsd))
     : DEFAULT_BILLING_CATALOG.runtimeMinuteUsd;
-  const snapshotUsd = Number.isFinite(source.snapshotUsd)
-    ? Math.max(0, Number(source.snapshotUsd))
-    : DEFAULT_BILLING_CATALOG.snapshotUsd;
-  const templateBuildUsd = Number.isFinite(source.templateBuildUsd)
-    ? Math.max(0, Number(source.templateBuildUsd))
-    : DEFAULT_BILLING_CATALOG.templateBuildUsd;
+  const storageGbMonthUsd = Number.isFinite(source.storageGbMonthUsd)
+    ? Math.max(0, Number(source.storageGbMonthUsd))
+    : DEFAULT_BILLING_CATALOG.storageGbMonthUsd;
   return {
     currency,
     runtimeMinuteUsd,
-    snapshotUsd,
-    templateBuildUsd
+    storageGbMonthUsd
   };
 }
 
@@ -261,16 +257,18 @@ function priceUsageSummary(usage, catalog) {
   const normalizedUsage = normalizeUsageTotals(usage);
   const normalizedCatalog = normalizeBillingCatalog(catalog);
   const runtimeUsd = normalizedUsage.runtimeMinutes * normalizedCatalog.runtimeMinuteUsd;
-  const snapshotsUsd = normalizedUsage.snapshots * normalizedCatalog.snapshotUsd;
-  const templateBuildsUsd = normalizedUsage.templateBuilds * normalizedCatalog.templateBuildUsd;
-  const totalUsd = runtimeUsd + snapshotsUsd + templateBuildsUsd;
+  const storageGbMonths = normalizedUsage.storageGbDays / 30;
+  const storageUsd = storageGbMonths * normalizedCatalog.storageGbMonthUsd;
+  const totalUsd = runtimeUsd + storageUsd;
   return {
     currency: normalizedCatalog.currency,
-    usage: normalizedUsage,
+    usage: {
+      ...normalizedUsage,
+      storageGbMonths: Number(storageGbMonths.toFixed(4))
+    },
     rates: {
       runtimeMinuteUsd: normalizedCatalog.runtimeMinuteUsd,
-      snapshotUsd: normalizedCatalog.snapshotUsd,
-      templateBuildUsd: normalizedCatalog.templateBuildUsd
+      storageGbMonthUsd: normalizedCatalog.storageGbMonthUsd
     },
     lineItems: [
       {
@@ -280,16 +278,10 @@ function priceUsageSummary(usage, catalog) {
         amountUsd: Number(runtimeUsd.toFixed(4))
       },
       {
-        metric: "snapshots",
-        quantity: normalizedUsage.snapshots,
-        unitAmountUsd: normalizedCatalog.snapshotUsd,
-        amountUsd: Number(snapshotsUsd.toFixed(4))
-      },
-      {
-        metric: "templateBuilds",
-        quantity: normalizedUsage.templateBuilds,
-        unitAmountUsd: normalizedCatalog.templateBuildUsd,
-        amountUsd: Number(templateBuildsUsd.toFixed(4))
+        metric: "storageGbMonths",
+        quantity: Number(storageGbMonths.toFixed(4)),
+        unitAmountUsd: normalizedCatalog.storageGbMonthUsd,
+        amountUsd: Number(storageUsd.toFixed(4))
       }
     ],
     totalUsd: Number(totalUsd.toFixed(4))
@@ -827,6 +819,13 @@ function requireTemplateAccess(state, authToken, templateId, clock) {
   return { ...auth, template };
 }
 
+function requireInstanceAccess(state, authToken, instanceId, clock) {
+  const auth = requireAuth(state, authToken, clock);
+  const instance = state.instances.find((entry) => entry.id === instanceId && entry.userId === auth.user.id);
+  ensure(instance, "Instance not found", 404);
+  return { ...auth, instance };
+}
+
 function requireSessionAccess(state, authToken, sessionId, clock) {
   const auth = requireAuth(state, authToken, clock);
   const session = state.sessions.find((entry) => entry.id === sessionId && entry.workspaceId === auth.workspace.id);
@@ -884,8 +883,7 @@ function summarizeStorage(state, workspaceId) {
 function summarizeUsage(state, workspaceId) {
   const usage = {
     runtimeMinutes: 0,
-    snapshots: 0,
-    templateBuilds: 0
+    storageGbDays: 0
   };
   for (const event of state.usageEvents) {
     if (event.workspaceId !== workspaceId) {
@@ -894,23 +892,33 @@ function summarizeUsage(state, workspaceId) {
     if (event.kind === "runtime_minutes") {
       usage.runtimeMinutes += event.value;
     }
-    if (event.kind === "snapshot") {
-      usage.snapshots += event.value;
-    }
-    if (event.kind === "template_build") {
-      usage.templateBuilds += event.value;
+    if (event.kind === "storage_gb_day") {
+      usage.storageGbDays += event.value;
     }
   }
   const sessions = state.sessions.filter((entry) => entry.workspaceId === workspaceId && entry.state !== "deleted");
+  const instances = state.instances.filter((entry) => entry.workspaceId === workspaceId || entry.userId === (state.workspaces.find((w) => w.id === workspaceId)?.ownerUserId));
   const templates = state.templates.filter((entry) => entry.workspaceId === workspaceId);
   const templateIds = new Set(templates.map((entry) => entry.id));
   const templateVersions = state.templateVersions.filter((entry) => templateIds.has(entry.templateId));
   const snapshots = state.snapshots.filter((entry) => sessions.some((session) => session.id === entry.sessionId));
 
+  let storageBytes = 0;
+  for (const session of sessions) {
+    storageBytes += session.latestSnapshotBytes || 0;
+  }
+  for (const instance of instances) {
+    storageBytes += instance.commonStateBytes || 0;
+  }
+
   return {
     ...usage,
+    storageGbMonths: Number((usage.storageGbDays / 30).toFixed(4)),
+    currentStorageBytes: storageBytes,
+    currentStorageGb: Number((storageBytes / (1024 * 1024 * 1024)).toFixed(4)),
     storage: summarizeStorage(state, workspaceId),
     inventory: {
+      instances: instances.length,
       templates: templates.length,
       templateVersions: templateVersions.length,
       sessions: sessions.length,
@@ -929,8 +937,28 @@ function diffBillableUsageTotals(current, previous) {
   const prior = normalizeUsageTotals(previous);
   return {
     runtimeMinutes: Math.max(0, next.runtimeMinutes - prior.runtimeMinutes),
-    snapshots: Math.max(0, next.snapshots - prior.snapshots),
-    templateBuilds: Math.max(0, next.templateBuilds - prior.templateBuilds)
+    storageGbDays: Math.max(0, next.storageGbDays - prior.storageGbDays)
+  };
+}
+
+function recordDailyStorageUsageInState(state, clock, workspaceId) {
+  const usage = summarizeUsage(state, workspaceId);
+  const gbDay = Number((usage.currentStorageBytes / (1024 * 1024 * 1024)).toFixed(6));
+  if (gbDay <= 0) {
+    return null;
+  }
+  writeUsage(state, clock, {
+    workspaceId,
+    kind: "storage_gb_day",
+    value: gbDay,
+    details: {
+      currentStorageBytes: usage.currentStorageBytes
+    }
+  });
+  return {
+    workspaceId,
+    gbDay,
+    currentStorageBytes: usage.currentStorageBytes
   };
 }
 
@@ -1048,15 +1076,34 @@ function formatTemplateDetail(state, template) {
   };
 }
 
+function formatInstance(instance) {
+  return {
+    id: instance.id,
+    userId: instance.userId,
+    workspaceId: instance.workspaceId || null,
+    name: instance.name,
+    description: instance.description || "",
+    image: instance.image,
+    dockerfilePath: instance.dockerfilePath || null,
+    dockerContext: instance.dockerContext || null,
+    envVars: instance.envVars || {},
+    commonStateKey: instance.commonStateKey || null,
+    commonStateBytes: instance.commonStateBytes || 0,
+    createdAt: instance.createdAt,
+    updatedAt: instance.updatedAt || instance.createdAt
+  };
+}
+
 function formatSession(state, session, { includeSshKeys = false }: { includeSshKeys?: boolean } = {}) {
-  const template = state.templates.find((entry) => entry.id === session.templateId);
+  const instance = state.instances.find((entry) => entry.id === session.instanceId);
   const events = state.sessionEvents.filter((entry) => entry.sessionId === session.id);
   const snapshots = state.snapshots.filter((entry) => entry.sessionId === session.id);
   const { sshAuthorizedKeys: _sshAuthorizedKeys, ...baseSession } = session;
   const sshKeyCount = getSessionSshKeys(session).length;
   return {
     ...baseSession,
-    templateName: template?.name || "unknown",
+    instanceId: session.instanceId || null,
+    instanceName: instance?.name || "unknown",
     eventsCount: events.length,
     snapshotCount: snapshots.length,
     sshKeyCount,
@@ -1703,8 +1750,9 @@ export function createBurstFlareService(options: any = {}) {
   const AUTH_SCOPE = ["users", "workspaces", "memberships", "authTokens", "auditLogs"];
   const AUTH_DEVICE_SCOPE = [...AUTH_SCOPE, "deviceCodes", "usageEvents"];
   const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE, "workspaceInvites"];
-  const TEMPLATE_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
-  const SESSION_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
+  const INSTANCE_SCOPE = [...AUTH_SCOPE, "instances", "sessions", "sessionEvents", "uploadGrants", "usageEvents"];
+  const TEMPLATE_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
+  const SESSION_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
   const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "workspaceInvites", "sessionEvents", "snapshots", "usageEvents"];
   const TRANSACTION_ERROR = Symbol("transactionError");
 
@@ -3076,6 +3124,10 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
+    async getUserBilling(token) {
+      return this.getWorkspaceBilling(token);
+    },
+
     /**
      * @param {string} token
      * @param {CheckoutSessionOptions} [options]
@@ -3138,6 +3190,10 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
+    async createCheckoutSession(token: string, options: CheckoutSessionOptions = {}) {
+      return this.createWorkspaceCheckoutSession(token, options);
+    },
+
     /**
      * @param {string} token
      * @param {BillingPortalOptions} [options]
@@ -3187,6 +3243,10 @@ export function createBurstFlareService(options: any = {}) {
           billing: formatWorkspaceBilling(auth.workspace)
         };
       });
+    },
+
+    async createBillingPortalSession(token: string, options: BillingPortalOptions = {}) {
+      return this.createWorkspaceBillingPortalSession(token, options);
     },
 
     async createWorkspaceUsageInvoice(token) {
@@ -3245,8 +3305,8 @@ export function createBurstFlareService(options: any = {}) {
           details: {
             amountUsd: Number(estimate.totalUsd.toFixed(4)),
             runtimeMinutes: pendingUsage.runtimeMinutes,
-            snapshots: pendingUsage.snapshots,
-            templateBuilds: pendingUsage.templateBuilds
+            storageGbDays: pendingUsage.storageGbDays,
+            storageGbMonths: Number((pendingUsage.storageGbDays / 30).toFixed(4))
           }
         });
 
@@ -3268,6 +3328,10 @@ export function createBurstFlareService(options: any = {}) {
           )
         };
       });
+    },
+
+    async createUsageInvoice(token) {
+      return this.createWorkspaceUsageInvoice(token);
     },
 
     async addWorkspacePaymentMethod(token: string, input: { paymentMethodId: string }) {
@@ -3366,6 +3430,10 @@ export function createBurstFlareService(options: any = {}) {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
         };
       });
+    },
+
+    async chargeUser(token: string, input: { amountUsd: number; description?: string }) {
+      return this.chargeWorkspace(token, input);
     },
 
     async getWorkspaceBalance(token: string) {
@@ -3788,6 +3856,192 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
+    async createInstance(token, { name, image, description = "", envVars = {}, secrets = {}, dockerfilePath = null, dockerContext = null }) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireWriteAccess(state, token, clock);
+        ensure(name, "Instance name is required");
+        ensure(image, "Instance image is required");
+        const limits = getEffectiveLimits(auth.workspace);
+        ensure(
+          state.instances.filter((entry) => entry.userId === auth.user.id).length < (limits.maxInstances || limits.maxTemplates),
+          "Instance limit reached",
+          403
+        );
+        ensure(
+          !state.instances.some((entry) => entry.userId === auth.user.id && entry.name.toLowerCase() === String(name).toLowerCase()),
+          "Instance name already exists",
+          409
+        );
+        const createdAt = nowIso(clock);
+        const instance = {
+          id: createId("inst"),
+          userId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          name,
+          description,
+          image,
+          dockerfilePath,
+          dockerContext,
+          envVars: envVars && typeof envVars === "object" ? envVars : {},
+          secrets: secrets && typeof secrets === "object" ? secrets : {},
+          commonStateKey: `burstflare-snapshots/${createId("common")}/home/`,
+          commonStateBytes: 0,
+          createdAt,
+          updatedAt: createdAt
+        };
+        state.instances.push(instance);
+        writeAudit(state, clock, {
+          action: "instance.created",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "instance",
+          targetId: instance.id,
+          details: { name: instance.name, image: instance.image }
+        });
+        return { instance: formatInstance(instance) };
+      });
+    },
+
+    async listInstances(token) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireAuth(state, token, clock);
+        const instances = state.instances
+          .filter((entry) => entry.userId === auth.user.id)
+          .map((entry) => formatInstance(entry));
+        return { instances };
+      });
+    },
+
+    async getInstance(token, instanceId) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        return { instance: formatInstance(auth.instance) };
+      });
+    },
+
+    async updateInstance(token, instanceId, patch: any = {}) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        if (patch.name) {
+          ensure(
+            !state.instances.some(
+              (entry) =>
+                entry.id !== auth.instance.id &&
+                entry.userId === auth.user.id &&
+                entry.name.toLowerCase() === String(patch.name).toLowerCase()
+            ),
+            "Instance name already exists",
+            409
+          );
+          auth.instance.name = patch.name;
+        }
+        if (patch.description !== undefined) auth.instance.description = patch.description;
+        if (patch.image !== undefined) auth.instance.image = patch.image;
+        if (patch.dockerfilePath !== undefined) auth.instance.dockerfilePath = patch.dockerfilePath;
+        if (patch.dockerContext !== undefined) auth.instance.dockerContext = patch.dockerContext;
+        if (patch.envVars && typeof patch.envVars === "object") auth.instance.envVars = patch.envVars;
+        if (patch.secrets && typeof patch.secrets === "object") auth.instance.secrets = patch.secrets;
+        auth.instance.updatedAt = nowIso(clock);
+        writeAudit(state, clock, {
+          action: "instance.updated",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "instance",
+          targetId: auth.instance.id
+        });
+        return { instance: formatInstance(auth.instance) };
+      });
+    },
+
+    async deleteInstance(token, instanceId) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        const activeSession = state.sessions.find(
+          (entry) => (entry.instanceId || entry.templateId) === auth.instance.id && entry.state !== "deleted"
+        );
+        ensure(!activeSession, "Instance still has active sessions", 409);
+        state.instances = state.instances.filter((entry) => entry.id !== auth.instance.id);
+        writeAudit(state, clock, {
+          action: "instance.deleted",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "instance",
+          targetId: auth.instance.id
+        });
+        return { ok: true, instanceId: auth.instance.id };
+      });
+    },
+
+    async setInstanceEnvVar(token, instanceId, key, value) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        ensure(key, "Env var key is required");
+        auth.instance.envVars = auth.instance.envVars || {};
+        auth.instance.envVars[key] = String(value ?? "");
+        auth.instance.updatedAt = nowIso(clock);
+        return { instance: formatInstance(auth.instance) };
+      });
+    },
+
+    async unsetInstanceEnvVar(token, instanceId, key) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        if (auth.instance.envVars) {
+          delete auth.instance.envVars[key];
+        }
+        auth.instance.updatedAt = nowIso(clock);
+        return { instance: formatInstance(auth.instance) };
+      });
+    },
+
+    async setInstanceSecret(token, instanceId, key, value) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        ensure(key, "Secret key is required");
+        auth.instance.secrets = auth.instance.secrets || {};
+        auth.instance.secrets[key] = String(value ?? "");
+        auth.instance.updatedAt = nowIso(clock);
+        return {
+          instance: formatInstance(auth.instance),
+          secret: {
+            key,
+            configured: true
+          }
+        };
+      });
+    },
+
+    async unsetInstanceSecret(token, instanceId, key) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        if (auth.instance.secrets) {
+          delete auth.instance.secrets[key];
+        }
+        auth.instance.updatedAt = nowIso(clock);
+        return { instance: formatInstance(auth.instance) };
+      });
+    },
+
+    async syncCommonState(token, instanceId, direction = "push") {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        ensure(["push", "pull"].includes(direction), "Sync direction must be push or pull");
+        auth.instance.updatedAt = nowIso(clock);
+        writeAudit(state, clock, {
+          action: `instance.common_state_${direction}`,
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "instance",
+          targetId: auth.instance.id
+        });
+        return {
+          ok: true,
+          direction,
+          instance: formatInstance(auth.instance)
+        };
+      });
+    },
+
     async getTemplate(token, templateId) {
       return transact(TEMPLATE_SCOPE, (state) => {
         const auth = requireTemplateAccess(state, token, templateId, clock);
@@ -3842,7 +4096,9 @@ export function createBurstFlareService(options: any = {}) {
           "Template version limit reached",
           403
         );
-        ensure(usage.templateBuilds < limits.maxTemplateBuilds, "Template build limit reached", 403);
+        if (typeof limits.maxTemplateBuilds === "number") {
+          ensure((usage as any).templateBuilds < limits.maxTemplateBuilds, "Template build limit reached", 403);
+        }
 
         const templateVersion = {
           id: createId("tplv"),
@@ -4361,15 +4617,17 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
-    async createSession(token, { name, templateId }) {
+    async createSession(token, { name, instanceId = null, templateId = null }) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireWriteAccess(state, token, clock);
         ensure(name, "Session name is required");
+        const resolvedInstanceId = instanceId || templateId;
+        ensure(resolvedInstanceId, "Instance is required");
+
+        const instance = state.instances.find((entry) => entry.id === resolvedInstanceId && entry.userId === auth.user.id);
         const template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
-        ensure(template, "Template not found", 404);
-        ensure(!template.archivedAt, "Template is archived", 409);
-        const activeVersion = getActiveVersion(state, template.id);
-        ensure(activeVersion, "Template has no promoted version", 409);
+        ensure(instance || template, "Instance not found", 404);
+
         ensure(
           !state.sessions.some(
             (entry) => entry.workspaceId === auth.workspace.id && entry.name.toLowerCase() === name.toLowerCase() && entry.state !== "deleted"
@@ -4381,7 +4639,8 @@ export function createBurstFlareService(options: any = {}) {
         const session = {
           id: createId("ses"),
           workspaceId: auth.workspace.id,
-          templateId: template.id,
+          templateId: template?.id || null,
+          instanceId: instance?.id || resolvedInstanceId,
           name,
           state: "created",
           createdByUserId: auth.user.id,
@@ -4395,8 +4654,10 @@ export function createBurstFlareService(options: any = {}) {
           runtimeVersion: 0,
           runtimeOperationId: null,
           runtimeUpdatedAt: null,
-          persistedPaths: [...(activeVersion.manifest?.persistedPaths || [])],
-          sleepTtlSeconds: activeVersion.manifest?.sleepTtlSeconds || null,
+          persistedPaths: ["/workspace"],
+          sleepTtlSeconds: (instance as any)?.sleepTtlSeconds || null,
+          latestSnapshotAt: null,
+          latestSnapshotBytes: 0,
           sshAuthorizedKeys: [],
           previewUrl: null
         };
@@ -4409,7 +4670,7 @@ export function createBurstFlareService(options: any = {}) {
           workspaceId: auth.workspace.id,
           targetType: "session",
           targetId: session.id,
-          details: { name, templateId }
+          details: { name, instanceId: session.instanceId }
         });
         return { session: formatSession(state, session) };
       });
@@ -4529,11 +4790,22 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
-    async listSessions(token) {
+    async listSessions(token, { instanceId = null, status = null }: { instanceId?: string | null; status?: string | null } = {}) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const sessions = state.sessions
-          .filter((entry) => entry.workspaceId === auth.workspace.id && entry.state !== "deleted")
+          .filter((entry) => {
+            if (entry.workspaceId !== auth.workspace.id || entry.state === "deleted") {
+              return false;
+            }
+            if (instanceId && entry.instanceId !== instanceId) {
+              return false;
+            }
+            if (status && entry.state !== status) {
+              return false;
+            }
+            return true;
+          })
           .map((session) => formatSession(state, session));
         return { sessions };
       });
@@ -5294,13 +5566,30 @@ export function createBurstFlareService(options: any = {}) {
           workspaceId
         });
 
+        const storageUsageEvents = [];
+        if (workspaceId) {
+          const recorded = recordDailyStorageUsageInState(state, clock, workspaceId);
+          if (recorded) {
+            storageUsageEvents.push(recorded);
+          }
+        } else {
+          for (const workspace of state.workspaces) {
+            const recorded = recordDailyStorageUsageInState(state, clock, workspace.id);
+            if (recorded) {
+              storageUsageEvents.push(recorded);
+            }
+          }
+        }
+
         return {
           sleptSessions: slept.sleptSessions,
           recoveredStuckBuilds: recovered.recoveredStuckBuilds,
           processedBuilds: processed.processedBuilds,
           purgedDeletedSessions: deletedPurged.purgedSessions,
           purgedStaleSleepingSessions: stalePurged.purgedSessions,
-          purgedSnapshots: stalePurged.purgedSnapshots + deletedPurged.purgedSnapshots
+          purgedSnapshots: stalePurged.purgedSnapshots + deletedPurged.purgedSnapshots,
+          recordedStorageUsageEvents: storageUsageEvents.length,
+          storageUsageEvents
         };
       });
     },

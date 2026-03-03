@@ -93,6 +93,19 @@ export const TABLES: TableDefinition[] = [
     indexes: ["user_id", "workspace_id", "status"]
   },
   {
+    source: "instances",
+    table: "bf_instances",
+    keyOf: (row) => row.id,
+    columns: [
+      { name: "user_id", field: "userId" },
+      { name: "name", field: "name" },
+      { name: "image", field: "image" },
+      { name: "created_at", field: "createdAt" },
+      { name: "updated_at", field: "updatedAt" }
+    ],
+    indexes: ["user_id", "name"]
+  },
+  {
     source: "templates",
     table: "bf_templates",
     keyOf: (row) => row.id,
@@ -147,11 +160,12 @@ export const TABLES: TableDefinition[] = [
     columns: [
       { name: "workspace_id", field: "workspaceId" },
       { name: "template_id", field: "templateId" },
+      { name: "instance_id", field: "instanceId" },
       { name: "state", field: "state" },
       { name: "name", field: "name" },
       { name: "updated_at_field", field: "updatedAt" }
     ],
-    indexes: ["workspace_id", "template_id", "state", "name"]
+    indexes: ["workspace_id", "template_id", "instance_id", "state", "name"]
   },
   {
     source: "sessionEvents",
