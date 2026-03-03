@@ -1283,11 +1283,11 @@ export async function runCli(
     const keyPath = sshKey?.privateKeyPath || "<local-key-path>";
     return {
       sshUrl,
-      sshUser: data.sshUser || "dev",
+      sshUser: data.sshUser || "flare",
       sshPrivateKeyPath: keyPath,
       localCommand:
         `ssh -i ${keyPath} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ` +
-        "-o IdentitiesOnly=yes -o PreferredAuthentications=publickey -p <local-port> dev@127.0.0.1",
+        "-o IdentitiesOnly=yes -o PreferredAuthentications=publickey -p <local-port> flare@127.0.0.1",
       note: `Run \`flare ssh ${sessionId}\` to open the local tunnel automatically.`
     };
   }

@@ -109,7 +109,7 @@ test("session container bootstrap and lifecycle hooks persist runtime metadata f
   assert.equal(runtimeState.sshAuthorizedKeys.length, 1);
   assert.match(runtimeState.files.get("/workspace/.burstflare/session.json"), /Runtime Template/);
   assert.match(runtimeState.files.get("/run/burstflare/secrets.env"), /API_TOKEN=super-secret/);
-  assert.match(runtimeState.files.get("/home/dev/.ssh/authorized_keys"), /ssh-ed25519/);
+  assert.match(runtimeState.files.get("/home/flare/.ssh/authorized_keys"), /ssh-ed25519/);
 
   const lifecycle = recordLifecycleHook({
     sessionId: "ses_bootstrap",

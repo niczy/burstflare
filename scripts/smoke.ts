@@ -252,7 +252,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers: authHeaders
   });
-  if (!sshToken.token || sshToken.sshUser !== "dev") {
+  if (!sshToken.token || sshToken.sshUser !== "flare") {
     throw new Error("SSH attach details did not include a runtime token and SSH user");
   }
 

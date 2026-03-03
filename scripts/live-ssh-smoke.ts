@@ -263,7 +263,7 @@ async function main(): Promise<void> {
         "PreferredAuthentications=publickey",
         "-p",
         String(tunnel.port),
-        "dev@127.0.0.1",
+        "flare@127.0.0.1",
         "whoami"
       ],
       {
@@ -271,7 +271,7 @@ async function main(): Promise<void> {
       }
     );
     const output = sshResult.stdout.trim();
-    assert(output === "dev", `Expected live SSH smoke to return 'dev', received '${output}'`);
+    assert(output === "flare", `Expected live SSH smoke to return 'flare', received '${output}'`);
 
     process.stdout.write(
       `${JSON.stringify(

@@ -240,10 +240,10 @@ function getRuntimeUserIdentity() {
   if (runtimeUserIdentity !== null) {
     return runtimeUserIdentity;
   }
-  const uidResult = spawnSync("id", ["-u", "dev"], {
+  const uidResult = spawnSync("id", ["-u", "flare"], {
     encoding: "utf8"
   });
-  const gidResult = spawnSync("id", ["-g", "dev"], {
+  const gidResult = spawnSync("id", ["-g", "flare"], {
     encoding: "utf8"
   });
   if (uidResult.status !== 0 || gidResult.status !== 0) {
@@ -266,7 +266,7 @@ function getRuntimeUserIdentity() {
 function applyAuthorizedKeys(values) {
   const keys = normalizeAuthorizedKeys(values);
   runtimeState.sshAuthorizedKeys = keys;
-  const sshDir = "/home/dev/.ssh";
+  const sshDir = "/home/flare/.ssh";
   const authorizedKeysPath = `${sshDir}/authorized_keys`;
   const body = keys.length > 0 ? `${keys.join("\n")}\n` : "";
   try {
@@ -789,13 +789,13 @@ function runShellCommand(state, command) {
   }
 
   if (trimmed === "whoami") {
-    return "dev";
+    return "flare";
   }
 
   if (trimmed === "env") {
     return [
       `SESSION_ID=${state.sessionId}`,
-      "USER=dev",
+      "USER=flare",
       `HOME=${state.home}`,
       `PWD=${state.cwd}`,
       `LAST_RESTORED_SNAPSHOT=${runtimeState.restoredSnapshotId || ""}`,
@@ -843,7 +843,7 @@ function attachShell(req, socket) {
   const state = {
     sessionId,
     cwd: "/workspace",
-    home: "/home/dev",
+    home: "/home/flare",
     closed: false
   };
   let incoming = Buffer.alloc(0);
