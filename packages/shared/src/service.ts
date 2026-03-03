@@ -323,6 +323,29 @@ function normalizeSecretValue(value) {
   return value;
 }
 
+function normalizeInstanceEnvVars(value) {
+  ensure(value == null || (typeof value === "object" && !Array.isArray(value)), "Instance env vars must be an object");
+  const envVars: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value || {})) {
+    const key = String(rawKey || "").trim();
+    ensure(key, "Instance env var name is required");
+    ensure(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key), "Instance env var name must match ^[A-Za-z_][A-Za-z0-9_]{0,63}$");
+    ensure(typeof rawValue === "string", `Instance env var ${key} must be a string`);
+    envVars[key] = rawValue as string;
+  }
+  return envVars;
+}
+
+function normalizeInstanceSecrets(value) {
+  ensure(value == null || (typeof value === "object" && !Array.isArray(value)), "Instance secrets must be an object");
+  const secrets: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value || {})) {
+    const key = normalizeSecretName(rawKey);
+    secrets[key] = normalizeSecretValue(rawValue as string);
+  }
+  return secrets;
+}
+
 function getWorkspaceRuntimeSecrets(workspace) {
   if (!Array.isArray(workspace.runtimeSecrets)) {
     workspace.runtimeSecrets = [];
@@ -827,6 +850,13 @@ function requireTemplateAccess(state, authToken, templateId, clock) {
   return { ...auth, template };
 }
 
+function requireInstanceAccess(state, authToken, instanceId, clock) {
+  const auth = requireAuth(state, authToken, clock);
+  const instance = state.instances.find((entry) => entry.id === instanceId && entry.userId === auth.user.id);
+  ensure(instance, "Instance not found", 404);
+  return { ...auth, instance };
+}
+
 function requireSessionAccess(state, authToken, sessionId, clock) {
   const auth = requireAuth(state, authToken, clock);
   const session = state.sessions.find((entry) => entry.id === sessionId && entry.workspaceId === auth.workspace.id);
@@ -1045,6 +1075,17 @@ function formatTemplateDetail(state, template) {
   return {
     ...formatTemplate(state, template),
     releases: getTemplateReleases(state, template.id)
+  };
+}
+
+function formatInstance(instance) {
+  const { secrets: _secrets, ...baseInstance } = instance;
+  const secretNames = Object.keys(instance.secrets || {}).sort();
+  return {
+    ...baseInstance,
+    envVars: { ...(instance.envVars || {}) },
+    secretNames,
+    secretCount: secretNames.length
   };
 }
 
@@ -1703,6 +1744,7 @@ export function createBurstFlareService(options: any = {}) {
   const AUTH_SCOPE = ["users", "workspaces", "memberships", "authTokens", "auditLogs"];
   const AUTH_DEVICE_SCOPE = [...AUTH_SCOPE, "deviceCodes", "usageEvents"];
   const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE, "workspaceInvites"];
+  const INSTANCE_SCOPE = [...AUTH_SCOPE, "instances"];
   const TEMPLATE_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
   const SESSION_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
   const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "workspaceInvites", "sessionEvents", "snapshots", "usageEvents"];
@@ -3620,6 +3662,148 @@ export function createBurstFlareService(options: any = {}) {
         });
         return {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role)
+        };
+      });
+    },
+
+    async createInstance(
+      token,
+      { name, description = "", image, dockerfilePath = null, dockerContext = null, envVars = {}, secrets = {} }
+    ) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireAuth(state, token, clock);
+        ensure(typeof name === "string" && name.trim(), "Instance name is required");
+        const nextName = name.trim();
+        ensure(nextName.length >= 3, "Instance name must be at least 3 characters");
+        ensure(nextName.length <= 80, "Instance name is too long");
+        ensure(typeof image === "string" && image.trim(), "Instance image is required");
+        ensure(
+          !state.instances.some(
+            (entry) => entry.userId === auth.user.id && entry.name.toLowerCase() === nextName.toLowerCase()
+          ),
+          "Instance name already exists"
+        );
+
+        const timestamp = nowIso(clock);
+        const instance = {
+          id: createId("ins"),
+          userId: auth.user.id,
+          name: nextName,
+          description: String(description || ""),
+          image: image.trim(),
+          dockerfilePath: dockerfilePath == null ? null : String(dockerfilePath),
+          dockerContext: dockerContext == null ? null : String(dockerContext),
+          envVars: normalizeInstanceEnvVars(envVars),
+          secrets: normalizeInstanceSecrets(secrets),
+          createdAt: timestamp,
+          updatedAt: timestamp
+        };
+        state.instances.push(instance);
+        writeAudit(state, clock, {
+          action: "instance.created",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "instance",
+          targetId: instance.id,
+          details: {
+            name: instance.name,
+            image: instance.image
+          }
+        });
+        return {
+          instance: formatInstance(instance)
+        };
+      });
+    },
+
+    async listInstances(token) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireAuth(state, token, clock);
+        const instances = state.instances
+          .filter((entry) => entry.userId === auth.user.id)
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+          .map((entry) => formatInstance(entry));
+        return { instances };
+      });
+    },
+
+    async getInstance(token, instanceId) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        return {
+          instance: formatInstance(auth.instance)
+        };
+      });
+    },
+
+    async updateInstance(token, instanceId, updates: any = {}) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        if (Object.prototype.hasOwnProperty.call(updates, "name")) {
+          ensure(typeof updates.name === "string" && updates.name.trim(), "Instance name is required");
+          const nextName = updates.name.trim();
+          ensure(nextName.length >= 3, "Instance name must be at least 3 characters");
+          ensure(nextName.length <= 80, "Instance name is too long");
+          ensure(
+            !state.instances.some(
+              (entry) =>
+                entry.id !== auth.instance.id &&
+                entry.userId === auth.user.id &&
+                entry.name.toLowerCase() === nextName.toLowerCase()
+            ),
+            "Instance name already exists"
+          );
+          auth.instance.name = nextName;
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "description")) {
+          auth.instance.description = String(updates.description || "");
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "image")) {
+          ensure(typeof updates.image === "string" && updates.image.trim(), "Instance image is required");
+          auth.instance.image = updates.image.trim();
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "dockerfilePath")) {
+          auth.instance.dockerfilePath = updates.dockerfilePath == null ? null : String(updates.dockerfilePath);
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "dockerContext")) {
+          auth.instance.dockerContext = updates.dockerContext == null ? null : String(updates.dockerContext);
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "envVars")) {
+          auth.instance.envVars = normalizeInstanceEnvVars(updates.envVars);
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "secrets")) {
+          auth.instance.secrets = normalizeInstanceSecrets(updates.secrets);
+        }
+        auth.instance.updatedAt = nowIso(clock);
+        writeAudit(state, clock, {
+          action: "instance.updated",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "instance",
+          targetId: auth.instance.id
+        });
+        return {
+          instance: formatInstance(auth.instance)
+        };
+      });
+    },
+
+    async deleteInstance(token, instanceId) {
+      return transact(INSTANCE_SCOPE, (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        const index = state.instances.findIndex((entry) => entry.id === auth.instance.id);
+        ensure(index >= 0, "Instance not found", 404);
+        state.instances.splice(index, 1);
+        writeAudit(state, clock, {
+          action: "instance.deleted",
+          actorUserId: auth.user.id,
+          workspaceId: auth.workspace.id,
+          targetType: "instance",
+          targetId: auth.instance.id
+        });
+        return {
+          ok: true,
+          instanceId: auth.instance.id
         };
       });
     },

@@ -101,6 +101,79 @@ function createObjectStore() {
   };
 }
 
+test("service supports instance CRUD with write-only secrets", async () => {
+  let tick = Date.parse("2026-03-03T00:00:00.000Z");
+  const service = createBurstFlareService({
+    store: createMemoryStore(),
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "instances@example.com",
+    name: "Instance Owner"
+  });
+
+  const created = await service.createInstance(owner.token, {
+    name: "Base Node",
+    description: "Node 20 runtime",
+    image: "node:20",
+    dockerfilePath: "./Dockerfile",
+    dockerContext: ".",
+    envVars: {
+      NODE_ENV: "development"
+    },
+    secrets: {
+      api_key: "secret-1"
+    }
+  });
+  assert.equal(created.instance.name, "Base Node");
+  assert.equal(created.instance.image, "node:20");
+  assert.deepEqual(created.instance.envVars, {
+    NODE_ENV: "development"
+  });
+  assert.deepEqual(created.instance.secretNames, ["API_KEY"]);
+  assert.equal(created.instance.secretCount, 1);
+  assert.equal("secrets" in created.instance, false);
+
+  const listed = await service.listInstances(owner.token);
+  assert.equal(listed.instances.length, 1);
+  assert.equal(listed.instances[0].id, created.instance.id);
+
+  const updated = await service.updateInstance(owner.token, created.instance.id, {
+    image: "node:22",
+    envVars: {
+      NODE_ENV: "production",
+      DEBUG: "0"
+    },
+    secrets: {
+      api_key: "secret-2",
+      extra_token: "secret-3"
+    }
+  });
+  assert.equal(updated.instance.image, "node:22");
+  assert.deepEqual(updated.instance.envVars, {
+    NODE_ENV: "production",
+    DEBUG: "0"
+  });
+  assert.deepEqual(updated.instance.secretNames, ["API_KEY", "EXTRA_TOKEN"]);
+  assert.equal(updated.instance.secretCount, 2);
+
+  const fetched = await service.getInstance(owner.token, created.instance.id);
+  assert.equal(fetched.instance.id, created.instance.id);
+  assert.equal(fetched.instance.image, "node:22");
+  assert.equal("secrets" in fetched.instance, false);
+
+  const deleted = await service.deleteInstance(owner.token, created.instance.id);
+  assert.equal(deleted.ok, true);
+  assert.equal(deleted.instanceId, created.instance.id);
+
+  const empty = await service.listInstances(owner.token);
+  assert.deepEqual(empty.instances, []);
+});
+
 test("service covers invites, queued builds, releases, session events, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();
