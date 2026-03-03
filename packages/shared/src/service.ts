@@ -457,10 +457,6 @@ function auditAndThrow(_state, _clock, audit, message, status = 400) {
   throw error;
 }
 
-function failWorkspaceSharingRemoved() {
-  fail("Workspace sharing has been removed", 410);
-}
-
 function canManageWorkspace(role) {
   return role === "owner" || role === "admin";
 }
@@ -1847,11 +1843,11 @@ export function createBurstFlareService(options: any = {}) {
   const billingCatalog = normalizeBillingCatalog(options.billingCatalog);
   const AUTH_SCOPE = ["users", "workspaces", "memberships", "authTokens", "auditLogs"];
   const AUTH_DEVICE_SCOPE = [...AUTH_SCOPE, "deviceCodes", "usageEvents"];
-  const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE, "workspaceInvites"];
+  const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE];
   const INSTANCE_SCOPE = [...AUTH_SCOPE, "instances"];
   const TEMPLATE_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
   const SESSION_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
-  const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "workspaceInvites", "sessionEvents", "snapshots", "usageEvents"];
+  const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "sessionEvents", "snapshots", "usageEvents"];
   const TRANSACTION_ERROR = Symbol("transactionError");
 
   async function transact(collections, work) {
@@ -2916,45 +2912,6 @@ export function createBurstFlareService(options: any = {}) {
           })
           .filter(Boolean);
         return { workspaces };
-      });
-    },
-
-    async listWorkspaceMembers(token) {
-      return transact(WORKSPACE_SCOPE, (state) => {
-        const auth = requireAuth(state, token, clock);
-        const members = state.memberships
-          .filter((entry) => entry.workspaceId === auth.workspace.id)
-          .map((entry) => ({
-            ...entry,
-            user: formatUser(findUserById(state, entry.userId))
-          }));
-        return { members, invites: [] };
-      });
-    },
-
-    async createWorkspaceInvite(token, { email, role = "member" }) {
-      return transact(WORKSPACE_SCOPE, (state) => {
-        requireManageWorkspace(state, token, clock);
-        void email;
-        void role;
-        failWorkspaceSharingRemoved();
-      });
-    },
-
-    async acceptWorkspaceInvite(token, inviteCode) {
-      return transact(WORKSPACE_SCOPE, (state) => {
-        requireAuth(state, token, clock);
-        void inviteCode;
-        failWorkspaceSharingRemoved();
-      });
-    },
-
-    async updateWorkspaceMemberRole(token, userId, role) {
-      return transact(WORKSPACE_SCOPE, (state) => {
-        requireManageWorkspace(state, token, clock);
-        void userId;
-        void role;
-        failWorkspaceSharingRemoved();
       });
     },
 
@@ -5306,7 +5263,6 @@ export function createBurstFlareService(options: any = {}) {
             exportedAt: nowIso(clock),
             workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
             members: state.memberships.filter((entry) => entry.workspaceId === workspaceId),
-            invites: state.workspaceInvites.filter((entry) => entry.workspaceId === workspaceId),
             templates: state.templates
               .filter((entry) => entry.workspaceId === workspaceId)
               .map((entry) => formatTemplate(state, entry)),
