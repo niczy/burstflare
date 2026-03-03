@@ -161,12 +161,9 @@ export function desiredResourceNames(config: CloudflareConfig) {
       cache: `${prefix}-cache`
     },
     r2: {
-      templates: `${prefix}-templates`,
-      snapshots: `${prefix}-snapshots`,
-      builds: `${prefix}-build-logs`
+      snapshots: `${prefix}-state`
     },
     queues: {
-      builds: `${prefix}-builds`,
       reconcile: `${prefix}-reconcile`
     }
   };

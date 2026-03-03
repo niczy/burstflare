@@ -93,7 +93,7 @@ async function main(): Promise<void> {
         {
           baseUrl,
           limited: true,
-          reason: "Turnstile is enabled; pass --turnstile-token for authenticated release validation",
+          reason: "Turnstile is enabled; pass --turnstile-token for authenticated instance validation",
           publicChecks: ["health", "homepage"]
         },
         null,
@@ -103,12 +103,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const email = `release-validate-${Date.now()}@example.com`;
+  const email = `instance-validate-${Date.now()}@example.com`;
   const register = await requestJson(baseUrl, "/api/auth/register", {
     method: "POST",
     body: JSON.stringify({
       email,
-      name: "Release Validator",
+      name: "Instance Validator",
       ...(turnstileToken ? { turnstileToken } : {})
     })
   });
@@ -120,9 +120,9 @@ async function main(): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify({
-      name: `release-validate-${Date.now()}`,
-      description: "Release validation instance",
-      image: "registry.cloudflare.com/example/release-validate:1.0.0"
+      name: `instance-validate-${Date.now()}`,
+      description: "Instance validation runtime",
+      image: "registry.cloudflare.com/example/instance-validate:1.0.0"
     })
   });
 
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify({
-      name: "release-validate-session",
+      name: "instance-validate-session",
       instanceId: instance.instance.id
     })
   });

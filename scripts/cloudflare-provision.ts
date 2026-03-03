@@ -68,76 +68,32 @@ async function main(): Promise<void> {
   );
 
   const r2Errors: FailedAttempt[] = [];
-  let r2Templates = null;
   let r2Snapshots = null;
-  let r2Builds = null;
   if (r2ListAttempt.ok) {
     const r2List = r2ListAttempt.value;
-    const templatesAttempt = await attempt("r2.templates", () =>
-      ensureByName(r2List, "name", names.r2.templates, (name) => client.createR2Bucket(name))
+    const snapshotsAttempt = await attempt("r2.snapshots", () =>
+      ensureByName(r2List, "name", names.r2.snapshots, (name) => client.createR2Bucket(name))
     );
-    if (templatesAttempt.ok) {
-      r2Templates = templatesAttempt.value;
-      const snapshotsAttempt = await attempt("r2.snapshots", () =>
-        ensureByName(
-          r2List.concat(r2Templates.created ? [r2Templates.resource] : []),
-          "name",
-          names.r2.snapshots,
-          (name) => client.createR2Bucket(name)
-        )
-      );
-      if (snapshotsAttempt.ok) {
-        r2Snapshots = snapshotsAttempt.value;
-        const buildsAttempt = await attempt("r2.builds", () =>
-          ensureByName(
-            r2List
-              .concat(r2Templates.created ? [r2Templates.resource] : [])
-              .concat(r2Snapshots.created ? [r2Snapshots.resource] : []),
-            "name",
-            names.r2.builds,
-            (name) => client.createR2Bucket(name)
-          )
-        );
-        if (buildsAttempt.ok) {
-          r2Builds = buildsAttempt.value;
-        } else {
-          r2Errors.push(buildsAttempt as FailedAttempt);
-        }
-      } else {
-        r2Errors.push(snapshotsAttempt as FailedAttempt);
-      }
+    if (snapshotsAttempt.ok) {
+      r2Snapshots = snapshotsAttempt.value;
     } else {
-      r2Errors.push(templatesAttempt as FailedAttempt);
+      r2Errors.push(snapshotsAttempt as FailedAttempt);
     }
   } else {
     r2Errors.push(r2ListAttempt as FailedAttempt);
   }
 
   const queueErrors: FailedAttempt[] = [];
-  let queueBuilds = null;
   let queueReconcile = null;
   if (queueListAttempt.ok) {
     const queueList = queueListAttempt.value;
-    const buildsAttempt = await attempt("queues.builds", () =>
-      ensureByName(queueList, "queue_name", names.queues.builds, (queueName) => client.createQueue(queueName))
+    const reconcileAttempt = await attempt("queues.reconcile", () =>
+      ensureByName(queueList, "queue_name", names.queues.reconcile, (queueName) => client.createQueue(queueName))
     );
-    if (buildsAttempt.ok) {
-      queueBuilds = buildsAttempt.value;
-      const reconcileAttempt = await attempt("queues.reconcile", () =>
-        ensureByName(
-          queueList.concat(queueBuilds.created ? [queueBuilds.resource] : []),
-          "queue_name",
-          names.queues.reconcile,
-          (queueName) => client.createQueue(queueName)
-        )
-      );
-      if (reconcileAttempt.ok) {
-        queueReconcile = reconcileAttempt.value;
-      } else {
-        queueErrors.push(reconcileAttempt as FailedAttempt);
-      }
+    if (reconcileAttempt.ok) {
+      queueReconcile = reconcileAttempt.value;
     } else {
-      queueErrors.push(buildsAttempt as FailedAttempt);
+      queueErrors.push(reconcileAttempt as FailedAttempt);
     }
   } else {
     queueErrors.push(queueListAttempt as FailedAttempt);
@@ -166,26 +122,16 @@ async function main(): Promise<void> {
         }
       },
       r2:
-        r2Templates && r2Snapshots && r2Builds
+        r2Snapshots
           ? {
-              templates: {
-                name: r2Templates.resource.name
-              },
               snapshots: {
                 name: r2Snapshots.resource.name
-              },
-              builds: {
-                name: r2Builds.resource.name
               }
             }
           : null,
       queues:
-        queueBuilds && queueReconcile
+        queueReconcile
           ? {
-              builds: {
-                name: queueBuilds.resource.queue_name,
-                id: queueBuilds.resource.queue_id
-              },
               reconcile: {
                 name: queueReconcile.resource.queue_name,
                 id: queueReconcile.resource.queue_id
@@ -211,10 +157,7 @@ async function main(): Promise<void> {
           d1: d1.created,
           kvAuth: kvAuth.created,
           kvCache: kvCache.created,
-          r2Templates: r2Templates ? r2Templates.created : null,
           r2Snapshots: r2Snapshots ? r2Snapshots.created : null,
-          r2Builds: r2Builds ? r2Builds.created : null,
-          queueBuilds: queueBuilds ? queueBuilds.created : null,
           queueReconcile: queueReconcile ? queueReconcile.created : null
         },
         warnings: state.warnings

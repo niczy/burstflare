@@ -69,13 +69,19 @@ async function main(): Promise<void> {
     run("npx", ["wrangler", "deploy", "-c", "wrangler.generated.toml"]);
   });
 
-  // 5. Smoke test
+  // 5. Post-deploy validation
   if (!skipSmoke) {
     step(`Running smoke tests against ${baseUrl}`, () => {
       run("npx", ["tsx", "scripts/smoke.ts", "--base-url", baseUrl]);
     });
+    step(`Running UI smoke tests against ${baseUrl}`, () => {
+      run("npx", ["tsx", "scripts/ui-smoke.ts", "--base-url", baseUrl]);
+    });
+    step(`Running instance validation against ${baseUrl}`, () => {
+      run("npx", ["tsx", "scripts/instance-validate.ts", "--base-url", baseUrl]);
+    });
   } else {
-    process.stdout.write("\n▸ Skipping smoke tests (--skip-smoke)\n");
+    process.stdout.write("\n▸ Skipping post-deploy validation (--skip-smoke)\n");
   }
 
   process.stdout.write("\n✓ Deploy complete\n");

@@ -13,20 +13,20 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-async function requestText(baseUrl: string, path: string): Promise<string> {
-  const response = await fetch(`${baseUrl}${path}`);
+async function requestText(url: string): Promise<string> {
+  const response = await fetch(url);
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`${path} failed (${response.status})`);
+    throw new Error(`${url} failed (${response.status})`);
   }
   return text;
 }
 
-async function waitForShell(baseUrl: string): Promise<string> {
+async function waitForShell(url: string): Promise<string> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
-      return await requestText(baseUrl, "/");
+      return await requestText(url);
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -38,20 +38,46 @@ async function waitForShell(baseUrl: string): Promise<string> {
 async function main(): Promise<void> {
   const baseUrl = getArg("--base-url") || process.env.BURSTFLARE_BASE_URL || "http://127.0.0.1:8787";
 
-  const html = await waitForShell(baseUrl);
-
-  const requiredHtml = [
-    "BurstFlare",
-    "Dashboard Pulse",
-    "Workspace",
-    "Sessions",
-    "Snapshots",
-    "Terminal",
-    "type=\"module\""
+  const pages = [
+    {
+      path: "/",
+      required: ["BurstFlare", "Instances first.", "/dashboard", "/docs", "rel=\"modulepreload\""],
+      forbidden: ["Template", "Release"]
+    },
+    {
+      path: "/dashboard",
+      required: ["Instances", "Sessions", "/home/flare", "Create and start", "rel=\"modulepreload\""],
+      forbidden: ["Templates", "Queue build", "Promote version", "Terminal"]
+    },
+    {
+      path: "/login",
+      required: ["Register", "Login", "Recover", "rel=\"modulepreload\""],
+      forbidden: ["Passkeys", "Device approvals"]
+    },
+    {
+      path: "/profile",
+      required: ["Workspace", "Browser sessions", "Upgrade to Pro", "rel=\"modulepreload\""],
+      forbidden: ["Members &amp; invites", "Approve device"]
+    },
+    {
+      path: "/docs",
+      required: ["Instances", "Sessions", "Snapshots", "Common state"],
+      forbidden: ["Templates", "Builds", "Releases"]
+    }
   ];
-  for (const marker of requiredHtml) {
-    if (!html.includes(marker)) {
-      throw new Error(`Shell HTML is missing ${marker}`);
+
+  for (const page of pages) {
+    const url = new URL(page.path, `${baseUrl}/`).toString();
+    const html = await waitForShell(url);
+    for (const marker of page.required) {
+      if (!html.includes(marker)) {
+        throw new Error(`${page.path} is missing ${marker}`);
+      }
+    }
+    for (const marker of page.forbidden) {
+      if (html.includes(marker)) {
+        throw new Error(`${page.path} still contains removed UI text: ${marker}`);
+      }
     }
   }
 
@@ -59,7 +85,7 @@ async function main(): Promise<void> {
     `${JSON.stringify(
       {
         baseUrl,
-        htmlChecked: requiredHtml.length
+        pagesChecked: pages.length
       },
       null,
       2

@@ -17,6 +17,6 @@ BURSTFLARE_DATA_FILE = ".local/burstflare-data.json"
 # Real deployments should replace the local file-backed adapter with:
 # - D1 for durable metadata
 # - KV for ephemeral/session indexes
-# - R2 for template bundles and snapshots
-# - Queues/Workflows for async template builds and reconciliation
+# - R2 for snapshots and instance common state
+# - Queues for async reconciliation
 # - Durable Objects and Containers for session runtime coordination

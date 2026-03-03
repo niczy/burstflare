@@ -1,12 +1,26 @@
 # BurstFlare Remaining Work
 
-Status as of February 28, 2026.
+Status as of March 3, 2026.
 
 This file lists the remaining work required to close the gap between the current implementation and the full production-beta scope defined in `spec/plan.md`.
+
+The simplification rollout tracked in `spec/simplify_product.md` is complete. Legacy template/build/release work items below are retained as historical context only; they are no longer the active product direction.
 
 ## 1. Highest-Priority Gaps
 
 - No current high-priority gaps remain. The remaining work is polish, operator hardening, and future scale improvements.
+
+## 1A. Simplified Product Status
+
+- Complete:
+  - instance-first control plane
+  - session ownership by `instanceId`
+  - single latest-snapshot semantics with automatic restore
+  - shared `/home/flare` common state with explicit push/pull
+  - billing on runtime and storage
+  - simplified web UI, deploy surface, and operator docs
+- Remaining:
+  - future polish and scale work only
 
 ## 2. PR Plan Status
 

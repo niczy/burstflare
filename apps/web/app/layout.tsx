@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 export const metadata = {
   title: "BurstFlare",
   description:
-    "BurstFlare keeps templates, sessions, previews, access flows, terminal tools, snapshots, and activity in one place."
+    "BurstFlare keeps instances, sessions, previews, shared home state, and billing in one place."
 };
 
 type RootLayoutProps = {
