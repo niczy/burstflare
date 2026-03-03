@@ -87,10 +87,13 @@ export const TABLES: TableDefinition[] = [
       { name: "user_id", field: "userId" },
       { name: "name", field: "name" },
       { name: "image", field: "image" },
+      { name: "common_state_key", field: "commonStateKey" },
+      { name: "common_state_bytes", field: "commonStateBytes" },
+      { name: "common_state_updated_at", field: "commonStateUpdatedAt" },
       { name: "created_at", field: "createdAt" },
       { name: "updated_at_field", field: "updatedAt" }
     ],
-    indexes: ["user_id", "name", "image"]
+    indexes: ["user_id", "name", "image", "common_state_updated_at"]
   },
   {
     source: "sessions",

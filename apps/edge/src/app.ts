@@ -346,26 +346,61 @@ function devicePage(code: string | null): string {
 }
 
 function createObjectStore(options: any): any {
-  if (!options.SNAPSHOT_BUCKET) {
+  const snapshotBucket = options.SNAPSHOT_BUCKET || null;
+  const commonStateBucket = options.COMMON_STATE_BUCKET || options.SNAPSHOT_BUCKET || null;
+  if (!snapshotBucket && !commonStateBucket) {
     return null;
   }
 
   return {
-    async putSnapshot({ snapshot, body, contentType }: { snapshot: any; body: any; contentType: string }) {
-      if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
+    async putCommonState({ instance, body, contentType }: { instance: any; body: any; contentType: string }) {
+      if (!commonStateBucket || !instance.commonStateKey) {
         return null;
       }
-      await options.SNAPSHOT_BUCKET.put(snapshot.objectKey, body, {
+      await commonStateBucket.put(instance.commonStateKey, body, {
+        httpMetadata: { contentType }
+      });
+      return { key: instance.commonStateKey };
+    },
+
+    async getCommonState({ instance }: { instance: any }) {
+      if (!commonStateBucket || !instance.commonStateKey) {
+        return null;
+      }
+      const object = await commonStateBucket.get(instance.commonStateKey);
+      if (!object) {
+        return null;
+      }
+      return {
+        body: await object.arrayBuffer(),
+        contentType: object.httpMetadata?.contentType || "application/octet-stream",
+        bytes: object.size ?? instance.commonStateBytes ?? 0
+      };
+    },
+
+    async deleteCommonState({ instance }: { instance: any }) {
+      if (!commonStateBucket || !instance.commonStateKey) {
+        return null;
+      }
+      await commonStateBucket.delete(instance.commonStateKey);
+      return { key: instance.commonStateKey };
+    },
+
+    async putSnapshot({ snapshot, body, contentType }: { snapshot: any; body: any; contentType: string }) {
+      if (!snapshotBucket || !snapshot.objectKey) {
+        return null;
+      }
+      await snapshotBucket.put(snapshot.objectKey, body, {
         httpMetadata: { contentType }
       });
       return { key: snapshot.objectKey };
     },
 
     async getSnapshot({ snapshot }: { snapshot: any }) {
-      if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
+      if (!snapshotBucket || !snapshot.objectKey) {
         return null;
       }
-      const object = await options.SNAPSHOT_BUCKET.get(snapshot.objectKey);
+      const object = await snapshotBucket.get(snapshot.objectKey);
       if (!object) {
         return null;
       }
@@ -377,10 +412,10 @@ function createObjectStore(options: any): any {
     },
 
     async deleteSnapshot({ snapshot }: { snapshot: any }) {
-      if (!options.SNAPSHOT_BUCKET || !snapshot.objectKey) {
+      if (!snapshotBucket || !snapshot.objectKey) {
         return null;
       }
-      await options.SNAPSHOT_BUCKET.delete(snapshot.objectKey);
+      await snapshotBucket.delete(snapshot.objectKey);
       return { key: snapshot.objectKey };
     }
   };
@@ -1173,6 +1208,28 @@ export async function runReconcile(options: any = {}): Promise<any> {
       if (!container) {
         continue;
       }
+      if (session.instanceId && typeof container.fetch === "function") {
+        try {
+          const response = await container.fetch(
+            new Request("http://runtime.internal/common-state/export", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json; charset=utf-8"
+              },
+              body: JSON.stringify({
+                sessionId: session.id,
+                instanceId: session.instanceId
+              })
+            })
+          );
+          if (response.ok) {
+            await service.saveSystemInstanceCommonState(session.id, {
+              body: await response.arrayBuffer(),
+              contentType: response.headers.get("content-type") || "application/octet-stream"
+            });
+          }
+        } catch (_error) {}
+      }
       const runtime = await stopContainerRuntime(container, "reconcile", session.id);
       await service.applySystemSessionTransition(session.id, "stop", runtime);
       runtimeSleptSessions += 1;
@@ -1315,7 +1372,15 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
       throw new Error(`Unsupported session action: ${action}`);
     }
 
-    const result = await service.transitionSessionWithRuntime(token, sessionId, action, (session: any) => syncSessionRuntime(action, session));
+    const result = await service.transitionSessionWithRuntime(token, sessionId, action, async (session: any) => {
+      if (["stop", "restart", "delete"].includes(action) && session.state === "running" && session.instanceId) {
+        const runtimeCommonState = await captureCommonStateFromRuntime(session);
+        if (runtimeCommonState) {
+          await service.saveInstanceCommonState(token, session.instanceId, runtimeCommonState);
+        }
+      }
+      return syncSessionRuntime(action, session);
+    });
     if (
       ["start", "restart"].includes(action) &&
       result.session.state === "running" &&
@@ -1328,6 +1393,12 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
         const runtimeRestore = await applyRuntimeSnapshotHydration(token, result.session);
         if (runtimeRestore) {
           result.runtimeRestore = runtimeRestore;
+        }
+      }
+      if (result.session.instanceId) {
+        const runtimeCommonState = await applyInstanceCommonStateToRuntime(token, result.session);
+        if (runtimeCommonState) {
+          result.runtimeCommonState = runtimeCommonState;
         }
       }
     }
@@ -1483,6 +1554,137 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
       body,
       contentType: response.headers.get("content-type") || "application/octet-stream",
       bytes: body.byteLength
+    };
+  }
+
+  function createCommonStateRestoreRequest(session: any, content: any): Request {
+    const url = new URL("http://runtime.internal/common-state/restore");
+    url.searchParams.set("sessionId", session.id);
+    return new Request(url.toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json; charset=utf-8"
+      },
+      body: JSON.stringify({
+        sessionId: session.id,
+        instanceId: session.instanceId || null,
+        contentType: content.contentType,
+        bytes: content.bytes,
+        contentBase64: toBase64(content.body)
+      })
+    });
+  }
+
+  function createCommonStateExportRequest(session: any): Request {
+    const url = new URL("http://runtime.internal/common-state/export");
+    url.searchParams.set("sessionId", session.id);
+    return new Request(url.toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json; charset=utf-8"
+      },
+      body: JSON.stringify({
+        sessionId: session.id,
+        instanceId: session.instanceId || null
+      })
+    });
+  }
+
+  async function applyCommonStateContentToRuntime(session: any, content: any): Promise<any> {
+    const container = getSessionContainer(session.id);
+    if (!container || typeof container.fetch !== "function") {
+      return null;
+    }
+    const response = await container.fetch(createCommonStateRestoreRequest(session, content));
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      const message = await response.text().catch(() => "Common state restore failed");
+      throw createHttpError(message || "Common state restore failed", 502);
+    }
+    const data = await response.json().catch(() => ({}));
+    return {
+      ok: true,
+      ...data
+    };
+  }
+
+  async function applyInstanceCommonStateToRuntime(token: string, session: any): Promise<any> {
+    if (!session?.instanceId) {
+      return null;
+    }
+    let content;
+    try {
+      content = await service.getInstanceCommonState(token, session.instanceId);
+    } catch (error) {
+      if ((error as any)?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+    return applyCommonStateContentToRuntime(session, content);
+  }
+
+  async function captureCommonStateFromRuntime(session: any): Promise<any> {
+    const container = getSessionContainer(session.id);
+    if (!container || typeof container.fetch !== "function") {
+      return null;
+    }
+    const response = await container.fetch(createCommonStateExportRequest(session));
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      const message = await response.text().catch(() => "Common state export failed");
+      throw createHttpError(message || "Common state export failed", 502);
+    }
+    const body = await response.arrayBuffer();
+    return {
+      body,
+      contentType: response.headers.get("content-type") || "application/octet-stream",
+      bytes: body.byteLength
+    };
+  }
+
+  async function pushInstanceCommonState(token: string, instanceId: string): Promise<any> {
+    const sessions = (await service.listSessions(token)).sessions
+      .filter((entry: any) => entry.instanceId === instanceId && entry.state === "running")
+      .sort((left: any, right: any) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
+    if (sessions.length === 0) {
+      throw createHttpError("No running session available to push common state", 409);
+    }
+    const runtimeCapture = await captureCommonStateFromRuntime(sessions[0]);
+    if (!runtimeCapture) {
+      throw createHttpError("No running session available to push common state", 409);
+    }
+    const saved = await service.saveInstanceCommonState(token, instanceId, runtimeCapture);
+    return {
+      ...saved,
+      sessionId: sessions[0].id,
+      runtimeCapture: {
+        bytes: runtimeCapture.bytes,
+        contentType: runtimeCapture.contentType
+      }
+    };
+  }
+
+  async function pullInstanceCommonState(token: string, instanceId: string): Promise<any> {
+    const content = await service.getInstanceCommonState(token, instanceId);
+    const sessions = (await service.listSessions(token)).sessions
+      .filter((entry: any) => entry.instanceId === instanceId && entry.state === "running");
+    const appliedSessions = [];
+    for (const session of sessions) {
+      const applied = await applyCommonStateContentToRuntime(session, content);
+      if (applied) {
+        appliedSessions.push(session.id);
+      }
+    }
+    return {
+      instance: content.instance,
+      commonState: content.commonState,
+      bytes: content.bytes,
+      appliedSessions
     };
   }
 
@@ -2240,6 +2442,28 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           return unauthorized();
         }
         return toJson(await service.getInstance(token, instanceId));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/instances/:instanceId/push",
+      handler: withErrorHandling(async (request, { instanceId }: { instanceId: string }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await pushInstanceCommonState(token, instanceId));
+      })
+    },
+    {
+      method: "POST",
+      pattern: "/api/instances/:instanceId/pull",
+      handler: withErrorHandling(async (request, { instanceId }: { instanceId: string }) => {
+        const token = requireToken(request, service);
+        if (!token) {
+          return unauthorized();
+        }
+        return toJson(await pullInstanceCommonState(token, instanceId));
       })
     },
     {

@@ -1897,6 +1897,141 @@ test("worker health reports build dispatch removed", async () => {
   assert.equal(health.data.runtime.buildDispatchMode, null);
 });
 
+test("worker restores and syncs instance common state", async () => {
+  const bucket = createBucket();
+  const restoredCommonState: any[] = [];
+  let exportedCommonState = JSON.stringify(
+    {
+      format: "burstflare.common-state.v1",
+      instanceId: "ins_common",
+      files: [
+        {
+          path: "/home/flare/.myconfig",
+          content: "from-r2"
+        }
+      ]
+    },
+    null,
+    2
+  );
+
+  const service = createWorkerService({
+    SNAPSHOT_BUCKET: bucket
+  });
+  const app = createApp({
+    service,
+    SNAPSHOT_BUCKET: bucket,
+    containersEnabled: true,
+    getSessionContainer() {
+      return {
+        async startRuntime() {
+          return {
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy"
+          };
+        },
+        async fetch(request: Request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/runtime/bootstrap") {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: { "content-type": "application/json; charset=utf-8" }
+            });
+          }
+          if (url.pathname === "/common-state/restore") {
+            const payload = JSON.parse(String(await request.text() || "{}"));
+            restoredCommonState.push(payload);
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                restoredPaths: ["/home/flare/.myconfig"]
+              }),
+              {
+                headers: { "content-type": "application/json; charset=utf-8" }
+              }
+            );
+          }
+          if (url.pathname === "/common-state/export") {
+            return new Response(exportedCommonState, {
+              headers: {
+                "content-type": "application/vnd.burstflare.common-state+json; charset=utf-8"
+              }
+            });
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { "content-type": "application/json; charset=utf-8" }
+          });
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "worker-common-state@example.com",
+    name: "Worker Common State"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "common-state-instance",
+    description: "Common state runtime coverage",
+    image: "registry.cloudflare.com/example/common-state:1.0.0"
+  });
+
+  await service.saveInstanceCommonState(owner.token, instance.instance.id, {
+    body: exportedCommonState,
+    contentType: "application/vnd.burstflare.common-state+json; charset=utf-8"
+  });
+
+  const created = await service.createSession(owner.token, {
+    name: "common-state-session",
+    instanceId: instance.instance.id
+  });
+  const headers = {
+    authorization: `Bearer ${owner.token}`
+  };
+
+  const started = await requestJson(app, `/api/sessions/${created.session.id}/start`, {
+    method: "POST",
+    headers
+  });
+  assert.equal(started.response.status, 200);
+  assert.equal(restoredCommonState.length, 1);
+  assert.equal(restoredCommonState[0].instanceId, instance.instance.id);
+
+  exportedCommonState = JSON.stringify(
+    {
+      format: "burstflare.common-state.v1",
+      instanceId: instance.instance.id,
+      files: [
+        {
+          path: "/home/flare/.myconfig",
+          content: "updated"
+        }
+      ]
+    },
+    null,
+    2
+  );
+
+  const pushed = await requestJson(app, `/api/instances/${instance.instance.id}/push`, {
+    method: "POST",
+    headers
+  });
+  assert.equal(pushed.response.status, 200);
+  assert.equal(pushed.data.sessionId, created.session.id);
+  assert.ok(pushed.data.commonState.bytes > 0);
+
+  const pulled = await requestJson(app, `/api/instances/${instance.instance.id}/pull`, {
+    method: "POST",
+    headers
+  });
+  assert.equal(pulled.response.status, 200);
+  assert.deepEqual(pulled.data.appliedSessions, [created.session.id]);
+  assert.equal(restoredCommonState.length, 2);
+
+  const detail = await service.getInstance(owner.token, instance.instance.id);
+  assert.ok(detail.instance.commonStateBytes > 0);
+});
+
 test("worker replays the latest snapshot into the container runtime on session start", async () => {
   const appliedRestores: any[] = [];
   let runtime: {
