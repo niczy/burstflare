@@ -42,11 +42,11 @@ export default function HomePage() {
                 </div>
                 <div className="metric-chip">
                   <strong>Sessions stay close</strong>
-                  <span>Preview, editor, terminal, and SSH all hang off the same workspace flow.</span>
+                  <span>Preview, editor, Terminal, and SSH all hang off the same workspace flow.</span>
                 </div>
                 <div className="metric-chip">
-                  <strong>State is preserved</strong>
-                  <span>Snapshots capture persisted paths on every sleep so no work is ever lost between sessions.</span>
+                  <strong>Dashboard Pulse</strong>
+                  <span>Live counts of templates, builds, sessions, and Snapshots refresh from the current workspace.</span>
                 </div>
               </div>
               <div className="hero-actions">
@@ -184,6 +184,7 @@ flare session ssh &lt;sessionId&gt;</pre>
           </aside>
         </section>
       </main>
+      <script type="module" dangerouslySetInnerHTML={{ __html: "" }} />
     </>
   );
 }
