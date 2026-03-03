@@ -1,4 +1,5 @@
 import { styles } from "../../src/assets.js";
+import { SiteNav, siteNavStyles } from "../components/site-nav.js";
 
 export const metadata = {
   title: "Concepts — BurstFlare",
@@ -10,19 +11,24 @@ export default function DocsPage() {
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: styles }} />
+      <style dangerouslySetInnerHTML={{ __html: siteNavStyles }} />
       <style dangerouslySetInnerHTML={{ __html: docsStyles }} />
       <main className="shell">
+        <SiteNav active="docs" />
+
         {/* Header */}
         <div className="docs-header card">
           <div className="docs-header-inner">
-            <div>
-              <a href="/" className="docs-home-link">← BurstFlare</a>
-            </div>
-            <div className="docs-hero-copy">
+            <div className="docs-header-top">
               <div className="hero-topline">
                 <span className="eyebrow">Documentation</span>
                 <span className="pill">Core concepts</span>
               </div>
+              <a href="/docs/raw" className="docs-markdown-link" title="Plain Markdown — for agents and LLMs">
+                <span className="docs-markdown-icon">⬡</span> Markdown
+              </a>
+            </div>
+            <div className="docs-hero-copy">
               <h1 className="docs-title">How BurstFlare works</h1>
               <p className="subtitle">
                 BurstFlare is organized around four building blocks: workspaces, templates, sessions,
@@ -927,5 +933,41 @@ const docsStyles = `
   .docs-state-step:last-child {
     border-bottom: none;
   }
+}
+
+.docs-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.docs-markdown-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(22, 33, 40, 0.05);
+  font-size: 0.76rem;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.docs-markdown-link:hover {
+  background: rgba(22, 33, 40, 0.1);
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.docs-markdown-icon {
+  font-size: 0.9rem;
+  opacity: 0.7;
 }
 `;
