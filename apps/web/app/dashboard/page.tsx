@@ -73,7 +73,7 @@ export default function DashboardPage() {
               <input
                 id="persistedPaths"
                 type="text"
-                placeholder="/workspace,/home/dev/.cache"
+                placeholder="/workspace,/home/flare/.cache"
               />
             </div>
             <div className="row">

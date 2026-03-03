@@ -550,7 +550,7 @@ This file records what has already been implemented in the repository and what h
 ## 45. Persisted-Path Template Inputs
 
 - Exposed template `persistedPaths` at the product edges instead of leaving it as backend-only manifest data.
-- Added CLI support for `--persisted-paths /workspace,/home/dev/.cache` on `flare template upload`.
+- Added CLI support for `--persisted-paths /workspace,/home/flare/.cache` on `flare template upload`.
 - Added a persisted-paths input to the web template version form.
 - Added client-side parsing of comma-separated persisted paths in the browser shell.
 - Added test coverage across the service, Worker, and CLI suites to ensure persisted paths pass through the manifest correctly.
@@ -1149,7 +1149,7 @@ This file records what has already been implemented in the repository and what h
 - SSH tunnel error paths now emit valid websocket close frames instead of invalid close payloads.
 - CLI `flare ssh <session>` now emits a `wstunnel` plus native `ssh` attach command:
   - `wstunnel client -L tcp://127.0.0.1:2222:...`
-  - `ssh -p 2222 dev@127.0.0.1`
+  - `ssh -p 2222 flare@127.0.0.1`
 - Added Worker and CLI test coverage for the dedicated browser terminal route and the new SSH attach command shape.
 - Verified locally through `npm run ci`, in a local Docker container, and in the live Cloudflare deployment that:
   - the browser terminal websocket returns the container shell banner and `pwd` resolves to `/workspace`
