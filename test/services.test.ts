@@ -734,8 +734,7 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
     store,
     billingCatalog: {
       runtimeMinuteUsd: 0.05,
-      snapshotUsd: 0.5,
-      templateBuildUsd: 2
+      storageGbMonthUsd: 0.5
     },
     billing: {
       providerName: "stripe",
@@ -797,6 +796,7 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
   const listed = await service.getWorkspaceBilling(owner.token);
   assert.equal(listed.billing.customerId, "cus_test_1");
   assert.equal(listed.pricing.totalUsd, 0);
+  assert.equal(listed.pricing.rates.storageGbMonthUsd, 0.5);
   assert.equal(listed.pendingInvoiceEstimate.totalUsd, 0);
 
   const portal = await service.createWorkspaceBillingPortalSession(owner.token, {
@@ -819,10 +819,10 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
         createdAt: new Date().toISOString()
       },
       {
-        id: "use_snapshot_1",
+        id: "use_storage_1",
         workspaceId: owner.workspace.id,
-        kind: "snapshot",
-        value: 3,
+        kind: "storage_gb_day",
+        value: 90,
         details: {},
         createdAt: new Date().toISOString()
       },
@@ -833,26 +833,33 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
         value: 2,
         details: {},
         createdAt: new Date().toISOString()
+      },
+      {
+        id: "use_snapshot_1",
+        workspaceId: owner.workspace.id,
+        kind: "snapshot",
+        value: 3,
+        details: {},
+        createdAt: new Date().toISOString()
       }
     );
   });
 
   const quoted = await service.getWorkspaceBilling(owner.token);
-  assert.equal(quoted.pendingInvoiceEstimate.totalUsd, 6.1);
+  assert.equal(quoted.pendingInvoiceEstimate.totalUsd, 2.1);
   assert.equal(quoted.pendingInvoiceEstimate.lineItems[0].amountUsd, 0.6);
   assert.equal(quoted.pendingInvoiceEstimate.lineItems[1].amountUsd, 1.5);
-  assert.equal(quoted.pendingInvoiceEstimate.lineItems[2].amountUsd, 4);
 
   const invoiced = await service.createWorkspaceUsageInvoice(owner.token);
   assert.equal(invoiced.invoice.id, "in_test_1");
-  assert.equal(invoiced.invoice.amountUsd, 6.1);
+  assert.equal(invoiced.invoice.amountUsd, 2.1);
   assert.equal(invoiced.billing.lastInvoiceId, "in_test_1");
-  assert.equal(invoiced.billing.lastInvoiceAmountUsd, 6.1);
+  assert.equal(invoiced.billing.lastInvoiceAmountUsd, 2.1);
   assert.equal(invoiced.billing.billedUsageTotals.runtimeMinutes, 12);
+  assert.equal(invoiced.billing.billedUsageTotals.storageGbDays, 90);
   assert.equal(invoiceCalls.length, 1);
   assert.equal(invoiceCalls[0].usage.runtimeMinutes, 12);
-  assert.equal(invoiceCalls[0].usage.snapshots, 3);
-  assert.equal(invoiceCalls[0].usage.templateBuilds, 2);
+  assert.equal(invoiceCalls[0].usage.storageGbDays, 90);
 
   const noDelta = await service.createWorkspaceUsageInvoice(owner.token);
   assert.equal(noDelta.invoice, null);

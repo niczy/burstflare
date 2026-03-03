@@ -536,12 +536,11 @@ function readUsdRate(options: any, key: string, fallback: number): number {
   return value;
 }
 
-function createBillingCatalog(options: any): { currency: string; runtimeMinuteUsd: number; snapshotUsd: number; templateBuildUsd: number } {
+function createBillingCatalog(options: any): { currency: string; runtimeMinuteUsd: number; storageGbMonthUsd: number } {
   return {
     currency: "usd",
     runtimeMinuteUsd: readUsdRate(options, "BILLING_RATE_RUNTIME_MINUTE_USD", 0.03),
-    snapshotUsd: readUsdRate(options, "BILLING_RATE_SNAPSHOT_USD", 0.02),
-    templateBuildUsd: readUsdRate(options, "BILLING_RATE_TEMPLATE_BUILD_USD", 0.1)
+    storageGbMonthUsd: readUsdRate(options, "BILLING_RATE_STORAGE_GB_MONTH_USD", 0.015)
   };
 }
 

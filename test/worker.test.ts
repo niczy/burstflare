@@ -2711,8 +2711,7 @@ test("worker exposes billing endpoints and validates Stripe webhooks", async () 
   const invoiceCalls: any[] = [];
   const service = createWorkerService({
     BILLING_RATE_RUNTIME_MINUTE_USD: "0.05",
-    BILLING_RATE_SNAPSHOT_USD: "0.50",
-    BILLING_RATE_TEMPLATE_BUILD_USD: "2.00",
+    BILLING_RATE_STORAGE_GB_MONTH_USD: "0.50",
     billing: {
       providerName: "stripe",
       async createCheckoutSession(input: any) {
@@ -2770,6 +2769,7 @@ test("worker exposes billing endpoints and validates Stripe webhooks", async () 
   assert.equal(billing.response.status, 200);
   assert.equal(billing.data.billing.provider, null);
   assert.equal(billing.data.pricing.rates.runtimeMinuteUsd, 0.05);
+  assert.equal(billing.data.pricing.rates.storageGbMonthUsd, 0.5);
 
   const checkout = await requestJson(app, "/api/workspaces/current/billing/checkout", {
     method: "POST",
@@ -2827,17 +2827,15 @@ test("worker exposes billing endpoints and validates Stripe webhooks", async () 
   assert.equal(webhook.data.billing.billingStatus, "active");
   assert.equal(webhook.data.billing.defaultPaymentMethodId, "pm_worker_1");
 
-  const seeded = await service.createTemplate(owner.data.token, {
-    name: "usage-billing-template",
-    description: "usage"
+  const instance = await service.createInstance(owner.data.token, {
+    name: "billing-worker-runtime",
+    image: "registry.cloudflare.com/example/billing-worker-runtime:1.0.0"
   });
-  const seededVersion = await service.addTemplateVersion(owner.data.token, seeded.template.id, {
-    version: "1.0.0",
-    manifest: {
-      image: "registry.cloudflare.com/example/usage-billing-template:1.0.0"
-    }
+  const session = await service.createSession(owner.data.token, {
+    name: "billing-worker-session",
+    instanceId: instance.instance.id
   });
-  await service.processTemplateBuildById(seededVersion.build.id);
+  await service.startSession(owner.data.token, session.session.id);
   const usageInvoice = await requestJson(app, "/api/workspaces/current/billing/invoice", {
     method: "POST",
     headers: {
@@ -2847,7 +2845,8 @@ test("worker exposes billing endpoints and validates Stripe webhooks", async () 
   assert.equal(usageInvoice.response.status, 200);
   assert.equal(usageInvoice.data.invoice.id, "in_worker_1");
   assert.equal(invoiceCalls.length >= 1, true);
-  assert.equal(invoiceCalls.at(-1).usage.templateBuilds, 1);
+  assert.equal(invoiceCalls.at(-1).usage.runtimeMinutes, 1);
+  assert.equal(invoiceCalls.at(-1).usage.storageGbDays, 0);
 
   const invalidWebhook = await requestJson(app, "/api/stripe/webhook", {
     method: "POST",
