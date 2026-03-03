@@ -24,6 +24,12 @@ function renderWrangler(state: any, config: CloudflareConfig): string {
   if (config.turnstileSecret) {
     vars.push(`TURNSTILE_SECRET = "${config.turnstileSecret}"`);
   }
+  if (config.resendApiKey) {
+    vars.push(`RESEND_API_KEY = "${config.resendApiKey}"`);
+  }
+  if (config.resendFrom) {
+    vars.push(`RESEND_FROM = "${config.resendFrom}"`);
+  }
   const lines = [`name = "${config.workerName}"
 main = "apps/edge/src/worker.ts"
 compatibility_date = "2026-02-27"

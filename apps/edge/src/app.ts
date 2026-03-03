@@ -74,6 +74,8 @@ function errorCodeForStatus(status: number): string {
       return "CONFLICT";
     case 413:
       return "PAYLOAD_TOO_LARGE";
+    case 424:
+      return "FAILED_DEPENDENCY";
     case 426:
       return "UPGRADE_REQUIRED";
     case 429:
@@ -446,6 +448,73 @@ function createTurnstileVerifier(options: any): { enabled: boolean; verify(token
       if (!response.ok || !data.success) {
         throw createHttpError((data["error-codes"] && data["error-codes"].join(", ")) || "Turnstile verification failed", 400);
       }
+    }
+  };
+}
+
+function createEmailAuthSender(options: any): {
+  sendVerificationCode(params: { email: string; code: string; expiresAt?: string | null; requestId?: string | null }): Promise<{ id: string | null }>;
+} {
+  const apiKey = String(options.RESEND_API_KEY || "").trim();
+  const from = String(options.RESEND_FROM || options.RESEND_FROM_EMAIL || "").trim();
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+
+  return {
+    async sendVerificationCode({
+      email,
+      code,
+      expiresAt = null,
+      requestId = null
+    }: {
+      email: string;
+      code: string;
+      expiresAt?: string | null;
+      requestId?: string | null;
+    }): Promise<{ id: string | null }> {
+      if (!apiKey || !from) {
+        throw createHttpError("Email delivery is not configured", 424, null, {
+          code: "EMAIL_DELIVERY_NOT_CONFIGURED",
+          hint: "Set RESEND_API_KEY and RESEND_FROM to enable verification emails."
+        });
+      }
+      const expiresLabel = expiresAt ? new Date(expiresAt).toUTCString() : null;
+      const response = await fetchImpl("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          "idempotency-key": requestId || globalThis.crypto.randomUUID()
+        },
+        body: JSON.stringify({
+          from,
+          to: [email],
+          subject: "Your BurstFlare verification code",
+          text: [
+            `Use this verification code to sign in to BurstFlare: ${code}`,
+            expiresLabel ? `It expires at ${expiresLabel}.` : null,
+            "If you did not request this code, you can ignore this email."
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          html: [
+            "<p>Use this verification code to sign in to <strong>BurstFlare</strong>:</p>",
+            `<p style="font-size: 32px; font-weight: 700; letter-spacing: 0.18em; margin: 16px 0;">${code}</p>`,
+            expiresLabel ? `<p>This code expires at ${expiresLabel}.</p>` : "",
+            "<p>If you did not request this code, you can ignore this email.</p>"
+          ].join("")
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw createHttpError(data?.message || `Resend API request failed (${response.status})`, 502, {
+          provider: "resend",
+          status: response.status,
+          name: data?.name || null
+        });
+      }
+      return {
+        id: data?.id || null
+      };
     }
   };
 }
@@ -1273,6 +1342,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   const jobs = createJobQueue(options);
   const rateLimiter = createRateLimiter(options);
   const turnstile = createTurnstileVerifier(options);
+  const emailAuthSender = createEmailAuthSender(options);
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
   const frontendHandler = options.frontendHandler || null;
   const getFrontendAssetResponse = options.getFrontendAssetResponse || null;
@@ -1966,15 +2036,25 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
           const result = await service.requestEmailAuthCode(body);
+          const exposeCode = shouldExposeEmailAuthCode(request, result.email);
+          if (!exposeCode) {
+            await emailAuthSender.sendVerificationCode({
+              email: result.email,
+              code: result.code,
+              expiresAt: result.expiresAt,
+              requestId: requestIdFromRequest(request)
+            });
+          }
           return toJson({
             ok: true,
             email: result.email,
             expiresAt: result.expiresAt,
             delivery: {
               method: "verification_code",
-              mode: shouldExposeEmailAuthCode(request, result.email) ? "inline" : "email"
+              mode: exposeCode ? "inline" : "email",
+              ...(exposeCode ? {} : { provider: "resend" })
             },
-            ...(shouldExposeEmailAuthCode(request, result.email) ? { code: result.code } : {})
+            ...(exposeCode ? { code: result.code } : {})
           });
         })
       )

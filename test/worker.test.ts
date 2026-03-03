@@ -139,6 +139,62 @@ function createFrontendHandler(bodyByPath: Record<string, string> = {}) {
 const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
 
+test("worker sends email auth codes through Resend for non-managed addresses", async () => {
+  const sentEmails: Array<{ url: string; method: string; headers: Headers; body: any }> = [];
+  const app = createApp({
+    RESEND_API_KEY: "re_test_123",
+    RESEND_FROM: "BurstFlare <login@burstflare.dev>",
+    fetchImpl: async (url: string, init: RequestInit = {}) => {
+      sentEmails.push({
+        url,
+        method: String(init.method || "GET"),
+        headers: new Headers(init.headers),
+        body: JSON.parse(String(init.body || "{}"))
+      });
+      return new Response(JSON.stringify({ id: "email_123" }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json; charset=utf-8"
+        }
+      });
+    }
+  });
+
+  const requested = await requestJson(app, "/api/auth/email-code/request", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "alice@example.com",
+      name: "Alice"
+    })
+  });
+  assert.equal(requested.response.status, 200);
+  assert.equal(requested.data.delivery.mode, "email");
+  assert.equal(requested.data.delivery.provider, "resend");
+  assert.equal("code" in requested.data, false);
+  assert.equal(sentEmails.length, 1);
+  assert.equal(sentEmails[0].url, "https://api.resend.com/emails");
+  assert.equal(sentEmails[0].method, "POST");
+  assert.equal(sentEmails[0].headers.get("authorization"), "Bearer re_test_123");
+  assert.equal(sentEmails[0].body.from, "BurstFlare <login@burstflare.dev>");
+  assert.deepEqual(sentEmails[0].body.to, ["alice@example.com"]);
+  assert.equal(sentEmails[0].body.subject, "Your BurstFlare verification code");
+  assert.match(sentEmails[0].body.text, /Use this verification code to sign in to BurstFlare/);
+  assert.match(sentEmails[0].body.html, /<strong>BurstFlare<\/strong>/);
+
+  const unconfigured = createApp();
+  const failed = await requestJson(unconfigured, "/api/auth/email-code/request", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "bob@example.com",
+      name: "Bob"
+    })
+  });
+  assert.equal(failed.response.status, 424);
+  assert.equal(failed.data.error, "Email delivery is not configured");
+  assert.equal(failed.data.code, "EMAIL_DELIVERY_NOT_CONFIGURED");
+  assert.equal(failed.data.hint, "Set RESEND_API_KEY and RESEND_FROM to enable verification emails.");
+});
+
 test("worker serves removed sharing flow, bundle upload, build logs, session events, and runtime validation", async () => {
   const queuedBuilds: unknown[] = [];
   const queuedReconcile: unknown[] = [];
