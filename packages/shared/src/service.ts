@@ -457,6 +457,10 @@ function auditAndThrow(_state, _clock, audit, message, status = 400) {
   throw error;
 }
 
+function failWorkspaceSharingRemoved() {
+  fail("Workspace sharing has been removed", 410);
+}
+
 function canManageWorkspace(role) {
   return role === "owner" || role === "admin";
 }
@@ -2924,278 +2928,33 @@ export function createBurstFlareService(options: any = {}) {
             ...entry,
             user: formatUser(findUserById(state, entry.userId))
           }));
-        const invites = state.workspaceInvites.filter(
-          (entry) =>
-            entry.workspaceId === auth.workspace.id &&
-            entry.status === "pending" &&
-            new Date(entry.expiresAt).getTime() > nowMs(clock)
-        );
-        return { members, invites };
+        return { members, invites: [] };
       });
     },
 
     async createWorkspaceInvite(token, { email, role = "member" }) {
       return transact(WORKSPACE_SCOPE, (state) => {
-        const auth = requireManageWorkspace(state, token, clock);
-        ensure(email, "Email is required");
-        ensure(["admin", "member", "viewer"].includes(role), "Invalid role");
-        const inviteEmail = email.toLowerCase();
-        const existing = findUserByEmail(state, inviteEmail);
-        if (existing) {
-          if (getMembership(state, existing.id, auth.workspace.id)) {
-            auditAndThrow(
-              state,
-              clock,
-              {
-                action: "workspace.invite_rejected_existing_member",
-                actorUserId: auth.user.id,
-                workspaceId: auth.workspace.id,
-                targetType: "workspace",
-                targetId: auth.workspace.id,
-                details: {
-                  email: inviteEmail,
-                  existingUserId: existing.id
-                }
-              },
-              "User is already a member",
-              409
-            );
-          }
-        }
-        const existingPendingInvite = state.workspaceInvites.find(
-          (entry) =>
-            entry.workspaceId === auth.workspace.id &&
-            entry.email === inviteEmail &&
-            entry.status === "pending" &&
-            new Date(entry.expiresAt).getTime() > nowMs(clock)
-        );
-        if (existingPendingInvite) {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.invite_rejected_duplicate",
-              actorUserId: auth.user.id,
-              workspaceId: auth.workspace.id,
-              targetType: "workspace_invite",
-              targetId: existingPendingInvite.id,
-              details: {
-                email: inviteEmail,
-                role: existingPendingInvite.role
-              }
-            },
-            "Invite already pending",
-            409
-          );
-        }
-        const invite = {
-          id: createId("inv"),
-          code: createId("invite"),
-          workspaceId: auth.workspace.id,
-          email: inviteEmail,
-          role,
-          status: "pending",
-          createdByUserId: auth.user.id,
-          createdAt: nowIso(clock),
-          expiresAt: futureIso(clock, TOKEN_TTL_MS)
-        };
-        state.workspaceInvites.push(invite);
-        writeAudit(state, clock, {
-          action: "workspace.invite_created",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "workspace_invite",
-          targetId: invite.id,
-          details: { email: invite.email, role }
-        });
-        return { invite };
+        requireManageWorkspace(state, token, clock);
+        void email;
+        void role;
+        failWorkspaceSharingRemoved();
       });
     },
 
     async acceptWorkspaceInvite(token, inviteCode) {
       return transact(WORKSPACE_SCOPE, (state) => {
-        const auth = requireAuth(state, token, clock);
-        const invite = state.workspaceInvites.find((entry) => entry.code === inviteCode);
-        if (!invite) {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.invite_accept_failed",
-              actorUserId: auth.user.id,
-              workspaceId: null,
-              targetType: "workspace_invite_code",
-              targetId: inviteCode || "unknown",
-              details: { reason: "not_found" }
-            },
-            "Invite not found",
-            404
-          );
-        }
-        if (invite.status !== "pending") {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.invite_accept_failed",
-              actorUserId: auth.user.id,
-              workspaceId: invite.workspaceId,
-              targetType: "workspace_invite",
-              targetId: invite.id,
-              details: { reason: "already_used", status: invite.status }
-            },
-            "Invite already used",
-            409
-          );
-        }
-        if (new Date(invite.expiresAt).getTime() <= nowMs(clock)) {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.invite_accept_failed",
-              actorUserId: auth.user.id,
-              workspaceId: invite.workspaceId,
-              targetType: "workspace_invite",
-              targetId: invite.id,
-              details: { reason: "expired" }
-            },
-            "Invite expired",
-            400
-          );
-        }
-        if (invite.email !== auth.user.email.toLowerCase()) {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.invite_accept_failed",
-              actorUserId: auth.user.id,
-              workspaceId: invite.workspaceId,
-              targetType: "workspace_invite",
-              targetId: invite.id,
-              details: {
-                reason: "email_mismatch",
-                inviteEmail: invite.email,
-                actorEmail: auth.user.email.toLowerCase()
-              }
-            },
-            "Invite email mismatch",
-            403
-          );
-        }
-        if (getMembership(state, auth.user.id, invite.workspaceId)) {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.invite_accept_failed",
-              actorUserId: auth.user.id,
-              workspaceId: invite.workspaceId,
-              targetType: "workspace_invite",
-              targetId: invite.id,
-              details: { reason: "already_joined" }
-            },
-            "Already joined",
-            409
-          );
-        }
-
-        invite.status = "accepted";
-        invite.acceptedAt = nowIso(clock);
-        state.memberships.push({
-          workspaceId: invite.workspaceId,
-          userId: auth.user.id,
-          role: invite.role,
-          createdAt: nowIso(clock)
-        });
-        const workspace = state.workspaces.find((entry) => entry.id === invite.workspaceId);
-        ensure(workspace, "Workspace missing", 500);
-        writeAudit(state, clock, {
-          action: "workspace.invite_accepted",
-          actorUserId: auth.user.id,
-          workspaceId: invite.workspaceId,
-          targetType: "workspace_invite",
-          targetId: invite.id,
-          details: {
-            role: invite.role,
-            email: invite.email
-          }
-        });
-        return {
-          workspace: formatWorkspace(state, workspace, invite.role)
-        };
+        requireAuth(state, token, clock);
+        void inviteCode;
+        failWorkspaceSharingRemoved();
       });
     },
 
     async updateWorkspaceMemberRole(token, userId, role) {
       return transact(WORKSPACE_SCOPE, (state) => {
-        const auth = requireManageWorkspace(state, token, clock);
-        ensure(["admin", "member", "viewer"].includes(role), "Invalid role");
-        const membership = getMembership(state, userId, auth.workspace.id);
-        if (!membership) {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.member_role_update_failed",
-              actorUserId: auth.user.id,
-              workspaceId: auth.workspace.id,
-              targetType: "workspace_membership",
-              targetId: `${auth.workspace.id}:${userId}`,
-              details: {
-                requestedRole: role,
-                reason: "missing_membership"
-              }
-            },
-            "Membership not found",
-            404
-          );
-        }
-        if (membership.role === "owner") {
-          auditAndThrow(
-            state,
-            clock,
-            {
-              action: "workspace.member_role_update_failed",
-              actorUserId: auth.user.id,
-              workspaceId: auth.workspace.id,
-              targetType: "workspace_membership",
-              targetId: `${auth.workspace.id}:${userId}`,
-              details: {
-                requestedRole: role,
-                reason: "owner_locked"
-              }
-            },
-            "Cannot change owner role",
-            409
-          );
-        }
-        if (membership.role === role) {
-          writeAudit(state, clock, {
-            action: "workspace.member_role_reaffirmed",
-            actorUserId: auth.user.id,
-            workspaceId: auth.workspace.id,
-            targetType: "workspace_membership",
-            targetId: `${auth.workspace.id}:${userId}`,
-            details: { role }
-          });
-          return { membership };
-        }
-        const previousRole = membership.role;
-        membership.role = role;
-        writeAudit(state, clock, {
-          action: "workspace.member_role_updated",
-          actorUserId: auth.user.id,
-          workspaceId: auth.workspace.id,
-          targetType: "workspace_membership",
-          targetId: `${auth.workspace.id}:${userId}`,
-          details: {
-            previousRole,
-            role
-          }
-        });
-        return { membership };
+        requireManageWorkspace(state, token, clock);
+        void userId;
+        void role;
+        failWorkspaceSharingRemoved();
       });
     },
 

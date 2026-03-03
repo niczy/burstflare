@@ -138,7 +138,7 @@ function createFrontendHandler(bodyByPath: Record<string, string> = {}) {
 const TEST_SSH_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ1cnN0ZmxhcmV0ZXN0a2V5bWF0ZXJpYWw= flare@test";
 
-test("worker serves invite flow, bundle upload, build logs, session events, and runtime validation", async () => {
+test("worker serves removed sharing flow, bundle upload, build logs, session events, and runtime validation", async () => {
   const queuedBuilds: unknown[] = [];
   const queuedReconcile: unknown[] = [];
   const app = createApp({
@@ -440,28 +440,21 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const teammateToken = teammate.data.token;
   const teammateHeaders = { authorization: `Bearer ${teammateToken}` };
 
-  const invite = await requestJson(app, "/api/workspaces/current/invites", {
+  const inviteRemoved = await requestJson(app, "/api/workspaces/current/invites", {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({ email: "dev@example.com", role: "member" })
   });
-  assert.equal(invite.response.status, 200);
+  assert.equal(inviteRemoved.response.status, 410);
 
-  const accepted = await requestJson(app, "/api/workspaces/current/invites/accept", {
+  const acceptedRemoved = await requestJson(app, "/api/workspaces/current/invites/accept", {
     method: "POST",
     headers: teammateHeaders,
-    body: JSON.stringify({ inviteCode: invite.data.invite.code })
+    body: JSON.stringify({ inviteCode: "invite_removed" })
   });
-  assert.equal(accepted.response.status, 200);
-
-  const switched = await requestJson(app, "/api/auth/switch-workspace", {
-    method: "POST",
-    headers: teammateHeaders,
-    body: JSON.stringify({ workspaceId: owner.data.workspace.id })
-  });
-  assert.equal(switched.response.status, 200);
-  const switchedToken = switched.data.token;
-  const switchedHeaders = { authorization: `Bearer ${switchedToken}` };
+  assert.equal(acceptedRemoved.response.status, 410);
+  const switchedToken = owner.data.token;
+  const switchedHeaders = ownerHeaders;
 
   const template = await requestJson(app, "/api/templates", {
     method: "POST",
@@ -918,7 +911,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(exported.response.status, 200);
   assert.equal(exported.data.export.workspace.id, owner.data.workspace.id);
-  assert.equal(exported.data.export.members.length, 2);
+  assert.equal(exported.data.export.members.length, 1);
 
   const enqueued = await requestJson(app, "/api/admin/reconcile/enqueue", {
     method: "POST",
@@ -1001,7 +994,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   const revokedTeammate = await requestJson(app, "/api/auth/me", {
     headers: teammateHeaders
   });
-  assert.equal(revokedTeammate.response.status, 401);
+  assert.equal(revokedTeammate.response.status, 200);
 
   const ownerSecondLogin = await requestJson(app, "/api/auth/login", {
     method: "POST",
@@ -1009,15 +1002,20 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   });
   assert.equal(ownerSecondLogin.response.status, 200);
   const ownerSecondHeaders = { authorization: `Bearer ${ownerSecondLogin.data.token}` };
+  const ownerThirdLogin = await requestJson(app, "/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email: "ops@example.com", kind: "browser" })
+  });
+  assert.equal(ownerThirdLogin.response.status, 200);
 
   const ownerSessions = await requestJson(app, "/api/auth/sessions", {
     headers: ownerSecondHeaders
   });
   assert.equal(ownerSessions.response.status, 200);
-  assert.ok(ownerSessions.data.sessions.some((entry: any) => entry.id === owner.data.authSessionId));
+  assert.ok(ownerSessions.data.sessions.some((entry: any) => entry.id === ownerThirdLogin.data.authSessionId));
   assert.ok(ownerSessions.data.sessions.some((entry: any) => entry.current));
 
-  const ownerSessionRevoked = await requestJson(app, `/api/auth/sessions/${owner.data.authSessionId}`, {
+  const ownerSessionRevoked = await requestJson(app, `/api/auth/sessions/${ownerThirdLogin.data.authSessionId}`, {
     method: "DELETE",
     headers: ownerSecondHeaders
   });
@@ -1028,6 +1026,12 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
     headers: ownerHeaders
   });
   assert.equal(revokedOwner.response.status, 401);
+  const revokedThird = await requestJson(app, "/api/auth/me", {
+    headers: {
+      authorization: `Bearer ${ownerThirdLogin.data.token}`
+    }
+  });
+  assert.equal(revokedThird.response.status, 401);
 
   const activeOwner = await requestJson(app, "/api/auth/me", {
     headers: ownerSecondHeaders
@@ -1035,7 +1039,7 @@ test("worker serves invite flow, bundle upload, build logs, session events, and 
   assert.equal(activeOwner.response.status, 200);
 });
 
-test("worker records workspace membership edge cases in the audit log", async () => {
+test("worker rejects removed workspace sharing routes", async () => {
   const app = createApp();
 
   const owner = await requestJson(app, "/api/auth/register", {
@@ -1061,100 +1065,42 @@ test("worker records workspace membership edge cases in the audit log", async ()
       role: "member"
     })
   });
-  assert.equal(invite.response.status, 200);
+  assert.equal(invite.response.status, 410);
 
   const accepted = await requestJson(app, "/api/workspaces/current/invites/accept", {
     method: "POST",
     headers: teammateHeaders,
-    body: JSON.stringify({ inviteCode: invite.data.invite.code })
+    body: JSON.stringify({ inviteCode: "invite_removed" })
   });
-  assert.equal(accepted.response.status, 200);
-
-  const existingMemberInvite = await requestJson(app, "/api/workspaces/current/invites", {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      email: "audit-teammate@example.com",
-      role: "member"
-    })
-  });
-  assert.equal(existingMemberInvite.response.status, 409);
-
-  const prospectInvite = await requestJson(app, "/api/workspaces/current/invites", {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      email: "audit-prospect@example.com",
-      role: "viewer"
-    })
-  });
-  assert.equal(prospectInvite.response.status, 200);
-
-  const duplicateInvite = await requestJson(app, "/api/workspaces/current/invites", {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({
-      email: "audit-prospect@example.com",
-      role: "viewer"
-    })
-  });
-  assert.equal(duplicateInvite.response.status, 409);
-
-  const mismatchedAccept = await requestJson(app, "/api/workspaces/current/invites/accept", {
-    method: "POST",
-    headers: teammateHeaders,
-    body: JSON.stringify({ inviteCode: prospectInvite.data.invite.code })
-  });
-  assert.equal(mismatchedAccept.response.status, 403);
-
-  const reusedAccept = await requestJson(app, "/api/workspaces/current/invites/accept", {
-    method: "POST",
-    headers: teammateHeaders,
-    body: JSON.stringify({ inviteCode: invite.data.invite.code })
-  });
-  assert.equal(reusedAccept.response.status, 409);
+  assert.equal(accepted.response.status, 410);
 
   const members = await requestJson(app, "/api/workspaces/current/members", {
     headers: ownerHeaders
   });
   assert.equal(members.response.status, 200);
-  const teammateMembership = members.data.members.find((entry: any) => entry.userId === teammate.data.user.id);
-  assert.ok(teammateMembership);
+  assert.equal(members.data.members.length, 1);
+  assert.equal(members.data.members[0].userId, owner.data.user.id);
+  assert.deepEqual(members.data.invites, []);
 
-  const reaffirmedRole = await requestJson(app, `/api/workspaces/current/members/${teammate.data.user.id}/role`, {
-    method: "POST",
-    headers: ownerHeaders,
-    body: JSON.stringify({ role: teammateMembership.role })
-  });
-  assert.equal(reaffirmedRole.response.status, 200);
-
-  const elevatedRole = await requestJson(app, `/api/workspaces/current/members/${teammate.data.user.id}/role`, {
+  const roleUpdate = await requestJson(app, `/api/workspaces/current/members/${teammate.data.user.id}/role`, {
     method: "POST",
     headers: ownerHeaders,
     body: JSON.stringify({ role: "admin" })
   });
-  assert.equal(elevatedRole.response.status, 200);
+  assert.equal(roleUpdate.response.status, 410);
 
   const audit = await requestJson(app, "/api/audit", {
     headers: ownerHeaders
   });
   assert.equal(audit.response.status, 200);
-  assert.ok(audit.data.audit.some((entry: any) => entry.action === "workspace.invite_rejected_existing_member"));
-  assert.ok(audit.data.audit.some((entry: any) => entry.action === "workspace.invite_rejected_duplicate"));
-  assert.ok(
-    audit.data.audit.some(
-      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "email_mismatch"
-    )
+  assert.equal(
+    audit.data.audit.some((entry: any) => String(entry.action || "").startsWith("workspace.invite_")),
+    false
   );
-  assert.ok(
-    audit.data.audit.some(
-      (entry: any) => entry.action === "workspace.invite_accept_failed" && entry.details.reason === "already_used"
-    )
+  assert.equal(
+    audit.data.audit.some((entry: any) => String(entry.action || "").startsWith("workspace.member_role_")),
+    false
   );
-  assert.ok(audit.data.audit.some((entry: any) => entry.action === "workspace.member_role_reaffirmed"));
-  const roleAudit = audit.data.audit.find((entry: any) => entry.action === "workspace.member_role_updated");
-  assert.equal(roleAudit.details.previousRole, "member");
-  assert.equal(roleAudit.details.role, "admin");
 });
 
 test("worker scheduled handler enqueues reconcile jobs", async () => {
