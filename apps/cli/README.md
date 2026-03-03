@@ -4,8 +4,8 @@
 
 It gives you direct access to the BurstFlare control plane for:
 - authentication
-- workspace and membership management
-- template and release workflows
+- workspace settings and billing
+- instance CRUD, rebuilds, and common-state sync
 - session lifecycle and runtime access
 - snapshots, reports, exports, and reconcile operations
 
@@ -47,18 +47,16 @@ Register:
 flare auth register --email you@example.com
 ```
 
-Create and promote a template:
+Create an instance:
 
 ```bash
-flare template create node-dev
-flare template upload <templateId> --version 1.0.0
-flare template promote <templateId> <versionId>
+flare instance create node-dev --image node:20
 ```
 
 Launch a session and attach:
 
 ```bash
-flare session up sandbox --template <templateId>
+flare session up sandbox --instance <instanceId>
 flare ssh <sessionId>
 ```
 
@@ -69,11 +67,11 @@ flare ssh <sessionId>
 ```bash
 flare auth whoami
 flare help session
-flare template upload --help
+flare help instance
 flare doctor
 flare workspace
-flare templates
-flare template inspect <templateId>
+flare instance list
+flare instance inspect <instanceId>
 flare sessions
 flare snapshot list <sessionId>
 flare report

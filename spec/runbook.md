@@ -12,18 +12,17 @@ This document defines the operational baseline for the current BurstFlare beta d
   - KV
   - R2
   - Queues
-  - Workflows
   - Durable Objects
   - Containers
 - User-facing beta surfaces:
   - browser auth, passkeys, recovery codes, Turnstile
-  - template creation, versioning, builds, promotion, rollback
+  - instance creation, editing, rebuilds, push, and pull
   - session start, stop, restart, delete
   - preview, browser terminal, browser editor, SSH tunnel
-  - snapshots, restore, autosave
+  - latest snapshot restore and autosave
 - Explicitly out of current beta scope:
   - multi-region failover
-  - real external OCI image builds
+  - live sync for shared home state
   - full IDE experience beyond the bundled browser editor
   - enterprise-grade secrets management
 
@@ -36,10 +35,11 @@ Run these at the start of each operator day:
 3. `node scripts/smoke.mjs --base-url https://burstflare.nicholas-zhaoyu.workers.dev`
 4. `curl -fsS https://burstflare.nicholas-zhaoyu.workers.dev/api/health`
 5. Inspect `/api/admin/report` from an operator account and confirm:
-   - no unexpected `buildsDeadLettered`
-   - no unexpected `buildsStuck`
+   - `buildsDeadLettered` remains `0`
+   - `buildsStuck` remains `0`
    - no runaway `sessionsSleeping`
    - no unexpected `activeUploadGrants`
+   - shared `commonStateBytes` is within expected bounds
 
 ## 3. Incident Procedures
 
@@ -50,12 +50,12 @@ Run these at the start of each operator day:
 - Verify KV access for auth and rate-limit state.
 - If browser auth is degraded, confirm passkey and recovery-code flows independently.
 
-### Build Incident
+### Storage Incident
 
-- Inspect `/api/template-builds` for `failed`, `retrying`, and `dead_lettered`.
-- Pull the relevant `/api/template-builds/:id/log`.
-- Use `flare build retry <buildId>` or `flare build retry-dead-lettered` for controlled recovery.
-- If build dispatch is stuck globally, verify Queue consumers and the `BUILD_WORKFLOW` binding from `/api/health`.
+- Inspect `/api/admin/report` for unexpected storage growth.
+- Check affected instances for `commonStateBytes` growth and confirm `flare instance push` or `flare instance pull` still succeeds.
+- Verify the snapshot bucket is reachable because it now stores both snapshots and instance common state.
+- If reconcile is backlogged, verify the reconcile queue binding from `/api/health` and your Cloudflare queue dashboard.
 
 ### Runtime Incident
 
@@ -67,12 +67,6 @@ Run these at the start of each operator day:
 - Check preview and editor routes for the affected session.
 - Mint a fresh SSH token and confirm the tunnel command still resolves.
 - If runtime state is stale, use session restart before destructive cleanup.
-
-### Storage Incident
-
-- Verify R2 bucket access for templates, snapshots, and build artifacts.
-- Confirm the affected artifact keys still exist.
-- Use workspace export before any destructive repair work.
 
 ## 4. Rollout Checklist
 

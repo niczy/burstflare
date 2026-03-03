@@ -1,8 +1,31 @@
 # BurstFlare Implementation Changelog
 
-Status as of February 28, 2026.
+Status as of March 3, 2026.
 
 This file records what has already been implemented in the repository and what has been verified in the live Cloudflare environment.
+
+## 0. Simplified Product Rollout Complete
+
+- Completed the staged simplification plan in `spec/simplify_product.md`.
+- Replaced the template/build/release model with an instance-first control plane:
+  - instances now own runtime config, secrets, and shared `/home/flare` state
+  - sessions now point to `instanceId` and restore only the latest snapshot
+  - billing is based on runtime usage plus current storage
+- Removed workspace-sharing mutations and the legacy template/build/release routes from the supported product surface.
+- Simplified the web app to focus on:
+  - auth
+  - instances
+  - sessions
+  - common-state sync
+  - usage and billing
+- Simplified deploy-time Cloudflare resources to:
+  - one R2 bucket for snapshots and common state
+  - one reconcile queue
+  - no build workflow binding
+- Added simplified validation coverage, including:
+  - instance-oriented smoke flows
+  - instance validation for deploys
+  - UI smoke checks for the simplified web surface
 
 ## 1. Product Spec Baseline
 

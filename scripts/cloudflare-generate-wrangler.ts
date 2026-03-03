@@ -16,8 +16,7 @@ function renderWrangler(state: any, config: CloudflareConfig): string {
   const vars = [
     `BURSTFLARE_DATA_FILE = "${dataFile}"`,
     `CLOUDFLARE_ENVIRONMENT = "${config.environment}"`,
-    `CLOUDFLARE_DOMAIN = "${state.domain}"`,
-    `BUILD_WORKFLOW_NAME = "${config.workerName}-builds"`
+    `CLOUDFLARE_DOMAIN = "${state.domain}"`
   ];
   if (config.turnstileSiteKey) {
     vars.push(`TURNSTILE_SITE_KEY = "${config.turnstileSiteKey}"`);
@@ -68,34 +67,16 @@ class_name = "BurstFlareSessionContainer"
 image = "${containerImage}"`);
   }
 
-  lines.push(`[[workflows]]
-binding = "BUILD_WORKFLOW"
-name = "${config.workerName}-builds"
-class_name = "BurstFlareBuildWorkflow"`);
-
   if (resources.r2) {
-    lines.push(`[[r2_buckets]]
-binding = "TEMPLATE_BUCKET"
-bucket_name = "${resources.r2.templates.name}"`);
     lines.push(`[[r2_buckets]]
 binding = "SNAPSHOT_BUCKET"
 bucket_name = "${resources.r2.snapshots.name}"`);
-    lines.push(`[[r2_buckets]]
-binding = "BUILD_BUCKET"
-bucket_name = "${resources.r2.builds.name}"`);
   }
 
   if (resources.queues) {
     lines.push(`[[queues.producers]]
-binding = "BUILD_QUEUE"
-queue = "${resources.queues.builds.name}"`);
-    lines.push(`[[queues.producers]]
 binding = "RECONCILE_QUEUE"
 queue = "${resources.queues.reconcile.name}"`);
-    lines.push(`[[queues.consumers]]
-queue = "${resources.queues.builds.name}"
-max_batch_size = 1
-max_batch_timeout = 1`);
     lines.push(`[[queues.consumers]]
 queue = "${resources.queues.reconcile.name}"
 max_batch_size = 1

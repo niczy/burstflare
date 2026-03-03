@@ -5,10 +5,10 @@ BurstFlare is a hosted workspace product for creating reusable dev environments,
 ## What It Does
 
 - account and workspace management
-- team invites, access review, and recovery flows
-- template creation, versioning, and release promotion
+- browser sessions, recovery flows, and workspace settings
+- instance creation, editing, rebuilds, and shared home-state sync
 - live workspace sessions with preview, terminal, editor, and SSH access
-- snapshots, activity history, reporting, and export tools
+- latest snapshots, activity history, reporting, billing, and export tools
 
 ## Product Quick Start
 
@@ -38,18 +38,16 @@ flare doctor
 flare auth register --email you@example.com
 ```
 
-4. Create and promote a template:
+4. Create an instance:
 
 ```bash
-flare template create node-dev
-flare template upload <templateId> --version 1.0.0
-flare template promote <templateId> <versionId>
+flare instance create node-dev --image node:20
 ```
 
 5. Launch a workspace and attach:
 
 ```bash
-flare session up sandbox --template <templateId>
+flare session up sandbox --instance <instanceId>
 flare ssh <sessionId>
 ```
 
@@ -90,7 +88,7 @@ npm run ci
 npm run smoke
 npm run ui:smoke
 npm run npm:cli:smoke
-npm run release:validate
+npm run instance:validate
 ```
 
 ## Project Layout

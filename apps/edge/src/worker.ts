@@ -320,7 +320,6 @@ export class BurstFlareSessionContainer extends Container {
 interface EnvWithSessionContainer {
   SESSION_CONTAINER?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
-  BUILD_WORKFLOW_NAME?: string;
   [key: string]: unknown;
 }
 
