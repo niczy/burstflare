@@ -1174,6 +1174,17 @@ function syncSessionRuntimeSnapshot(session, runtime, clock) {
   session.runtimeUpdatedAt = nowIso(clock);
 }
 
+function syncLatestRestoredSnapshot(state, session, timestamp) {
+  const snapshot = getLatestSessionSnapshot(state, session.id);
+  if (!snapshot) {
+    session.lastRestoredSnapshotId = null;
+    session.lastRestoredAt = null;
+    return;
+  }
+  session.lastRestoredSnapshotId = snapshot.id;
+  session.lastRestoredAt = timestamp;
+}
+
 function isStaleRuntimeSnapshot(session, runtime) {
   if (!runtime || !Number.isInteger(runtime.version)) {
     return false;
@@ -1240,6 +1251,7 @@ function applySessionTransition({ state, clock, auth, action, runtime = null }) 
       const usage = summarizeUsage(state, auth.workspace.id);
       ensure(usage.runtimeMinutes < limits.maxRuntimeMinutes, "Runtime minute limit reached", 403);
       session.lastStartedAt = timestamp;
+      syncLatestRestoredSnapshot(state, session, timestamp);
       writeUsage(state, clock, {
         workspaceId: auth.workspace.id,
         kind: "runtime_minutes",
@@ -1305,6 +1317,7 @@ function applySessionTransition({ state, clock, auth, action, runtime = null }) 
       const usage = summarizeUsage(state, auth.workspace.id);
       ensure(usage.runtimeMinutes < limits.maxRuntimeMinutes, "Runtime minute limit reached", 403);
       session.lastStartedAt = timestamp;
+      syncLatestRestoredSnapshot(state, session, timestamp);
       writeUsage(state, clock, {
         workspaceId: auth.workspace.id,
         kind: "runtime_minutes",

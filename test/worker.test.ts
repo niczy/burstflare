@@ -2322,7 +2322,7 @@ test("worker exposes workflow-backed build dispatch", async () => {
   assert.equal(processed.build.workflowStatus, "succeeded");
 });
 
-test("worker replays restored snapshots into the container runtime on session start", async () => {
+test("worker replays the latest snapshot into the container runtime on session start", async () => {
   const appliedRestores: any[] = [];
   let runtime: {
     desiredState: string;
@@ -2426,20 +2426,13 @@ test("worker replays restored snapshots into the container runtime on session st
   });
   assert.equal(uploaded.response.status, 200);
 
-  const restored = await requestJson(app, `/api/sessions/${sessionId}/snapshots/${snapshot.data.snapshot.id}/restore`, {
-    method: "POST",
-    headers: authHeaders
-  });
-  assert.equal(restored.response.status, 200);
-  assert.equal(restored.data.session.lastRestoredSnapshotId, snapshot.data.snapshot.id);
-  assert.equal(appliedRestores.length, 0);
-
   const started = await requestJson(app, `/api/sessions/${sessionId}/start`, {
     method: "POST",
     headers: authHeaders
   });
   assert.equal(started.response.status, 200);
   assert.equal(started.data.session.state, "running");
+  assert.equal(started.data.session.lastRestoredSnapshotId, snapshot.data.snapshot.id);
   assert.equal(started.data.runtimeRestore.snapshotId, snapshot.data.snapshot.id);
   assert.equal(appliedRestores.length, 1);
   assert.equal(appliedRestores[0].snapshotId, snapshot.data.snapshot.id);
@@ -2571,7 +2564,7 @@ test("worker auto-captures snapshot content from a running container", async () 
   assert.equal(parsed.files[0].path, "/workspace/project/notes.txt");
 });
 
-test("preview route rehydrates the restored snapshot before proxying", async () => {
+test("preview route rehydrates the latest snapshot before proxying", async () => {
   const forwarded: Array<{ path: string; payload?: any }> = [];
   const service = createWorkerService();
   const app = createApp({
@@ -2635,7 +2628,6 @@ test("preview route rehydrates the restored snapshot before proxying", async () 
     body: "preview restore payload",
     contentType: "text/plain"
   });
-  await service.restoreSnapshot(owner.token, created.session.id, snapshot.snapshot.id);
 
   const preview = await app.fetch(
     new Request(`http://example.test/runtime/sessions/${created.session.id}/preview`, {
