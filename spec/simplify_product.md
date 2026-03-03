@@ -1,0 +1,731 @@
+# Product Simplification: Instance + Session Model
+
+## Motivation
+
+The current BurstFlare product model has five core concepts: **workspace**, **template** (with versions, builds, promotions, releases), **session**, and **snapshot** (with full history). This is powerful but too complex for most users. The upload → build → promote → release pipeline, version management, snapshot history, and workspace scoping create friction that doesn't justify itself for the primary use case: "I need a machine, fast."
+
+This document proposes collapsing the model to two concepts: **Instance** and **Session**.
+
+## New Mental Model
+
+```
+User
+  └── Instance (defines what to run)
+        ├── Docker image reference
+        ├── Environment variables / secrets
+        ├── Persisted paths configuration
+        ├── Common state (shared R2 prefix)
+        └── Sessions (running environments)
+              ├── Session A (own isolated state)
+              ├── Session B (own isolated state)
+              └── Session C (own isolated state)
+```
+
+An **Instance** is what you configure once. A **Session** is what you launch and work in. That's it.
+
+## Concept Mapping
+
+| Current concept | New concept | Notes |
+|----------------|-------------|-------|
+| Workspace | User account (flat) | Remove workspace indirection for v1; one user = one account |
+| Template | Instance | No versions, no builds, no promotion. Just a docker image ref + config. |
+| Template version | *(removed)* | Instance points directly at an image. Update = edit the instance. |
+| Template build | CLI-side Docker build | No server-side builds. CLI builds locally from Dockerfile and pushes to registry. |
+| Promotion / release | *(removed)* | No release pipeline. Editing instance config takes effect on next session start. |
+| Session | Session | Same concept, but tied to an Instance instead of a Template. |
+| Snapshot (list) | Latest snapshot (one per session) | No history. Only the most recent snapshot is retained. |
+| Workspace secrets | Instance env vars | Scoped to instance, not workspace. |
+
+## Instance
+
+### Definition
+
+An Instance is a named configuration that defines how sessions run.
+
+```typescript
+interface Instance {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+
+  // Runtime definition
+  image: string;                      // e.g. "node:20", "ubuntu:24.04", OCI registry URL
+  dockerfilePath: string | null;      // local path used by CLI for rebuild; null if --image was used
+  dockerContext: string | null;       // build context directory; null if --image was used
+  envVars: Record<string, string>;    // non-sensitive config (visible in UI)
+  secrets: Record<string, string>;    // sensitive config (write-only in UI)
+
+  // Common state (/home/flare)
+  commonStateKey: string;             // R2 prefix for shared /home/flare across sessions
+
+  // Metadata
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### Key behaviors
+
+1. **No versioning.** An Instance has exactly one configuration at any time. Editing it is a direct mutation, not a new version.
+2. **No server-side build pipeline.** The `image` field is a reference to an already-built image. The CLI can build from a Dockerfile locally (see below), but the server never runs builds.
+3. **Changes apply on next start.** If you change the image or env vars on an Instance, already-running sessions are unaffected. The next session to start picks up the new config.
+4. **Secrets are write-only.** Once set, secret values are never returned by the API. They're injected into sessions at bootstrap time.
+
+### Creating from a Dockerfile
+
+`flare instance create` supports two modes:
+
+**From an existing image:**
+```
+flare instance create my-env --image node:20
+```
+
+**From a local Dockerfile:**
+```
+flare instance create my-env --dockerfile ./Dockerfile
+flare instance create my-env --dockerfile ./dev/Dockerfile --context .
+```
+
+When `--dockerfile` is provided, the CLI:
+
+1. Runs `docker build` locally using the user's Docker daemon.
+2. Tags the image as `registry.cloudflare.com/{accountId}/flare-{instanceName}:{hash}`.
+3. Pushes the image to the Cloudflare container registry.
+4. Creates the Instance with the pushed image URL.
+
+This keeps builds client-side (no server build queue, no build workers, no build logs to manage) while still giving users who don't have a pre-built image a one-command path. The same flow works for `flare instance edit --dockerfile` to update the image.
+
+**Requirements:** Docker must be installed and running on the user's machine. The CLI detects this and gives a clear error if Docker is unavailable.
+
+**Rebuild shortcut:**
+```
+flare instance rebuild <id>
+```
+Re-runs the local Docker build using the Dockerfile path stored in the Instance metadata, pushes, and updates the image. Useful after editing the Dockerfile.
+
+### API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/instances` | Create a new instance |
+| GET | `/api/instances` | List user's instances |
+| GET | `/api/instances/:id` | Get instance detail |
+| PATCH | `/api/instances/:id` | Update instance config (image, env, secrets, paths) |
+| DELETE | `/api/instances/:id` | Delete instance and all its sessions |
+
+### CLI
+
+```
+flare instance create <name> --image <image> [--env KEY=VAL]... [--secret KEY=VAL]...
+flare instance create <name> --dockerfile <path> [--context <dir>] [--env KEY=VAL]...
+flare instance list
+flare instance show <id>
+flare instance edit <id> [--image <image>] [--dockerfile <path>]
+flare instance rebuild <id>             # re-build + push from stored Dockerfile path
+flare instance env set <id> KEY=VAL
+flare instance env unset <id> KEY
+flare instance secret set <id> KEY=VAL
+flare instance secret unset <id> KEY
+flare instance delete <id>
+```
+
+## Session
+
+### Definition
+
+A Session is a running (or sleeping) container environment launched from an Instance.
+
+```typescript
+interface Session {
+  id: string;
+  instanceId: string;
+  userId: string;
+  name: string;
+  state: "starting" | "running" | "sleeping" | "stopped" | "failed" | "deleted";
+
+  // Runtime state
+  runtimeStatus: string | null;
+  runtimeVersion: number;
+
+  // Snapshot (latest only)
+  latestSnapshotId: string | null;
+  latestSnapshotAt: string | null;
+  latestSnapshotBytes: number | null;
+
+  // Metadata
+  imageAtLaunch: string;              // frozen copy of instance.image at start time
+  createdAt: string;
+  updatedAt: string;
+  lastStartedAt: string | null;
+  lastStoppedAt: string | null;
+}
+```
+
+### Key behaviors
+
+1. **Multiple sessions per instance.** A user can run any number of sessions from the same Instance, each with its own isolated workspace. No per-instance session limit.
+2. **Isolated state.** Each session has its own snapshot in R2. The system persists `/workspace` automatically — this is not user-configurable. Session A's `/workspace` is completely separate from Session B's.
+3. **Common state.** All sessions of the same Instance share a common R2 prefix. This is mounted read-write and changes are visible across sessions. See the Common State section below.
+4. **Single snapshot.** Each session retains only its latest snapshot. When a new snapshot is saved (on sleep, stop, or manual save), it replaces the previous one. No history, no restore-from-list.
+5. **Image frozen at start.** When a session starts, it records `imageAtLaunch` from the Instance config. If the Instance image is later changed, this session continues using the image it started with until it's stopped and restarted.
+
+### API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/instances/:id/sessions` | Create and start a session |
+| GET | `/api/instances/:id/sessions` | List sessions for an instance |
+| GET | `/api/sessions/:id` | Get session detail |
+| POST | `/api/sessions/:id/start` | Start/wake a sleeping session |
+| POST | `/api/sessions/:id/stop` | Stop (sleep) a session |
+| POST | `/api/sessions/:id/restart` | Restart a session |
+| DELETE | `/api/sessions/:id` | Delete a session and its snapshot |
+| POST | `/api/sessions/:id/snapshot` | Force an immediate snapshot save |
+| POST | `/api/sessions/:id/ssh-token` | Get SSH attach credentials |
+
+### CLI
+
+```
+flare up <name> --instance <id>            # create + start
+flare list [--instance <id>]               # list sessions
+flare status <session-id>
+flare ssh <session-id>
+flare stop <session-id>
+flare start <session-id>
+flare restart <session-id>
+flare delete <session-id>
+flare snapshot <session-id>                # force save now
+flare preview <session-id>
+flare editor <session-id>
+```
+
+## Common State (`/home/flare`)
+
+### Concept
+
+Every Instance has a **common state** — the user's home directory `/home/flare`. Since the user SSHs in as `flare`, this means dotfiles (`.bashrc`, `.gitconfig`, `.ssh/config`, tool caches), scripts, and any home-directory config are automatically shared across all sessions of the same Instance.
+
+This is separate from `/workspace`, which is per-session isolated state.
+
+### Implementation
+
+Common state is backed by an R2 prefix scoped to the Instance:
+
+```
+R2: burstflare-snapshots/{instanceId}/home/
+```
+
+**Sync model: auto-pull on start, auto-push on stop, explicit push/pull mid-session.**
+
+1. **On session start:** the container bootstrap pulls the latest `/home/flare` snapshot from R2 and hydrates the home directory.
+2. **During runtime:** `/home/flare` is a normal local directory. Changes are local to this session until pushed.
+3. **On session stop/sleep:** the container automatically pushes `/home/flare` back to R2 before shutting down.
+4. **Mid-session:** the user can run `flare instance push` or `flare instance pull` at any time for immediate sync without restart.
+
+There is **no live sync**. This is deliberate — it avoids distributed filesystem complexity, conflict resolution, and sync daemons. The model is simple and predictable: changes flow through R2 at session boundaries, with manual commands for mid-session sync.
+
+**Concurrent stop:** If two sessions stop simultaneously, last-write-wins at the file level (R2 object timestamps). This is acceptable since there's no real-time coordination — users pushing shared state understand they're overwriting.
+
+### What gets shared vs. isolated
+
+| Path | Scope | Snapshot timing |
+|------|-------|-----------------|
+| `/home/flare` | **Shared** across all sessions of an Instance | Pull on start, push on stop |
+| `/workspace` | **Isolated** per session | Pull on start, push on stop |
+| Everything else | **Ephemeral** | Lost on stop |
+
+This maps to how developers naturally think: "my home directory is me, my workspace is my project."
+
+### CLI commands
+
+```
+flare instance push <id>              # upload current session's /home/flare to R2
+flare instance pull <id>              # download latest /home/flare from R2 into current session (without restart)
+```
+
+### Future enhancement
+
+Live sync (R2 polling + inotify push with last-write-wins) can be added later as an opt-in feature on the Instance (`"syncMode": "live"`) without changing the data model. The pull-on-start default remains the safe, simple path.
+
+## Snapshot Simplification
+
+### Current model
+
+Each session can have many snapshots. Users list, browse, and restore specific snapshots. The system tracks snapshot metadata, upload state, and R2 keys for each one.
+
+### New model
+
+Each session has **at most one snapshot** — the latest one. This simplifies everything:
+
+| Operation | Behavior |
+|-----------|----------|
+| Auto-save on sleep/stop | Overwrites the single snapshot |
+| Manual save | Overwrites the single snapshot |
+| Restore on start | Restores the single snapshot (no choice needed) |
+| Delete session | Deletes the single snapshot |
+| List snapshots | Not needed — session detail includes snapshot metadata |
+
+**R2 layout:**
+
+```
+burstflare-snapshots/{instanceId}/sessions/{sessionId}/snapshot.tar.gz
+```
+
+One key per session. Overwritten in place. No versioning.
+
+### Migration from current model
+
+For existing sessions with multiple snapshots:
+1. Keep the most recent snapshot.
+2. Delete all older snapshots from R2.
+3. Update the session record to point to the single remaining snapshot.
+
+## Billing Changes
+
+### Current billing model
+
+Billing is tied to **workspaces**. Every workspace has a `billing` object that tracks:
+- Stripe customer ID, payment method, subscription status
+- Usage totals: `runtimeMinutes`, `snapshots`, `templateBuilds`
+- Invoice history and webhook state
+
+Usage events are scoped to `workspaceId`. The billing catalog prices three metrics:
+- Runtime minutes: $0.03/min
+- Snapshots: $0.02/snapshot (per save operation)
+- Template builds: $0.10/build
+
+Storage is tracked (`summarizeStorage`) but **not billed** — it's only used for quota enforcement.
+
+### What needs to change
+
+1. **Billing owner: workspace → user.** Since workspaces are removed, billing state moves to the user account. Each user has one Stripe customer, one payment method, one billing record.
+
+2. **Remove `templateBuilds` metric.** No server-side builds. Remove from usage tracking, billing catalog, and invoice line items.
+
+3. **Add `storageGbMonths` metric.** Charge for R2 storage at the same rate Cloudflare charges us: $0.015/GB-month. This covers:
+   - Per-session snapshot storage (`snapshot.tar.gz`)
+   - Common state storage (`/shared` R2 prefix)
+
+4. **Simplify `snapshots` metric.** With single-snapshot-per-session, there's no meaningful per-save billing. Replace with storage-based billing. Remove the per-snapshot-save charge.
+
+5. **Track storage usage events.** Add a periodic job (cron, e.g. daily) that measures each user's total R2 storage and writes a `storage_gb_day` usage event. At invoice time, sum daily measurements and convert to GB-months.
+
+### New billing catalog
+
+```typescript
+const BILLING_CATALOG = {
+  currency: "usd",
+  runtimeMinuteUsd: 0.03,        // unchanged
+  storageGbMonthUsd: 0.015,      // same as R2 Standard pricing
+};
+```
+
+### New usage tracking
+
+```typescript
+// Usage totals per user
+interface UsageTotals {
+  runtimeMinutes: number;         // accumulated runtime across all sessions
+  storageGbDays: number;          // accumulated daily storage measurements
+}
+
+// Derived at invoice time
+interface BillableUsage {
+  runtimeMinutes: number;
+  storageGbMonths: number;        // storageGbDays / 30
+}
+```
+
+### New usage summary function
+
+```typescript
+function summarizeUsage(state, userId) {
+  const usage = {
+    runtimeMinutes: 0,
+    storageGbDays: 0,
+  };
+  for (const event of state.usageEvents) {
+    if (event.userId !== userId) continue;
+    if (event.kind === "runtime_minutes") usage.runtimeMinutes += event.value;
+    if (event.kind === "storage_gb_day") usage.storageGbDays += event.value;
+  }
+
+  // Current storage inventory
+  const instances = state.instances.filter(i => i.userId === userId);
+  const sessions = state.sessions.filter(s => s.userId === userId && s.state !== "deleted");
+  let storageBytes = 0;
+  for (const session of sessions) {
+    storageBytes += session.latestSnapshotBytes || 0;
+  }
+  // Common state storage per instance (tracked in instance metadata)
+  for (const instance of instances) {
+    storageBytes += instance.commonStateBytes || 0;
+  }
+
+  return {
+    ...usage,
+    storageGbMonths: Number((usage.storageGbDays / 30).toFixed(4)),
+    currentStorageBytes: storageBytes,
+    currentStorageGb: Number((storageBytes / (1024 * 1024 * 1024)).toFixed(4)),
+    inventory: {
+      instances: instances.length,
+      sessions: sessions.length,
+    }
+  };
+}
+```
+
+### New invoice line items
+
+| Metric | Unit | Rate | Description |
+|--------|------|------|-------------|
+| `runtimeMinutes` | minutes | $0.03 | Accumulated session runtime |
+| `storageGbMonths` | GB-months | $0.015 | Average storage over billing period |
+
+### Storage measurement job
+
+A daily cron (already have `*/15 * * * *` schedule) measures storage:
+
+```typescript
+// Run daily: measure each user's total R2 storage and record a usage event
+function recordDailyStorageUsage(state, clock, userId) {
+  const sessions = state.sessions.filter(s => s.userId === userId && s.state !== "deleted");
+  const instances = state.instances.filter(i => i.userId === userId);
+  let totalBytes = 0;
+  for (const session of sessions) totalBytes += session.latestSnapshotBytes || 0;
+  for (const instance of instances) totalBytes += instance.commonStateBytes || 0;
+  const gbDay = totalBytes / (1024 * 1024 * 1024);
+  if (gbDay > 0) {
+    writeUsage(state, clock, { userId, kind: "storage_gb_day", value: Number(gbDay.toFixed(6)) });
+  }
+}
+```
+
+### Billing method renames
+
+| Current | New |
+|---------|-----|
+| `getWorkspaceBilling(token)` | `getUserBilling(token)` |
+| `createWorkspaceCheckoutSession(token, opts)` | `createCheckoutSession(token, opts)` |
+| `createWorkspaceBillingPortalSession(token, opts)` | `createBillingPortalSession(token, opts)` |
+| `createWorkspaceUsageInvoice(token)` | `createUsageInvoice(token)` |
+| `chargeWorkspace(token, input)` | `chargeUser(token, input)` |
+| `applyBillingWebhook(event)` | `applyBillingWebhook(event)` (unchanged, but targets user instead of workspace) |
+
+### CLI changes
+
+```
+flare billing                     # show billing summary + current storage usage
+flare billing add-card            # unchanged
+flare billing portal              # unchanged
+flare billing charge              # unchanged
+flare billing invoice             # create usage invoice
+```
+
+### .env changes
+
+```bash
+# Remove
+BILLING_RATE_SNAPSHOT_USD=0.02
+BILLING_RATE_TEMPLATE_BUILD_USD=0.10
+
+# Add
+BILLING_RATE_STORAGE_GB_MONTH_USD=0.015
+
+# Keep
+BILLING_RATE_RUNTIME_MINUTE_USD=0.03
+```
+
+## Data Model Changes
+
+### Tables to remove
+
+| Current table | Reason |
+|---------------|--------|
+| `bf_workspaces` | Replaced by direct user ownership |
+| `bf_workspace_memberships` | No workspace sharing in v1 |
+| `bf_workspace_invites` | No workspace sharing in v1 |
+| `bf_templates` | Replaced by instances |
+| `bf_template_versions` | No versioning |
+| `bf_template_builds` | No server-side builds |
+| `bf_binding_releases` | No promotion/release pipeline |
+
+### Tables to add/modify
+
+| Table | Description |
+|-------|-------------|
+| `bf_instances` | Instance config: image, env vars, common state key |
+| `bf_sessions` (modified) | Add `instance_id`, `image_at_launch`, `latest_snapshot_*` fields. Remove `template_id`, `workspace_id`. |
+| `bf_snapshots` (simplified) | One row per session max. Remove multi-snapshot tracking. |
+
+### Schema migration
+
+```sql
+-- 0005_simplify_model.sql
+
+-- New instances table
+CREATE TABLE IF NOT EXISTS bf_instances (
+  row_key TEXT PRIMARY KEY,
+  position INTEGER NOT NULL,
+  user_id TEXT,
+  name TEXT,
+  image TEXT,
+  created_at TEXT,
+  updated_at TEXT,
+  payload_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bf_instances_user_id ON bf_instances (user_id);
+CREATE INDEX IF NOT EXISTS idx_bf_instances_name ON bf_instances (name);
+
+-- Add instance_id to sessions, drop template/workspace references
+-- (handled in application layer since we use payload_json pattern)
+
+-- Drop legacy tables (after data migration)
+-- DROP TABLE IF EXISTS bf_templates;
+-- DROP TABLE IF EXISTS bf_template_versions;
+-- DROP TABLE IF EXISTS bf_template_builds;
+-- DROP TABLE IF EXISTS bf_binding_releases;
+-- DROP TABLE IF EXISTS bf_workspace_memberships;
+-- DROP TABLE IF EXISTS bf_workspace_invites;
+```
+
+## Service Layer Changes
+
+### Removed service methods
+
+The following service method groups can be deleted entirely:
+
+- `createTemplate`, `listTemplates`, `getTemplate`, `archiveTemplate`, `restoreTemplate`, `deleteTemplate`
+- `createTemplateVersion`, `uploadTemplateVersionBundle`, `getTemplateVersionBundle`
+- `promoteTemplateVersion`, `rollbackTemplate`
+- All build-related methods: `processBuilds`, `retryBuild`, `retryDeadLetteredBuilds`, `getBuildLog`, `getBuildArtifact`
+- All release-related methods: `listReleases`
+- Workspace invite/membership methods: `inviteToWorkspace`, `acceptInvite`, `setMemberRole`, `listMembers`
+- Multi-snapshot methods: `listSnapshots`, `getSnapshot`, `restoreSnapshot`, `deleteSnapshot`
+
+### New service methods
+
+```typescript
+// Instance CRUD
+createInstance(token, { name, image, envVars, secrets })
+listInstances(token)
+getInstance(token, instanceId)
+updateInstance(token, instanceId, { image?, envVars?, secrets? })
+deleteInstance(token, instanceId)
+
+// Instance env/secrets (convenience wrappers)
+setInstanceEnvVar(token, instanceId, key, value)
+unsetInstanceEnvVar(token, instanceId, key)
+setInstanceSecret(token, instanceId, key, value)
+unsetInstanceSecret(token, instanceId, key)
+
+// Session (simplified)
+createSession(token, instanceId, { name })
+listSessions(token, { instanceId? })
+getSession(token, sessionId)
+startSession(token, sessionId)
+stopSession(token, sessionId)
+restartSession(token, sessionId)
+deleteSession(token, sessionId)
+saveSnapshot(token, sessionId)           // force save, overwrites latest
+
+// Common state
+syncCommonState(token, instanceId)       // push/pull common state
+```
+
+## CLI Changes
+
+### Removed commands
+
+```
+flare template *          → replaced by flare instance *
+flare build *             → removed (no server-side builds)
+flare releases            → removed (no promotion pipeline)
+flare workspace invite    → removed (no sharing in v1)
+flare workspace members   → removed
+flare workspace set-role  → removed
+flare snapshot list       → removed (only latest exists)
+flare snapshot get        → removed
+flare snapshot restore    → removed (automatic on start)
+flare reconcile *         → simplified
+flare export              → simplified
+```
+
+### New/updated commands
+
+```
+flare instance create <name> --image <image>
+flare instance list
+flare instance show <id>
+flare instance edit <id> [--image ...] [--env KEY=VAL] [--secret KEY=VAL]
+flare instance delete <id>
+
+flare up <name> --instance <id>     # replaces --template
+flare snapshot <session-id>         # save now (single command, no subcommands)
+```
+
+## Implementation Plan
+
+The service has no live users, so we can make breaking changes directly — no migration path, no backward compatibility, no feature flags. This collapses what would have been a 7-PR additive migration into 4 clean PRs.
+
+### PR 1: Replace data model and service layer
+
+**Scope:** Gut and rebuild the core.
+
+- Delete all template, template version, template build, binding release, workspace membership, and workspace invite code from `service.ts`.
+- Delete the corresponding D1 table definitions from `cloudflare-schema.ts`.
+- Add `Instance` type with full CRUD (create, list, get, update, delete).
+- Rewrite `Session` to reference `instanceId` instead of `templateId`/`workspaceId`.
+- Replace multi-snapshot logic with single-snapshot-per-session model (latest only, overwrite on save, auto-restore on start).
+- Remove Queues, Workflows, and build pipeline entirely.
+- Rewrite billing: move from workspace to user, remove `templateBuilds` and `snapshots` metrics, add `storageGbMonths` metric.
+- Add daily storage measurement job to cron handler.
+- Update billing catalog: keep `runtimeMinuteUsd`, add `storageGbMonthUsd`, remove `snapshotUsd`/`templateBuildUsd`.
+- Rename SSH user from `dev` to `flare` across the entire codebase:
+  - `containers/session/Dockerfile` — `adduser -D flare`, `chpasswd`, `chown` references.
+  - `containers/session/server.mjs` — `id -u flare`, `id -g flare`, default username return.
+  - `packages/shared/src/service.ts` — `sshUser: "flare"`, SSH command template `flare@127.0.0.1`.
+  - `scripts/ssh-smoke.ts` — mock SSH server username, assertions for `whoami` output.
+  - `scripts/live-ssh-smoke.ts` — SSH command username, assertions.
+  - `test/container-server.test.ts` — update any `dev` user references.
+- Write new D1 migration `0005_simplified_model.sql` that drops legacy tables and creates `bf_instances`.
+- Update `cloudflare-store.ts` and `memory-store.ts` for the new schema.
+- Update all unit tests.
+
+**Exit criteria:** `npm run typecheck && npm test` pass. Service layer is <3000 lines.
+
+**Docs to update:**
+- `spec/architecture.md` — replace template/build/promotion sections with Instance model; remove workspace membership; update metadata plane tables; remove Queues/Workflows from component breakdown; update persistence section for single-snapshot model.
+- `spec/overview.md` — simplify "What The Product Delivers" to Instance + Session; remove template pipeline and build references from product surfaces; update CLI description.
+- `packages/shared/src/cloudflare-schema.ts` — remove legacy table definitions, add `bf_instances`.
+
+### PR 2: Update API routes and CLI
+
+**Scope:** Rewire the HTTP layer and CLI to the new model.
+
+- Delete all `/api/templates/*`, `/api/template-builds/*`, `/api/releases/*` routes from `app.ts`.
+- Delete workspace invite/membership routes.
+- Add `/api/instances` CRUD routes.
+- Update `/api/sessions` routes to use `instanceId`.
+- Simplify snapshot routes to single-snapshot model (POST to save, auto-restore on start).
+- Rewrite CLI: replace `flare template *` with `flare instance *`, remove `flare build *`, `flare releases`, multi-snapshot commands.
+- Add `--dockerfile` and `--context` flags to `flare instance create` and `flare instance edit`.
+- Add `flare instance rebuild` command.
+- Implement local Docker build → push → create/update flow in the CLI.
+- Update wrangler config generator to remove build/workflow/queue bindings if no longer needed.
+- Update all smoke tests and CLI tests.
+
+**Exit criteria:** `npm run ci` passes. `flare instance create --image node:20` and `flare instance create --dockerfile ./Dockerfile` both work. `flare up` creates a session from an instance.
+
+**Docs to update:**
+- `apps/cli/README.md` — rewrite command reference for Instance + Session model; add `--dockerfile` examples.
+- `spec/plan.md` — replace delivery plan PRs 07-09 (template catalog, build pipeline, binding catalog) with simplified Instance model PRs.
+- `.env.example` — remove `BILLING_RATE_SNAPSHOT_USD`, `BILLING_RATE_TEMPLATE_BUILD_USD`; add `BILLING_RATE_STORAGE_GB_MONTH_USD`.
+
+### PR 3: Common state
+
+**Scope:** Add shared state across sessions of the same instance.
+
+- Add `commonStateKey` to Instance model.
+- On session start: pull common state from R2 into `/shared` mount inside the container.
+- Add `flare instance push <id>` to upload `/shared` from current session to R2.
+- Add `flare instance pull <id>` to download latest `/shared` from R2 without restart.
+- Update container bootstrap script (`server.mjs`) to handle the `/shared` mount.
+- No live sync — pull-on-start, explicit push. Simple and predictable.
+
+**Exit criteria:** Two sessions of the same instance both see files placed in common state after push + restart.
+
+**Docs to update:**
+- `spec/architecture.md` — add Common State section under Workspace Persistence; document R2 layout and sync model.
+- `containers/session/` — update container README if present with `/shared` mount documentation.
+
+### PR 4: Web app and deploy cleanup
+
+**Scope:** Update the UI and deploy pipeline.
+
+- Replace template catalog pages with Instance list/create/edit pages.
+- Simplify session creation flow: pick Instance → name → launch.
+- Remove build/promotion/release UI pages.
+- Simplify session detail to show single snapshot status inline (no snapshot list).
+- Update `deploy.ts` to remove references to build workflow and queue bindings.
+- Update `wrangler.toml` / config generator to remove workflow and queue sections.
+- Update runbook, changelog, and spec docs.
+- Deploy to production and run smoke tests.
+
+**Exit criteria:** Full CI passes. Web app shows instances and sessions only. `npm run deploy` succeeds. CLI help fits on one screen.
+
+**Docs to update:**
+- `spec/runbook.md` — rewrite operator checks for Instance model; remove template build/promotion procedures; update rollout checklist to remove build workflow references; simplify post-deploy verification.
+- `spec/changelog.md` — add entry documenting the model simplification.
+- `spec/todo.md` — clear completed items; update remaining work for new model.
+- `README.md` — update product description, quickstart, and CLI examples for Instance + Session model.
+- `spec/plan.md` — mark legacy PRs (template catalog, build pipeline, promotion) as superseded; add new simplified PRs.
+
+### PR 5: End-to-end verification
+
+**Scope:** Verify the entire simplified product works end-to-end in production.
+
+This PR contains no feature code — only tests, smoke scripts, and fixes for anything they uncover.
+
+**E2E test script** (`scripts/e2e-simplified.ts`):
+
+Runs the full user journey against a live deployment:
+
+1. **Auth:** Register a new user, verify `whoami`, login from a second session, revoke it.
+2. **Instance from image:** `flare instance create e2e-test --image node:20 --env NODE_ENV=test --secret API_KEY=abc` → verify instance appears in `flare instance list` and `flare instance show`.
+3. **Instance from Dockerfile:** `flare instance create e2e-docker --dockerfile ./containers/session/Dockerfile` → verify local Docker build, push, and instance creation with a registry image URL.
+4. **Session lifecycle:** `flare up test-session --instance <id>` → verify session reaches `running` → `flare status` → `flare stop` → verify `sleeping` → `flare start` → verify `running` → `flare restart` → verify `running`.
+5. **SSH:** `flare ssh <session-id> -- whoami` → verify output is `flare`.
+6. **Preview + editor:** Fetch preview and editor URLs, verify HTTP 200 and expected HTML content.
+7. **Snapshot:** `flare stop <session-id>` → verify snapshot auto-saved (session detail shows `latestSnapshotAt` and `latestSnapshotBytes > 0`) → `flare start <session-id>` → verify snapshot auto-restored.
+8. **Common state:** Write a file to `/home/flare/.myconfig` in session A → `flare instance push <id>` → create session B from same instance → verify `.myconfig` exists in session B's `/home/flare` → `flare stop` session B → verify `/home/flare` auto-pushed on stop.
+9. **Multiple sessions:** Launch 3 sessions from the same instance → verify all running → verify isolated `/workspace` (file in session 1 not visible in session 2) → stop all.
+10. **Instance edit:** `flare instance edit <id> --image ubuntu:24.04` → start a new session → verify `imageAtLaunch` is `ubuntu:24.04` → verify previously running session still uses `node:20`.
+11. **Billing:** `flare billing` → verify response includes `runtimeMinutes > 0` and `currentStorageBytes > 0` → verify no `templateBuilds` or `snapshots` metrics in output.
+12. **Cleanup:** Delete all sessions → delete all instances → verify `flare instance list` is empty.
+13. **Negative tests:** Try to create a session on a deleted instance (expect 404) → try to SSH to a stopped session (expect error) → try to `flare instance rebuild` without Docker running (expect clear error message).
+
+**Manual verification checklist** (run by operator after E2E script passes):
+
+- [ ] Web app: sign in → instance list page loads → create instance → launch session → session dashboard shows running
+- [ ] Web app: click preview → page loads → click editor → page loads
+- [ ] Web app: stop session → session shows sleeping → start → session shows running
+- [ ] Web app: instance edit page → change image → save → verify
+- [ ] Web app: billing page → shows runtime + storage usage, no build/snapshot line items
+- [ ] Web app: no references to "template", "build", "promotion", or "release" anywhere in the UI
+- [ ] CLI: `flare --help` fits on one screen
+- [ ] CLI: `flare instance --help` shows create/list/show/edit/rebuild/delete/push/pull
+- [ ] Deploy: `npm run deploy` completes without queue/workflow errors
+- [ ] Health: `curl /api/health` returns `{"ok": true}` with no build/queue/workflow bindings
+
+**Update smoke scripts:**
+- Rewrite `scripts/smoke.ts` to test Instance + Session flow instead of template + build + promote.
+- Rewrite `scripts/release-validate.ts` → rename to `scripts/instance-validate.ts`, test instance CRUD + session lifecycle.
+- Rewrite `scripts/npm-cli-smoke.ts` to use `flare instance` commands instead of `flare template`.
+- Remove build-related assertions from all smoke scripts.
+
+**Exit criteria:** E2E script passes against production. Manual checklist completed. All smoke scripts updated and passing. The full user journey from sign-up to shell works with zero references to the old model.
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Users without Docker can't use `--dockerfile` | `--image` works without Docker. Add curated quick-start images (node:20, python:3, ubuntu:24.04) to the docs and CLI help. |
+| Common state has no live sync | Pull-on-start + explicit push is deterministic and simple. Live sync can be added later as opt-in without changing the data model. |
+| Single snapshot means no rollback if latest is corrupt | Keep a 1-deep backup: `snapshot.tar.gz` + `snapshot.prev.tar.gz`. Auto-fallback if latest fails to restore. |
+| Removing workspaces blocks future team features | The `userId` ownership model is simple to extend later: add `teamId` to Instance when team features ship. |
+| Local Docker build requires Docker Desktop | Document this clearly. Most developers already have Docker. For those who don't, `--image` with a public registry image works. |
+
+## Success Criteria
+
+The simplification is complete when:
+
+1. A new user can go from sign-up to running shell in **3 commands**: `flare instance create`, `flare up`, `flare ssh`.
+2. `flare instance create --dockerfile ./Dockerfile` builds, pushes, and creates in one command.
+3. The CLI `--help` fits on one screen.
+4. The web app has ≤4 primary navigation items.
+5. Zero mentions of "template version", "build", "promotion", or "release" in user-facing copy.
+6. The service layer is <3000 lines (currently ~5300).
+7. No Queues, Workflows, or build pipeline code remains.
