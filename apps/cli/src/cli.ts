@@ -456,6 +456,8 @@ const HELP_CATALOG: HelpSection[] = [
             summary: "Update an existing instance."
           },
           { name: "rebuild", usageTail: "<instanceId>", summary: "Rebuild and push the instance image from its saved Dockerfile." },
+          { name: "push", usageTail: "<instanceId>", summary: "Capture /home/flare from a running session into the instance common state." },
+          { name: "pull", usageTail: "<instanceId>", summary: "Apply the saved /home/flare common state into running sessions." },
           { name: "delete", usageTail: "<instanceId>", summary: "Delete an instance." }
         ]
       }
@@ -1966,6 +1968,32 @@ export async function runCli(
         const instanceId = rest[0];
         const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
           method: "DELETE",
+          headers: headers(undefined, false)
+        });
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "push") {
+        const instanceId = rest[0];
+        if (!instanceId) {
+          throw createCliError("Instance id is required", 400);
+        }
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}/push`, {
+          method: "POST",
+          headers: headers(undefined, false)
+        });
+        print(stdout, JSON.stringify(data, null, 2));
+        return 0;
+      }
+
+      if (subcommand === "pull") {
+        const instanceId = rest[0];
+        if (!instanceId) {
+          throw createCliError("Instance id is required", 400);
+        }
+        const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}/pull`, {
+          method: "POST",
           headers: headers(undefined, false)
         });
         print(stdout, JSON.stringify(data, null, 2));

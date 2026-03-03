@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyCommonStateRestore,
   applySnapshotRestore,
   applyRuntimeBootstrap,
+  exportCommonStatePayload,
   exportSnapshotPayload,
   listEditorFiles,
   recordLifecycleHook,
@@ -64,6 +66,59 @@ test("session container restores only files inside persisted paths and exports a
   ]);
 });
 
+test("session container restores and exports common state under /home/flare", async () => {
+  resetRuntimeState();
+  runtimeState.files.set("/home/flare/.ssh/authorized_keys", "ssh-key");
+
+  const commonStateBody = JSON.stringify(
+    {
+      format: "burstflare.common-state.v1",
+      files: [
+        {
+          path: "/home/flare/.myconfig",
+          content: "hello common state"
+        },
+        {
+          path: "/tmp/blocked.txt",
+          content: "should not restore"
+        },
+        {
+          path: "/home/flare/.ssh/authorized_keys",
+          content: "should not overwrite"
+        }
+      ]
+    },
+    null,
+    2
+  );
+
+  const restored = applyCommonStateRestore({
+    sessionId: "ses_common",
+    instanceId: "ins_common",
+    contentType: "application/vnd.burstflare.common-state+json; charset=utf-8",
+    contentBase64: toBase64(commonStateBody)
+  });
+
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.restoredPaths, ["/home/flare/.myconfig"]);
+  assert.equal(runtimeState.files.get("/home/flare/.myconfig"), "hello common state");
+  assert.equal(runtimeState.files.get("/home/flare/.ssh/authorized_keys"), "ssh-key");
+  assert.equal(runtimeState.files.has("/tmp/blocked.txt"), false);
+
+  const exported = exportCommonStatePayload("ins_common");
+  assert.equal(exported.contentType, "application/vnd.burstflare.common-state+json; charset=utf-8");
+
+  const parsed = JSON.parse(exported.body.toString("utf8"));
+  assert.equal(parsed.format, "burstflare.common-state.v1");
+  assert.equal(parsed.instanceId, "ins_common");
+  assert.deepEqual(parsed.files, [
+    {
+      path: "/home/flare/.myconfig",
+      content: "hello common state"
+    }
+  ]);
+});
+
 test("session container editor writes stay inside the configured persisted paths", async () => {
   resetRuntimeState();
 
@@ -88,6 +143,7 @@ test("session container bootstrap and lifecycle hooks persist runtime metadata f
   const bootstrapped = applyRuntimeBootstrap({
     sessionId: "ses_bootstrap",
     workspaceId: "ws_test",
+    instanceId: "ins_test",
     templateId: "tpl_test",
     templateName: "Runtime Template",
     state: "running",
@@ -103,6 +159,7 @@ test("session container bootstrap and lifecycle hooks persist runtime metadata f
   });
   assert.equal(bootstrapped.ok, true);
   assert.equal(bootstrapped.bootstrap.sessionId, "ses_bootstrap");
+  assert.equal(bootstrapped.bootstrap.instanceId, "ins_test");
   assert.equal(bootstrapped.bootstrap.sshKeyCount, 1);
   assert.deepEqual(runtimeState.persistedPaths, ["/workspace/project"]);
   assert.deepEqual(runtimeState.secretNames, ["API_TOKEN"]);

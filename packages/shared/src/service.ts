@@ -11,6 +11,7 @@ const MAX_BUILD_ATTEMPTS = 3;
 const STUCK_BUILD_TTL_MS = 1000 * 60 * 5;
 const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
+const MAX_COMMON_STATE_BYTES = 512 * 1024;
 const MAX_RUNTIME_SECRETS = 32;
 const MAX_RUNTIME_SECRET_VALUE_BYTES = 4096;
 const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
@@ -967,6 +968,7 @@ function summarizeStorage(state, workspaceId) {
     templateBundlesBytes: 0,
     snapshotBytes: 0,
     buildArtifactBytes: 0,
+    commonStateBytes: 0,
     totalBytes: 0
   };
 
@@ -982,7 +984,18 @@ function summarizeStorage(state, workspaceId) {
     storage.snapshotBytes += snapshot.bytes || 0;
   }
 
+  const workspace = state.workspaces.find((entry) => entry.id === workspaceId) || null;
+  if (workspace) {
+    for (const instance of state.instances) {
+      if (instance.userId !== workspace.ownerUserId) {
+        continue;
+      }
+      storage.commonStateBytes += instance.commonStateBytes || 0;
+    }
+  }
+
   storage.totalBytes = storage.templateBundlesBytes + storage.snapshotBytes + storage.buildArtifactBytes;
+  storage.totalBytes += storage.commonStateBytes;
   return storage;
 }
 
@@ -1043,7 +1056,7 @@ function summarizeBillableUsage(state, workspaceId) {
     }
   }
   const storage = summarizeStorage(state, workspaceId);
-  const currentStorageBytes = storage.snapshotBytes;
+  const currentStorageBytes = storage.snapshotBytes + storage.commonStateBytes;
   return {
     ...normalizeUsageTotals(usage),
     storageGbMonths: Number((usage.storageGbDays / 30).toFixed(4)),
@@ -2150,6 +2163,67 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
     return {
       processedBuilds: processedBuildIds.length,
       buildIds: processedBuildIds
+    };
+  }
+
+  async function writeInstanceCommonStateInState(
+    state,
+    instance,
+    workspace,
+    { actorUserId = null, body, contentType = "application/octet-stream", auditAction = "instance.common_state_saved" }: any = {}
+  ) {
+    ensure(objects?.putCommonState, "Common state storage unavailable", 501);
+    const payload = toUint8Array(body);
+    ensure(payload.byteLength > 0, "Common state body is required");
+    ensure(payload.byteLength <= MAX_COMMON_STATE_BYTES, "Common state exceeds size limit", 413);
+    const currentStorage = summarizeStorage(state, workspace.id);
+    const existingBytes = instance.commonStateBytes || 0;
+    ensureStorageWithinLimit(state, workspace, currentStorage.totalBytes - existingBytes + payload.byteLength);
+
+    instance.commonStateKey = instance.commonStateKey || `instances/${instance.id}/home-flare.json`;
+    instance.commonStateBytes = payload.byteLength;
+    instance.commonStateUpdatedAt = nowIso(clock);
+    instance.updatedAt = instance.commonStateUpdatedAt;
+
+    await objects.putCommonState({
+      instance,
+      body: payload,
+      contentType
+    });
+
+    writeAudit(state, clock, {
+      action: auditAction,
+      actorUserId,
+      workspaceId: workspace.id,
+      targetType: "instance",
+      targetId: instance.id,
+      details: {
+        bytes: payload.byteLength,
+        key: instance.commonStateKey
+      }
+    });
+
+    return {
+      instance: formatInstance(instance),
+      commonState: {
+        key: instance.commonStateKey,
+        bytes: instance.commonStateBytes,
+        contentType,
+        updatedAt: instance.commonStateUpdatedAt
+      }
+    };
+  }
+
+  async function readInstanceCommonStateInState(instance) {
+    ensure(instance.commonStateKey, "Instance common state not found", 404);
+    ensure(objects?.getCommonState, "Common state storage unavailable", 501);
+    const content = await objects.getCommonState({ instance });
+    ensure(content, "Instance common state not found", 404);
+    return {
+      key: instance.commonStateKey,
+      body: content.body,
+      contentType: content.contentType || "application/octet-stream",
+      bytes: content.bytes ?? toUint8Array(content.body).byteLength
     };
   }
 
@@ -3549,6 +3623,9 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
           secrets: normalizeInstanceSecrets(secrets),
           persistedPaths: normalizePersistedPaths(persistedPaths) || [],
           sleepTtlSeconds: normalizeSleepTtlSeconds(sleepTtlSeconds),
+          commonStateKey: null,
+          commonStateBytes: 0,
+          commonStateUpdatedAt: null,
           createdAt: timestamp,
           updatedAt: timestamp
         };
@@ -3586,6 +3663,37 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
         const auth = requireInstanceAccess(state, token, instanceId, clock);
         return {
           instance: formatInstance(auth.instance)
+        };
+      });
+    },
+
+    async saveInstanceCommonState(token, instanceId, options: any = {}) {
+      const { body, contentType = "application/octet-stream" } = options;
+      return transact(INSTANCE_SCOPE, async (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        return writeInstanceCommonStateInState(state, auth.instance, auth.workspace, {
+          actorUserId: auth.user.id,
+          body,
+          contentType
+        });
+      });
+    },
+
+    async getInstanceCommonState(token, instanceId) {
+      return transact(INSTANCE_SCOPE, async (state) => {
+        const auth = requireInstanceAccess(state, token, instanceId, clock);
+        const content = await readInstanceCommonStateInState(auth.instance);
+        return {
+          instance: formatInstance(auth.instance),
+          commonState: {
+            key: content.key,
+            bytes: content.bytes,
+            updatedAt: auth.instance.commonStateUpdatedAt
+          },
+          body: content.body,
+          contentType: content.contentType,
+          bytes: content.bytes,
+          fileName: `${auth.instance.name.replace(/[^a-z0-9._-]+/gi, "-").toLowerCase() || auth.instance.id}.home-flare.json`
         };
       });
     },
@@ -3649,10 +3757,15 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
     },
 
     async deleteInstance(token, instanceId) {
-      return transact(INSTANCE_SCOPE, (state) => {
+      return transact(INSTANCE_SCOPE, async (state) => {
         const auth = requireInstanceAccess(state, token, instanceId, clock);
         const index = state.instances.findIndex((entry) => entry.id === auth.instance.id);
         ensure(index >= 0, "Instance not found", 404);
+        if (auth.instance.commonStateKey && objects?.deleteCommonState) {
+          await objects.deleteCommonState({
+            instance: auth.instance
+          });
+        }
         state.instances.splice(index, 1);
         writeAudit(state, clock, {
           action: "instance.deleted",
@@ -3665,6 +3778,25 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
           ok: true,
           instanceId: auth.instance.id
         };
+      });
+    },
+
+    async saveSystemInstanceCommonState(sessionId, options: any = {}) {
+      const { body, contentType = "application/octet-stream" } = options;
+      return transact(INSTANCE_SCOPE, async (state) => {
+        const session = state.sessions.find((entry) => entry.id === sessionId);
+        ensure(session, "Session not found", 404);
+        ensure(session.instanceId, "Session instance not found", 404);
+        const instance = state.instances.find((entry) => entry.id === session.instanceId);
+        ensure(instance, "Instance not found", 404);
+        const workspace = state.workspaces.find((entry) => entry.id === session.workspaceId);
+        ensure(workspace, "Workspace not found", 404);
+        return writeInstanceCommonStateInState(state, instance, workspace, {
+          actorUserId: null,
+          body,
+          contentType,
+          auditAction: "instance.common_state_saved_system"
+        });
       });
     },
 

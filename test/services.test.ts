@@ -9,10 +9,32 @@ function createObjectStore() {
   const bundles = new Map<string, { key: string; body: Uint8Array; contentType: string }>();
   const logs = new Map<string, string>();
   const artifacts = new Map<string, string>();
+  const commonStates = new Map<string, { key: string; body: Uint8Array; contentType: string }>();
   const snapshots = new Map<string, { body: Uint8Array; contentType: string }>();
   const decoder = new TextDecoder();
 
   return {
+    async putCommonState({ instance, body, contentType }: { instance: { id: string; commonStateKey: string }; body: Uint8Array; contentType: string }) {
+      commonStates.set(instance.id, {
+        key: instance.commonStateKey,
+        body: body.slice(),
+        contentType
+      });
+    },
+    async getCommonState({ instance }: { instance: { id: string } }) {
+      const entry = commonStates.get(instance.id);
+      if (!entry) {
+        return null;
+      }
+      return {
+        body: entry.body.slice(),
+        contentType: entry.contentType,
+        bytes: entry.body.byteLength
+      };
+    },
+    async deleteCommonState({ instance }: { instance: { id: string } }) {
+      commonStates.delete(instance.id);
+    },
     async putTemplateVersionBundle({ templateVersion, body, contentType }: { templateVersion: { id: string; bundleKey: string }; body: Uint8Array; contentType: string }) {
       bundles.set(templateVersion.id, {
         key: templateVersion.bundleKey,
@@ -87,6 +109,10 @@ function createObjectStore() {
     },
     async deleteSnapshot({ snapshot }: { snapshot: { id: string } }) {
       snapshots.delete(snapshot.id);
+    },
+    readCommonStateText(instanceId: string) {
+      const entry = commonStates.get(instanceId);
+      return entry ? decoder.decode(entry.body) : null;
     },
     readBundleText(templateVersionId: string) {
       const entry = bundles.get(templateVersionId);
@@ -182,6 +208,52 @@ test("service supports instance CRUD with write-only secrets", async () => {
 
   const empty = await service.listInstances(owner.token);
   assert.deepEqual(empty.instances, []);
+});
+
+test("service can persist instance common state", async () => {
+  let tick = Date.parse("2026-03-03T00:00:00.000Z");
+  const objects = createObjectStore();
+  const service = createBurstFlareService({
+    objects,
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "common-state@example.com",
+    name: "Common State"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "common-state",
+    description: "Common state instance",
+    image: "registry.cloudflare.com/example/common-state:1.0.0"
+  });
+
+  const saved = await service.saveInstanceCommonState(owner.token, instance.instance.id, {
+    body: JSON.stringify({
+      format: "burstflare.common-state.v1",
+      files: [
+        {
+          path: "/home/flare/.myconfig",
+          content: "hello"
+        }
+      ]
+    }),
+    contentType: "application/vnd.burstflare.common-state+json; charset=utf-8"
+  });
+  assert.match(saved.commonState.key, /^instances\/ins_/);
+  assert.ok(saved.commonState.bytes > 0);
+  assert.ok(saved.commonState.updatedAt);
+  assert.equal(saved.instance.commonStateBytes, saved.commonState.bytes);
+  assert.match(objects.readCommonStateText(instance.instance.id) || "", /.myconfig/);
+
+  const fetched = await service.getInstanceCommonState(owner.token, instance.instance.id);
+  const parsed = JSON.parse(new TextDecoder().decode(fetched.body));
+  assert.equal(parsed.format, "burstflare.common-state.v1");
+  assert.equal(parsed.files[0].path, "/home/flare/.myconfig");
+  assert.equal(fetched.commonState.bytes, saved.commonState.bytes);
 });
 
 test("service can create and operate on sessions owned by an instance", async () => {

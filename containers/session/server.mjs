@@ -205,6 +205,70 @@ function exportSnapshotPayload(sessionId = "unknown", persistedPaths = []) {
   };
 }
 
+function isWithinCommonState(filePath) {
+  return filePath === "/home/flare" || filePath.startsWith("/home/flare/");
+}
+
+function listCommonStateFiles() {
+  return Array.from(runtimeState.files.entries())
+    .filter(([filePath]) => isWithinCommonState(filePath) && filePath !== "/home/flare/.ssh/authorized_keys")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([path, content]) => ({
+      path,
+      content
+    }));
+}
+
+function resetCommonStateFiles() {
+  for (const filePath of Array.from(runtimeState.files.keys())) {
+    if (isWithinCommonState(filePath) && filePath !== "/home/flare/.ssh/authorized_keys") {
+      runtimeState.files.delete(filePath);
+    }
+  }
+}
+
+function applyCommonStateRestore(payload) {
+  const sessionId = String(payload.sessionId || "unknown");
+  const instanceId = String(payload.instanceId || "unknown");
+  const contentType = String(payload.contentType || "application/octet-stream");
+  const raw = fromBase64(payload.contentBase64);
+  const parsed = JSON.parse(raw.toString("utf8") || "{}");
+  if (!parsed || parsed.format !== "burstflare.common-state.v1" || !Array.isArray(parsed.files)) {
+    throw new Error("Invalid common state payload");
+  }
+
+  resetCommonStateFiles();
+  const restoredPaths = [];
+  for (const file of parsed.files) {
+    if (!isWithinCommonState(file?.path) || file.path === "/home/flare/.ssh/authorized_keys") {
+      continue;
+    }
+    runtimeState.files.set(file.path, String(file.content || ""));
+    restoredPaths.push(file.path);
+  }
+
+  return {
+    ok: true,
+    sessionId,
+    instanceId,
+    bytes: raw.byteLength,
+    contentType,
+    restoredPaths
+  };
+}
+
+function exportCommonStatePayload(instanceId = "unknown") {
+  const envelope = {
+    format: "burstflare.common-state.v1",
+    instanceId: String(instanceId || "unknown"),
+    files: listCommonStateFiles()
+  };
+  return {
+    body: Buffer.from(JSON.stringify(envelope, null, 2), "utf8"),
+    contentType: "application/vnd.burstflare.common-state+json; charset=utf-8"
+  };
+}
+
 function resetRuntimeState() {
   runtimeState.restoredSnapshotId = null;
   runtimeState.restoredAt = null;
@@ -296,6 +360,7 @@ function applyRuntimeBootstrap(payload) {
   const bootstrap = {
     sessionId: String(payload?.sessionId || "unknown"),
     workspaceId: payload?.workspaceId || null,
+    instanceId: payload?.instanceId || null,
     templateId: payload?.templateId || null,
     templateName: payload?.templateName || null,
     state: payload?.state || null,
@@ -1114,6 +1179,31 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === "/common-state/restore" && req.method === "POST") {
+    const body = await readRequestBody(req);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    const restored = applyCommonStateRestore(payload);
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(restored));
+    return;
+  }
+
+  if (url.pathname === "/common-state/export" && req.method === "POST") {
+    const body = await readRequestBody(req);
+    const payload = JSON.parse(body.toString("utf8") || "{}");
+    const exported = exportCommonStatePayload(payload.instanceId || url.searchParams.get("instanceId") || "unknown");
+    res.writeHead(200, { "content-type": exported.contentType });
+    res.end(exported.body);
+    return;
+  }
+
+  if (url.pathname === "/common-state/export" && req.method === "GET") {
+    const exported = exportCommonStatePayload(url.searchParams.get("instanceId") || "unknown");
+    res.writeHead(200, { "content-type": exported.contentType });
+    res.end(exported.body);
+    return;
+  }
+
   if (url.pathname === "/editor" && (req.method === "GET" || req.method === "POST")) {
     const sessionId = url.searchParams.get("sessionId") || "unknown";
     const requestedPaths = normalizePersistedPaths(url.searchParams.getAll("persistedPath"));
@@ -1192,8 +1282,10 @@ if (isMain) {
 }
 
 export {
+  applyCommonStateRestore,
   applySnapshotRestore,
   applyRuntimeBootstrap,
+  exportCommonStatePayload,
   createSnapshotEnvelope,
   exportSnapshotPayload,
   listEditorFiles,
