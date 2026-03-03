@@ -602,23 +602,45 @@ The service has no live users, so we can make breaking product decisions directl
 - `packages/shared/src/cloudflare-schema.ts` — add `bf_instances`.
 - `spec/overview.md` — introduce Instance terminology at a high level.
 
-### PR 3: Session cutover + single latest snapshot
+### PR 3: Session ownership cutover
 
-**Scope:** Move session semantics to the new model before deleting the old one.
+**Scope:** Move session records onto the new instance model first, without changing snapshot behavior yet.
 
-- Rewrite `Session` to reference `instanceId` instead of `templateId`/`workspaceId`.
-- Replace multi-snapshot logic with single-snapshot-per-session metadata on the session plus one persisted latest snapshot record/object.
-- Implement save-overwrite semantics and automatic restore of the latest snapshot on start.
+- Add `instanceId` to the session shape and formatters.
+- Update `createSession`, `listSessions`, `getSession`, `startSession`, `stopSession`, `restartSession`, and `deleteSession` in `service.ts` to resolve sessions through instances.
+- Keep `templateId` as a temporary compatibility field internally where needed so the branch can stay deployable while the route layer still sends template-based payloads.
+- Update session-related store tests, fixtures, and service tests to assert `instanceId` is present and authoritative.
+- Keep snapshot methods working exactly as they do today in this PR.
+
+**Exit criteria:** Session lifecycle tests pass with `instanceId` present on sessions, and no user-facing snapshot behavior changes yet.
+
+### PR 4: Latest-snapshot backend semantics
+
+**Scope:** Collapse snapshot persistence to one logical latest snapshot per session while preserving the existing route surface.
+
+- Replace multi-snapshot service logic with a single latest snapshot record/object per session.
 - Update snapshot storage layout to one object key per session.
-- Update session-related tests and fixtures to the new shape.
-- Keep thin internal adapters where needed so higher layers can be rewired in a later PR without breaking the branch.
+- Make repeated snapshot saves overwrite the current latest snapshot instead of appending history.
+- Keep compatibility shims so `listSnapshots` can still return a singleton array until the API/CLI route cleanup PR removes the old surface.
+- Update snapshot-focused tests and fixtures in the service and shared store layers.
 
-**Exit criteria:** Session lifecycle tests pass with `instanceId`, and repeated snapshot saves overwrite the latest snapshot instead of creating history.
+**Exit criteria:** Repeated saves overwrite the same latest snapshot, and every session has at most one persisted snapshot.
 
 **Docs to update:**
 - `spec/architecture.md` — update persistence and session metadata to latest-snapshot-only.
 
-### PR 4: Billing rewrite
+### PR 5: Automatic latest-snapshot restore
+
+**Scope:** Wire the runtime flow to restore the latest snapshot automatically on start, separate from the storage rewrite itself.
+
+- Update session start/restart behavior to load the latest snapshot automatically if one exists.
+- Rework the edge runtime restore/export helpers to consume the session’s latest snapshot metadata instead of requiring explicit snapshot selection.
+- Keep temporary adapters for any still-existing `restoreSnapshot` code paths so the branch remains safe while public routes are still being simplified.
+- Update worker tests and runtime lifecycle tests around start, restart, and container bootstrap.
+
+**Exit criteria:** Starting a stopped session automatically restores its latest snapshot with no explicit restore step in the backend path.
+
+### PR 6: Billing rewrite
 
 **Scope:** Move billing off workspaces and onto users as a separate, reviewable change.
 
@@ -631,7 +653,7 @@ The service has no live users, so we can make breaking product decisions directl
 
 **Exit criteria:** Billing summaries and invoices only expose runtime and storage metrics, and cron writes daily storage usage events.
 
-### PR 5: Remove legacy template/build/release/workspace-sharing code
+### PR 7: Remove legacy template/build/release/workspace-sharing code
 
 **Scope:** Delete the old model after the new internals exist.
 
@@ -646,7 +668,7 @@ The service has no live users, so we can make breaking product decisions directl
 **Docs to update:**
 - `spec/architecture.md` — remove template/build/promotion and workspace-sharing sections.
 
-### PR 6: API routes and CLI switch-over
+### PR 8: API routes and CLI switch-over
 
 **Scope:** Rewire the external interfaces to the new backend.
 
@@ -667,7 +689,7 @@ The service has no live users, so we can make breaking product decisions directl
 - `apps/cli/README.md` — rewrite command reference for Instance + Session model; add `--dockerfile` examples.
 - `spec/plan.md` — replace legacy delivery PRs with the new simplified sequence.
 
-### PR 7: Common state (`/home/flare`)
+### PR 9: Common state (`/home/flare`)
 
 **Scope:** Add shared home-directory state after the base session model is stable.
 
@@ -685,7 +707,7 @@ The service has no live users, so we can make breaking product decisions directl
 - `spec/architecture.md` — add the Common State section and R2 layout details.
 - `containers/session/` — update container docs if present with `/home/flare` sync behavior.
 
-### PR 8: Web app and deploy cleanup
+### PR 10: Web app and deploy cleanup
 
 **Scope:** Update the UI and deployment surface after the API and CLI have stabilized.
 
@@ -705,7 +727,7 @@ The service has no live users, so we can make breaking product decisions directl
 - `spec/todo.md`
 - `README.md`
 
-### PR 9: End-to-end verification
+### PR 11: End-to-end verification
 
 **Scope:** Verify the entire simplified product works end-to-end in production.
 
