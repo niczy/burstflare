@@ -1,4 +1,4 @@
-import { createCloudflareClient, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.mjs";
+import { createCloudflareClient, loadCloudflareConfig, readProvisionState } from "./lib/cloudflare.js";
 import {
   LEGACY_TABLE,
   META_TABLE,
