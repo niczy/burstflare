@@ -13,46 +13,35 @@ const MAX_RUNTIME_SECRET_VALUE_BYTES = 4096;
 
 const PLANS = {
   free: {
-    maxTemplates: 10,
+    maxInstances: 10,
     maxRunningSessions: 3,
-    maxTemplateVersionsPerTemplate: 25,
-    maxSnapshotsPerSession: 25,
     maxStorageBytes: 25 * 1024 * 1024,
-    maxRuntimeMinutes: 500,
-    maxTemplateBuilds: 100
+    maxRuntimeMinutes: 500
   },
   pro: {
-    maxTemplates: 100,
+    maxInstances: 100,
     maxRunningSessions: 20,
-    maxTemplateVersionsPerTemplate: 250,
-    maxSnapshotsPerSession: 250,
     maxStorageBytes: 250 * 1024 * 1024,
-    maxRuntimeMinutes: 10_000,
-    maxTemplateBuilds: 2_000
+    maxRuntimeMinutes: 10_000
   },
   enterprise: {
-    maxTemplates: 1000,
+    maxInstances: 1000,
     maxRunningSessions: 200,
-    maxTemplateVersionsPerTemplate: 2500,
-    maxSnapshotsPerSession: 2_500,
     maxStorageBytes: 2_500 * 1024 * 1024,
-    maxRuntimeMinutes: 100_000,
-    maxTemplateBuilds: 20_000
+    maxRuntimeMinutes: 100_000
   }
 };
 
 const DEFAULT_BILLING_CATALOG = {
   currency: "usd",
   runtimeMinuteUsd: 0.03,
-  snapshotUsd: 0.02,
-  templateBuildUsd: 0.1
+  storageGbMonthUsd: 0.015
 };
 
 type BillingCatalogInput = {
   currency?: string;
   runtimeMinuteUsd?: number;
-  snapshotUsd?: number;
-  templateBuildUsd?: number;
+  storageGbMonthUsd?: number;
 };
 
 type ServiceError = Error & {
@@ -91,13 +80,10 @@ function getPlan(name) {
 }
 
 const QUOTA_OVERRIDE_KEYS = [
-  "maxTemplates",
+  "maxInstances",
   "maxRunningSessions",
-  "maxTemplateVersionsPerTemplate",
-  "maxSnapshotsPerSession",
   "maxStorageBytes",
-  "maxRuntimeMinutes",
-  "maxTemplateBuilds"
+  "maxRuntimeMinutes"
 ];
 
 function normalizeQuotaOverrides(overrides: any = {}) {
@@ -131,8 +117,7 @@ function normalizeUsageTotals(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     runtimeMinutes: Number.isFinite(source.runtimeMinutes) ? Math.max(0, Number(source.runtimeMinutes)) : 0,
-    snapshots: Number.isFinite(source.snapshots) ? Math.max(0, Number(source.snapshots)) : 0,
-    templateBuilds: Number.isFinite(source.templateBuilds) ? Math.max(0, Number(source.templateBuilds)) : 0
+    storageGbDays: Number.isFinite(source.storageGbDays) ? Math.max(0, Number(source.storageGbDays)) : 0
   };
 }
 
@@ -154,17 +139,13 @@ function normalizeBillingCatalog(catalog: BillingCatalogInput | null | undefined
   const runtimeMinuteUsd = Number.isFinite(source.runtimeMinuteUsd)
     ? Math.max(0, Number(source.runtimeMinuteUsd))
     : DEFAULT_BILLING_CATALOG.runtimeMinuteUsd;
-  const snapshotUsd = Number.isFinite(source.snapshotUsd)
-    ? Math.max(0, Number(source.snapshotUsd))
-    : DEFAULT_BILLING_CATALOG.snapshotUsd;
-  const templateBuildUsd = Number.isFinite(source.templateBuildUsd)
-    ? Math.max(0, Number(source.templateBuildUsd))
-    : DEFAULT_BILLING_CATALOG.templateBuildUsd;
+  const storageGbMonthUsd = Number.isFinite(source.storageGbMonthUsd)
+    ? Math.max(0, Number(source.storageGbMonthUsd))
+    : DEFAULT_BILLING_CATALOG.storageGbMonthUsd;
   return {
     currency,
     runtimeMinuteUsd,
-    snapshotUsd,
-    templateBuildUsd
+    storageGbMonthUsd
   };
 }
 
@@ -172,16 +153,15 @@ function priceUsageSummary(usage, catalog) {
   const normalizedUsage = normalizeUsageTotals(usage);
   const normalizedCatalog = normalizeBillingCatalog(catalog);
   const runtimeUsd = normalizedUsage.runtimeMinutes * normalizedCatalog.runtimeMinuteUsd;
-  const snapshotsUsd = normalizedUsage.snapshots * normalizedCatalog.snapshotUsd;
-  const templateBuildsUsd = normalizedUsage.templateBuilds * normalizedCatalog.templateBuildUsd;
-  const totalUsd = runtimeUsd + snapshotsUsd + templateBuildsUsd;
+  const storageGbMonths = normalizedUsage.storageGbDays / 30;
+  const storageUsd = storageGbMonths * normalizedCatalog.storageGbMonthUsd;
+  const totalUsd = runtimeUsd + storageUsd;
   return {
     currency: normalizedCatalog.currency,
-    usage: normalizedUsage,
+    usage: { ...normalizedUsage, storageGbMonths: Number(storageGbMonths.toFixed(4)) },
     rates: {
       runtimeMinuteUsd: normalizedCatalog.runtimeMinuteUsd,
-      snapshotUsd: normalizedCatalog.snapshotUsd,
-      templateBuildUsd: normalizedCatalog.templateBuildUsd
+      storageGbMonthUsd: normalizedCatalog.storageGbMonthUsd
     },
     lineItems: [
       {
@@ -191,16 +171,10 @@ function priceUsageSummary(usage, catalog) {
         amountUsd: Number(runtimeUsd.toFixed(4))
       },
       {
-        metric: "snapshots",
-        quantity: normalizedUsage.snapshots,
-        unitAmountUsd: normalizedCatalog.snapshotUsd,
-        amountUsd: Number(snapshotsUsd.toFixed(4))
-      },
-      {
-        metric: "templateBuilds",
-        quantity: normalizedUsage.templateBuilds,
-        unitAmountUsd: normalizedCatalog.templateBuildUsd,
-        amountUsd: Number(templateBuildsUsd.toFixed(4))
+        metric: "storageGbMonths",
+        quantity: Number(storageGbMonths.toFixed(4)),
+        unitAmountUsd: normalizedCatalog.storageGbMonthUsd,
+        amountUsd: Number(storageUsd.toFixed(4))
       }
     ],
     totalUsd: Number(totalUsd.toFixed(4))
