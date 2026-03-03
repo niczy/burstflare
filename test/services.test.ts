@@ -174,6 +174,50 @@ test("service supports instance CRUD with write-only secrets", async () => {
   assert.deepEqual(empty.instances, []);
 });
 
+test("service can create and operate on sessions owned by an instance", async () => {
+  let tick = Date.parse("2026-03-03T00:10:00.000Z");
+  const service = createBurstFlareService({
+    store: createMemoryStore(),
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "instance-sessions@example.com",
+    name: "Instance Sessions"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "Session Base",
+    image: "node:20"
+  });
+
+  const created = await service.createSession(owner.token, {
+    name: "from-instance",
+    instanceId: instance.instance.id
+  });
+  assert.equal(created.session.instanceId, instance.instance.id);
+  assert.equal(created.session.instanceName, "Session Base");
+  assert.equal(created.session.templateId, null);
+
+  const listed = await service.listSessions(owner.token);
+  assert.equal(listed.sessions.length, 1);
+  assert.equal(listed.sessions[0].instanceId, instance.instance.id);
+
+  const started = await service.startSession(owner.token, created.session.id);
+  assert.equal(started.session.state, "running");
+  assert.equal(started.session.instanceId, instance.instance.id);
+
+  const detail = await service.getSession(owner.token, created.session.id);
+  assert.equal(detail.session.instanceId, instance.instance.id);
+  assert.equal(detail.session.instanceName, "Session Base");
+
+  const stopped = await service.stopSession(owner.token, created.session.id);
+  assert.equal(stopped.session.state, "sleeping");
+  assert.equal(stopped.session.instanceId, instance.instance.id);
+});
+
 test("service covers invites, queued builds, releases, session events, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();

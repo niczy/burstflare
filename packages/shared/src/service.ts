@@ -857,11 +857,22 @@ function requireInstanceAccess(state, authToken, instanceId, clock) {
   return { ...auth, instance };
 }
 
+function getSessionInstance(state, session) {
+  if (!session?.instanceId) {
+    return null;
+  }
+  return state.instances.find((entry) => entry.id === session.instanceId) || null;
+}
+
 function requireSessionAccess(state, authToken, sessionId, clock) {
   const auth = requireAuth(state, authToken, clock);
-  const session = state.sessions.find((entry) => entry.id === sessionId && entry.workspaceId === auth.workspace.id);
+  const session = state.sessions.find((entry) => entry.id === sessionId);
   ensure(session, "Session not found", 404);
-  return { ...auth, session };
+  const instance = getSessionInstance(state, session);
+  const inWorkspace = session.workspaceId === auth.workspace.id;
+  const ownsInstance = instance ? instance.userId === auth.user.id : false;
+  ensure(inWorkspace || ownsInstance, "Session not found", 404);
+  return { ...auth, session, instance };
 }
 
 function requireRuntimeToken(state, token, sessionId, clock) {
@@ -1091,12 +1102,15 @@ function formatInstance(instance) {
 
 function formatSession(state, session, { includeSshKeys = false }: { includeSshKeys?: boolean } = {}) {
   const template = state.templates.find((entry) => entry.id === session.templateId);
+  const instance = getSessionInstance(state, session);
   const events = state.sessionEvents.filter((entry) => entry.sessionId === session.id);
   const snapshots = state.snapshots.filter((entry) => entry.sessionId === session.id);
   const { sshAuthorizedKeys: _sshAuthorizedKeys, ...baseSession } = session;
   const sshKeyCount = getSessionSshKeys(session).length;
   return {
     ...baseSession,
+    instanceId: session.instanceId || null,
+    instanceName: instance?.name || null,
     templateName: template?.name || "unknown",
     eventsCount: events.length,
     snapshotCount: snapshots.length,
@@ -1745,8 +1759,8 @@ export function createBurstFlareService(options: any = {}) {
   const AUTH_DEVICE_SCOPE = [...AUTH_SCOPE, "deviceCodes", "usageEvents"];
   const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE, "workspaceInvites"];
   const INSTANCE_SCOPE = [...AUTH_SCOPE, "instances"];
-  const TEMPLATE_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
-  const SESSION_SCOPE = [...AUTH_SCOPE, "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
+  const TEMPLATE_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
+  const SESSION_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
   const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "workspaceInvites", "sessionEvents", "snapshots", "usageEvents"];
   const TRANSACTION_ERROR = Symbol("transactionError");
 
@@ -4545,15 +4559,24 @@ export function createBurstFlareService(options: any = {}) {
       });
     },
 
-    async createSession(token, { name, templateId }) {
+    async createSession(token, { name, templateId = null, instanceId = null }) {
       return transact(SESSION_SCOPE, (state) => {
-        const auth = requireWriteAccess(state, token, clock);
+        let auth: any;
+        let template: any = null;
+        let activeVersion: any = null;
+        let instance: any = null;
         ensure(name, "Session name is required");
-        const template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
-        ensure(template, "Template not found", 404);
-        ensure(!template.archivedAt, "Template is archived", 409);
-        const activeVersion = getActiveVersion(state, template.id);
-        ensure(activeVersion, "Template has no promoted version", 409);
+        if (instanceId) {
+          auth = requireInstanceAccess(state, token, instanceId, clock);
+          instance = auth.instance;
+        } else {
+          auth = requireWriteAccess(state, token, clock);
+          template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
+          ensure(template, "Template not found", 404);
+          ensure(!template.archivedAt, "Template is archived", 409);
+          activeVersion = getActiveVersion(state, template.id);
+          ensure(activeVersion, "Template has no promoted version", 409);
+        }
         ensure(
           !state.sessions.some(
             (entry) => entry.workspaceId === auth.workspace.id && entry.name.toLowerCase() === name.toLowerCase() && entry.state !== "deleted"
@@ -4565,7 +4588,8 @@ export function createBurstFlareService(options: any = {}) {
         const session = {
           id: createId("ses"),
           workspaceId: auth.workspace.id,
-          templateId: template.id,
+          templateId: template?.id || null,
+          instanceId: instance?.id || null,
           name,
           state: "created",
           createdByUserId: auth.user.id,
@@ -4579,8 +4603,8 @@ export function createBurstFlareService(options: any = {}) {
           runtimeVersion: 0,
           runtimeOperationId: null,
           runtimeUpdatedAt: null,
-          persistedPaths: [...(activeVersion.manifest?.persistedPaths || [])],
-          sleepTtlSeconds: activeVersion.manifest?.sleepTtlSeconds || null,
+          persistedPaths: [...(activeVersion?.manifest?.persistedPaths || [])],
+          sleepTtlSeconds: activeVersion?.manifest?.sleepTtlSeconds || null,
           sshAuthorizedKeys: [],
           previewUrl: null
         };
@@ -4593,7 +4617,11 @@ export function createBurstFlareService(options: any = {}) {
           workspaceId: auth.workspace.id,
           targetType: "session",
           targetId: session.id,
-          details: { name, templateId }
+          details: {
+            name,
+            templateId: template?.id || null,
+            instanceId: instance?.id || null
+          }
         });
         return { session: formatSession(state, session) };
       });
@@ -4717,7 +4745,11 @@ export function createBurstFlareService(options: any = {}) {
       return transact(SESSION_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         const sessions = state.sessions
-          .filter((entry) => entry.workspaceId === auth.workspace.id && entry.state !== "deleted")
+          .filter((entry) => entry.state !== "deleted")
+          .filter((entry) => {
+            const instance = getSessionInstance(state, entry);
+            return entry.workspaceId === auth.workspace.id || (instance ? instance.userId === auth.user.id : false);
+          })
           .map((session) => formatSession(state, session));
         return { sessions };
       });

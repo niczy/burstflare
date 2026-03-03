@@ -197,8 +197,8 @@ test("cloudflare store loads normalized state without legacy fallback and preser
   await db
     .prepare(
       `
-        INSERT INTO bf_sessions (row_key, position, workspace_id, template_id, state, name, updated_at_field, payload_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO bf_sessions (row_key, position, workspace_id, template_id, instance_id, state, name, updated_at_field, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .bind(
@@ -206,6 +206,7 @@ test("cloudflare store loads normalized state without legacy fallback and preser
       0,
       "ws_1",
       "tpl_1",
+      "ins_1",
       "running",
       "z-first",
       "2026-02-28T00:00:00.000Z",
@@ -213,6 +214,7 @@ test("cloudflare store loads normalized state without legacy fallback and preser
         id: "ses_z",
         workspaceId: "ws_1",
         templateId: "tpl_1",
+        instanceId: "ins_1",
         name: "z-first",
         state: "running",
         createdByUserId: "usr_2",
@@ -226,8 +228,8 @@ test("cloudflare store loads normalized state without legacy fallback and preser
   await db
     .prepare(
       `
-        INSERT INTO bf_sessions (row_key, position, workspace_id, template_id, state, name, updated_at_field, payload_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO bf_sessions (row_key, position, workspace_id, template_id, instance_id, state, name, updated_at_field, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .bind(
@@ -235,6 +237,7 @@ test("cloudflare store loads normalized state without legacy fallback and preser
       1,
       "ws_1",
       "tpl_1",
+      null,
       "sleeping",
       "a-second",
       "2026-02-28T00:00:01.000Z",
@@ -242,6 +245,7 @@ test("cloudflare store loads normalized state without legacy fallback and preser
         id: "ses_a",
         workspaceId: "ws_1",
         templateId: "tpl_1",
+        instanceId: null,
         name: "a-second",
         state: "sleeping",
         createdByUserId: "usr_1",
@@ -257,6 +261,8 @@ test("cloudflare store loads normalized state without legacy fallback and preser
 
   assert.deepEqual(loaded.users.map((entry: any) => entry.id), ["usr_2", "usr_1"]);
   assert.deepEqual(loaded.sessions.map((entry: any) => entry.id), ["ses_z", "ses_a"]);
+  assert.equal(loaded.sessions[0].instanceId, "ins_1");
+  assert.equal(loaded.sessions[1].instanceId, null);
 
   const meta = await db.prepare("SELECT value FROM bf_state_meta WHERE key = ? LIMIT 1").bind("schema_version").first();
   assert.equal(meta.value, "1");
