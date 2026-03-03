@@ -432,3 +432,35 @@ test("cloudflare store removes deleted rows from a scoped normalized collection"
   assert.equal(users.results.length, 1);
   assert.equal(JSON.parse(users.results[0].payload_json as string).id, "usr_2");
 });
+
+test("cloudflare store can persist scoped instance rows", async () => {
+  const db = new MockD1Database();
+  const store = createCloudflareStateStore(db);
+  const state = await store.loadCollections(["instances"]);
+
+  state.instances.push({
+    id: "ins_1",
+    userId: "usr_1",
+    name: "Base Node",
+    description: "Node runtime",
+    image: "node:20",
+    dockerfilePath: "./Dockerfile",
+    dockerContext: ".",
+    envVars: {
+      NODE_ENV: "development"
+    },
+    secrets: {
+      API_KEY: "secret-1"
+    },
+    createdAt: "2026-03-03T00:00:00.000Z",
+    updatedAt: "2026-03-03T00:00:00.000Z"
+  });
+
+  await store.save(state, { instances: [] }, { collections: ["instances"] });
+
+  const reloaded = await store.loadCollections(["instances"]);
+  assert.equal(reloaded.instances.length, 1);
+  assert.equal(reloaded.instances[0].id, "ins_1");
+  assert.equal(reloaded.instances[0].image, "node:20");
+  assert.equal(reloaded.instances[0].envVars.NODE_ENV, "development");
+});

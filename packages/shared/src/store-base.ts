@@ -18,6 +18,7 @@ export function createDefaultState() {
     workspaceInvites: [],
     authTokens: [],
     deviceCodes: [],
+    instances: [],
     templates: [],
     templateVersions: [],
     templateBuilds: [],
