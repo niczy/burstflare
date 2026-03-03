@@ -52,19 +52,6 @@ export const TABLES: TableDefinition[] = [
     indexes: ["workspace_id", "user_id"]
   },
   {
-    source: "workspaceInvites",
-    table: "bf_workspace_invites",
-    keyOf: (row) => row.id,
-    columns: [
-      { name: "workspace_id", field: "workspaceId" },
-      { name: "email", field: "email" },
-      { name: "code", field: "code" },
-      { name: "status", field: "status" },
-      { name: "expires_at", field: "expiresAt" }
-    ],
-    indexes: ["workspace_id", "email", "code", "status"]
-  },
-  {
     source: "authTokens",
     table: "bf_auth_tokens",
     keyOf: (row) => row.token,

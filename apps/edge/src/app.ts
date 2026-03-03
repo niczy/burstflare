@@ -2205,53 +2205,6 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     },
     {
       method: "GET",
-      pattern: "/api/workspaces/current/members",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.listWorkspaceMembers(token));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/workspaces/current/invites",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const body = await parseJson(await request.text());
-        return toJson(await service.createWorkspaceInvite(token, body));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/workspaces/current/invites/accept",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const body = await parseJson(await request.text());
-        return toJson(await service.acceptWorkspaceInvite(token, body.inviteCode));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/workspaces/current/members/:userId/role",
-      handler: withErrorHandling(async (request, { userId }: { userId: string }) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        const body = await parseJson(await request.text());
-        return toJson(await service.updateWorkspaceMemberRole(token, userId, body.role));
-      })
-    },
-    {
-      method: "GET",
       pattern: "/api/workspaces/current/billing",
       handler: withErrorHandling(async (request) => {
         const token = requireToken(request, service);

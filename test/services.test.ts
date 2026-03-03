@@ -314,19 +314,7 @@ test("service covers removed sharing, queued builds, releases, session events, u
     /already registered/
   );
 
-  await assert.rejects(
-    () =>
-      service.createWorkspaceInvite(owner.token, {
-        email: "teammate@example.com",
-        role: "member"
-      }),
-    /Workspace sharing has been removed/
-  );
-  await assert.rejects(() => service.acceptWorkspaceInvite(teammate.token, "invite_removed"), /Workspace sharing has been removed/);
-  await assert.rejects(
-    () => service.updateWorkspaceMemberRole(owner.token, teammate.user.id, "admin"),
-    /Workspace sharing has been removed/
-  );
+  await assert.rejects(() => service.switchWorkspace(teammate.token, owner.workspace.id), /Unauthorized workspace/);
   const switched = {
     token: owner.token,
     workspace: owner.workspace

@@ -15,7 +15,6 @@ export function createDefaultState() {
     users: [],
     workspaces: [],
     memberships: [],
-    workspaceInvites: [],
     authTokens: [],
     deviceCodes: [],
     instances: [],
