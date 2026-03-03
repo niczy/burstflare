@@ -653,43 +653,82 @@ The service has no live users, so we can make breaking product decisions directl
 
 **Exit criteria:** Billing summaries and invoices only expose runtime and storage metrics, and cron writes daily storage usage events.
 
-### PR 7: Remove legacy template/build/release/workspace-sharing code
+### PR 7: Disable workspace-sharing interfaces
 
-**Scope:** Delete the old model after the new internals exist.
+**Scope:** Remove active sharing behavior first, without deleting the underlying auth scaffolding yet.
 
-- Delete template, template version, template build, binding release, workspace membership, and workspace invite code from `service.ts`.
-- Delete the corresponding D1 table definitions from `cloudflare-schema.ts`.
-- Remove Queues, Workflows, and server-side build pipeline logic from the backend.
-- Remove dead tests, fixtures, and helpers tied only to the deleted features.
-- Keep the branch deployable; any still-referenced API routes should fail closed with clear removals until the route layer is updated in the next PR.
+- Make workspace invite creation, invite acceptance, and member role mutation fail closed with a clear "workspace sharing removed" response.
+- Keep owner-only access working for the primary workspace.
+- Update worker and service tests so sharing routes are treated as removed behavior.
+- Leave route wiring in place temporarily; the next PR deletes the remaining storage and helper code.
 
-**Exit criteria:** The backend no longer contains build/release/workspace-sharing internals, and `packages/shared/src/service.ts` is materially smaller and easier to review.
+**Exit criteria:** New or existing clients cannot create invites, accept invites, or change member roles, and the branch stays deployable.
 
 **Docs to update:**
-- `spec/architecture.md` — remove template/build/promotion and workspace-sharing sections.
+- `spec/architecture.md` — note that workspace sharing is being removed and is no longer part of the supported model.
 
-### PR 8: API routes and CLI switch-over
+### PR 8: Remove workspace-sharing internals
 
-**Scope:** Rewire the external interfaces to the new backend.
+**Scope:** Delete the now-unused invite/member machinery after the public behavior is already disabled.
+
+- Remove workspace invite storage and invite-specific service helpers from `service.ts`.
+- Remove workspace-sharing route handlers from `apps/edge/src/app.ts`.
+- Delete workspace invite tables from `cloudflare-schema.ts`.
+- Remove dead tests, fixtures, and docs tied only to workspace sharing.
+- Keep owner auth and the single-workspace model intact.
+
+**Exit criteria:** The backend no longer supports workspace invites or multi-member role management, and only the owner path remains.
+
+**Docs to update:**
+- `spec/architecture.md` — remove workspace-sharing sections entirely.
+
+### PR 9: Remove legacy template/build/release backend
+
+**Scope:** Delete the old template stack after instances and instance-backed sessions are already live.
+
+- Delete template, template version, template build, and binding release code from `service.ts`.
+- Delete the corresponding D1 table definitions from `cloudflare-schema.ts`.
+- Remove Queues, Workflows, and server-side build pipeline logic from the backend.
+- Remove dead tests, fixtures, and helpers tied only to the deleted backend model.
+- Keep the branch deployable; any still-referenced API routes should fail closed with clear removals until the route layer is updated in the next PR.
+
+**Exit criteria:** The backend no longer contains build/release internals, and `packages/shared/src/service.ts` is materially smaller and easier to review.
+
+**Docs to update:**
+- `spec/architecture.md` — remove template/build/promotion sections.
+
+### PR 10: API routes switch-over
+
+**Scope:** Rewire the HTTP interface to the new backend model.
 
 - Delete `/api/templates/*`, `/api/template-builds/*`, and `/api/releases/*` routes from `apps/edge/src/app.ts`.
-- Delete workspace invite/membership routes.
 - Add `/api/instances` CRUD routes.
 - Update session routes to use `instanceId`.
 - Simplify snapshot routes to a single `POST` save action plus automatic restore behavior.
-- Rewrite the CLI: replace `flare template *` with `flare instance *`, remove `flare build *`, `flare releases`, and multi-snapshot commands.
+- Update smoke tests and worker/API tests.
+
+**Exit criteria:** The public API exposes only instances, sessions, and the simplified snapshot flow, and `npm test` passes.
+
+**Docs to update:**
+- `spec/plan.md` — replace legacy delivery PRs with the new simplified sequence.
+
+### PR 11: CLI switch-over
+
+**Scope:** Rewrite the CLI after the HTTP API has been switched.
+
+- Replace `flare template *` with `flare instance *`.
+- Remove `flare build *`, `flare releases`, and multi-snapshot commands.
 - Add `--dockerfile` and `--context` flags to `flare instance create` and `flare instance edit`.
 - Add `flare instance rebuild`.
-- Implement the local Docker build → push → create/update flow in the CLI.
+- Implement the local Docker build -> push -> create/update flow in the CLI.
 - Update smoke tests and CLI tests.
 
 **Exit criteria:** `npm run ci` passes. `flare instance create --image node:20`, `flare instance create --dockerfile ./Dockerfile`, and `flare up --instance <id>` all work.
 
 **Docs to update:**
 - `apps/cli/README.md` — rewrite command reference for Instance + Session model; add `--dockerfile` examples.
-- `spec/plan.md` — replace legacy delivery PRs with the new simplified sequence.
 
-### PR 9: Common state (`/home/flare`)
+### PR 12: Common state (`/home/flare`)
 
 **Scope:** Add shared home-directory state after the base session model is stable.
 
@@ -707,7 +746,7 @@ The service has no live users, so we can make breaking product decisions directl
 - `spec/architecture.md` — add the Common State section and R2 layout details.
 - `containers/session/` — update container docs if present with `/home/flare` sync behavior.
 
-### PR 10: Web app and deploy cleanup
+### PR 13: Web app and deploy cleanup
 
 **Scope:** Update the UI and deployment surface after the API and CLI have stabilized.
 
@@ -727,7 +766,7 @@ The service has no live users, so we can make breaking product decisions directl
 - `spec/todo.md`
 - `README.md`
 
-### PR 11: End-to-end verification
+### PR 14: End-to-end verification
 
 **Scope:** Verify the entire simplified product works end-to-end in production.
 
