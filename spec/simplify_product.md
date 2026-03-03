@@ -305,7 +305,7 @@ Storage is tracked (`summarizeStorage`) but **not billed** — it's only used fo
 
 3. **Add `storageGbMonths` metric.** Charge for R2 storage at the same rate Cloudflare charges us: $0.015/GB-month. This covers:
    - Per-session snapshot storage (`snapshot.tar.gz`)
-   - Common state storage (`/shared` R2 prefix)
+   - Common state storage (`/home/flare` R2 prefix)
 
 4. **Simplify `snapshots` metric.** With single-snapshot-per-session, there's no meaningful per-save billing. Replace with storage-based billing. Remove the per-snapshot-save charge.
 
@@ -568,102 +568,144 @@ flare snapshot <session-id>         # save now (single command, no subcommands)
 
 ## Implementation Plan
 
-The service has no live users, so we can make breaking changes directly — no migration path, no backward compatibility, no feature flags. This collapses what would have been a 7-PR additive migration into 4 clean PRs.
+The service has no live users, so we can make breaking product decisions directly — no external migration path, no backward compatibility promises, no feature flags. Even so, the original "4 clean PRs" split is too large for review and too risky for trunk stability. The rewrite should land in smaller PRs that each keep `main` green.
 
-### PR 1: Replace data model and service layer
+### PR 1: Runtime prep (`dev` → `flare`)
 
-**Scope:** Gut and rebuild the core.
+**Scope:** Land the cross-cutting SSH/runtime rename first so later diffs only have one user name in play.
 
-- Delete all template, template version, template build, binding release, workspace membership, and workspace invite code from `service.ts`.
-- Delete the corresponding D1 table definitions from `cloudflare-schema.ts`.
-- Add `Instance` type with full CRUD (create, list, get, update, delete).
-- Rewrite `Session` to reference `instanceId` instead of `templateId`/`workspaceId`.
-- Replace multi-snapshot logic with single-snapshot-per-session model (latest only, overwrite on save, auto-restore on start).
-- Remove Queues, Workflows, and build pipeline entirely.
-- Rewrite billing: move from workspace to user, remove `templateBuilds` and `snapshots` metrics, add `storageGbMonths` metric.
-- Add daily storage measurement job to cron handler.
-- Update billing catalog: keep `runtimeMinuteUsd`, add `storageGbMonthUsd`, remove `snapshotUsd`/`templateBuildUsd`.
-- Rename SSH user from `dev` to `flare` across the entire codebase:
+- Rename the SSH user from `dev` to `flare` across the entire codebase:
   - `containers/session/Dockerfile` — `adduser -D flare`, `chpasswd`, `chown` references.
   - `containers/session/server.mjs` — `id -u flare`, `id -g flare`, default username return.
   - `packages/shared/src/service.ts` — `sshUser: "flare"`, SSH command template `flare@127.0.0.1`.
   - `scripts/ssh-smoke.ts` — mock SSH server username, assertions for `whoami` output.
   - `scripts/live-ssh-smoke.ts` — SSH command username, assertions.
   - `test/container-server.test.ts` — update any `dev` user references.
-- Write new D1 migration `0005_simplified_model.sql` that drops legacy tables and creates `bf_instances`.
-- Update `cloudflare-store.ts` and `memory-store.ts` for the new schema.
-- Update all unit tests.
+- Update any CLI help text, fixtures, or docs that still mention the old SSH username.
 
-**Exit criteria:** `npm run typecheck && npm test` pass. Service layer is <3000 lines.
+**Exit criteria:** Container tests and SSH smoke tests pass with `whoami === "flare"`.
+
+### PR 2: Instance foundation (types + storage + service CRUD)
+
+**Scope:** Introduce the new core object without cutting over every caller yet.
+
+- Add the `Instance` type and serializers.
+- Add `bf_instances` schema definitions plus the new D1 migration.
+- Update `cloudflare-store.ts`, `memory-store.ts`, and shared store helpers for instance persistence.
+- Add `createInstance`, `listInstances`, `getInstance`, `updateInstance`, and `deleteInstance` to `service.ts`.
+- Keep legacy template APIs intact in this PR so the branch stays easy to validate while the new model is added.
+- Add focused unit tests for instance CRUD and persistence.
+
+**Exit criteria:** `npm run typecheck && npm test` pass, and the service layer can create and read instances even if legacy templates still exist.
 
 **Docs to update:**
-- `spec/architecture.md` — replace template/build/promotion sections with Instance model; remove workspace membership; update metadata plane tables; remove Queues/Workflows from component breakdown; update persistence section for single-snapshot model.
-- `spec/overview.md` — simplify "What The Product Delivers" to Instance + Session; remove template pipeline and build references from product surfaces; update CLI description.
-- `packages/shared/src/cloudflare-schema.ts` — remove legacy table definitions, add `bf_instances`.
+- `packages/shared/src/cloudflare-schema.ts` — add `bf_instances`.
+- `spec/overview.md` — introduce Instance terminology at a high level.
 
-### PR 2: Update API routes and CLI
+### PR 3: Session cutover + single latest snapshot
 
-**Scope:** Rewire the HTTP layer and CLI to the new model.
+**Scope:** Move session semantics to the new model before deleting the old one.
 
-- Delete all `/api/templates/*`, `/api/template-builds/*`, `/api/releases/*` routes from `app.ts`.
+- Rewrite `Session` to reference `instanceId` instead of `templateId`/`workspaceId`.
+- Replace multi-snapshot logic with single-snapshot-per-session metadata on the session plus one persisted latest snapshot record/object.
+- Implement save-overwrite semantics and automatic restore of the latest snapshot on start.
+- Update snapshot storage layout to one object key per session.
+- Update session-related tests and fixtures to the new shape.
+- Keep thin internal adapters where needed so higher layers can be rewired in a later PR without breaking the branch.
+
+**Exit criteria:** Session lifecycle tests pass with `instanceId`, and repeated snapshot saves overwrite the latest snapshot instead of creating history.
+
+**Docs to update:**
+- `spec/architecture.md` — update persistence and session metadata to latest-snapshot-only.
+
+### PR 4: Billing rewrite
+
+**Scope:** Move billing off workspaces and onto users as a separate, reviewable change.
+
+- Rewrite billing ownership from workspace to user.
+- Remove `templateBuilds` and per-save `snapshots` metrics.
+- Add `storageGbDays` accounting and `storageGbMonths` invoice math.
+- Update the billing catalog to keep `runtimeMinuteUsd` and add `storageGbMonthUsd`.
+- Add the daily storage measurement cron path.
+- Update `.env.example` billing keys and all billing unit tests.
+
+**Exit criteria:** Billing summaries and invoices only expose runtime and storage metrics, and cron writes daily storage usage events.
+
+### PR 5: Remove legacy template/build/release/workspace-sharing code
+
+**Scope:** Delete the old model after the new internals exist.
+
+- Delete template, template version, template build, binding release, workspace membership, and workspace invite code from `service.ts`.
+- Delete the corresponding D1 table definitions from `cloudflare-schema.ts`.
+- Remove Queues, Workflows, and server-side build pipeline logic from the backend.
+- Remove dead tests, fixtures, and helpers tied only to the deleted features.
+- Keep the branch deployable; any still-referenced API routes should fail closed with clear removals until the route layer is updated in the next PR.
+
+**Exit criteria:** The backend no longer contains build/release/workspace-sharing internals, and `packages/shared/src/service.ts` is materially smaller and easier to review.
+
+**Docs to update:**
+- `spec/architecture.md` — remove template/build/promotion and workspace-sharing sections.
+
+### PR 6: API routes and CLI switch-over
+
+**Scope:** Rewire the external interfaces to the new backend.
+
+- Delete `/api/templates/*`, `/api/template-builds/*`, and `/api/releases/*` routes from `apps/edge/src/app.ts`.
 - Delete workspace invite/membership routes.
 - Add `/api/instances` CRUD routes.
-- Update `/api/sessions` routes to use `instanceId`.
-- Simplify snapshot routes to single-snapshot model (POST to save, auto-restore on start).
-- Rewrite CLI: replace `flare template *` with `flare instance *`, remove `flare build *`, `flare releases`, multi-snapshot commands.
+- Update session routes to use `instanceId`.
+- Simplify snapshot routes to a single `POST` save action plus automatic restore behavior.
+- Rewrite the CLI: replace `flare template *` with `flare instance *`, remove `flare build *`, `flare releases`, and multi-snapshot commands.
 - Add `--dockerfile` and `--context` flags to `flare instance create` and `flare instance edit`.
-- Add `flare instance rebuild` command.
-- Implement local Docker build → push → create/update flow in the CLI.
-- Update wrangler config generator to remove build/workflow/queue bindings if no longer needed.
-- Update all smoke tests and CLI tests.
+- Add `flare instance rebuild`.
+- Implement the local Docker build → push → create/update flow in the CLI.
+- Update smoke tests and CLI tests.
 
-**Exit criteria:** `npm run ci` passes. `flare instance create --image node:20` and `flare instance create --dockerfile ./Dockerfile` both work. `flare up` creates a session from an instance.
+**Exit criteria:** `npm run ci` passes. `flare instance create --image node:20`, `flare instance create --dockerfile ./Dockerfile`, and `flare up --instance <id>` all work.
 
 **Docs to update:**
 - `apps/cli/README.md` — rewrite command reference for Instance + Session model; add `--dockerfile` examples.
-- `spec/plan.md` — replace delivery plan PRs 07-09 (template catalog, build pipeline, binding catalog) with simplified Instance model PRs.
-- `.env.example` — remove `BILLING_RATE_SNAPSHOT_USD`, `BILLING_RATE_TEMPLATE_BUILD_USD`; add `BILLING_RATE_STORAGE_GB_MONTH_USD`.
+- `spec/plan.md` — replace legacy delivery PRs with the new simplified sequence.
 
-### PR 3: Common state
+### PR 7: Common state (`/home/flare`)
 
-**Scope:** Add shared state across sessions of the same instance.
+**Scope:** Add shared home-directory state after the base session model is stable.
 
-- Add `commonStateKey` to Instance model.
-- On session start: pull common state from R2 into `/shared` mount inside the container.
-- Add `flare instance push <id>` to upload `/shared` from current session to R2.
-- Add `flare instance pull <id>` to download latest `/shared` from R2 without restart.
-- Update container bootstrap script (`server.mjs`) to handle the `/shared` mount.
-- No live sync — pull-on-start, explicit push. Simple and predictable.
+- Add `commonStateKey` and `commonStateBytes` to the Instance model.
+- On session start, pull common state from R2 into `/home/flare`.
+- On session stop/sleep, push `/home/flare` back to R2.
+- Add `flare instance push <id>` to upload the current session's `/home/flare` immediately.
+- Add `flare instance pull <id>` to fetch the latest `/home/flare` without restart.
+- Update container bootstrap (`server.mjs`) to hydrate and persist `/home/flare`.
+- No live sync — pull-on-start, auto-push on stop, explicit push/pull mid-session.
 
-**Exit criteria:** Two sessions of the same instance both see files placed in common state after push + restart.
+**Exit criteria:** Two sessions of the same instance both see shared files in `/home/flare` after push + restart, while `/workspace` stays isolated.
 
 **Docs to update:**
-- `spec/architecture.md` — add Common State section under Workspace Persistence; document R2 layout and sync model.
-- `containers/session/` — update container README if present with `/shared` mount documentation.
+- `spec/architecture.md` — add the Common State section and R2 layout details.
+- `containers/session/` — update container docs if present with `/home/flare` sync behavior.
 
-### PR 4: Web app and deploy cleanup
+### PR 8: Web app and deploy cleanup
 
-**Scope:** Update the UI and deploy pipeline.
+**Scope:** Update the UI and deployment surface after the API and CLI have stabilized.
 
 - Replace template catalog pages with Instance list/create/edit pages.
-- Simplify session creation flow: pick Instance → name → launch.
+- Simplify session creation flow to pick Instance → name → launch.
 - Remove build/promotion/release UI pages.
-- Simplify session detail to show single snapshot status inline (no snapshot list).
-- Update `deploy.ts` to remove references to build workflow and queue bindings.
-- Update `wrangler.toml` / config generator to remove workflow and queue sections.
-- Update runbook, changelog, and spec docs.
-- Deploy to production and run smoke tests.
+- Simplify session detail to show single snapshot status inline.
+- Update `scripts/deploy.ts` to remove build workflow and queue references.
+- Update `wrangler.toml` and any config generator output to remove workflow/queue sections.
+- Update runbook, changelog, todo list, and top-level README.
 
-**Exit criteria:** Full CI passes. Web app shows instances and sessions only. `npm run deploy` succeeds. CLI help fits on one screen.
+**Exit criteria:** Full CI passes, the web app shows only instances and sessions, and `npm run deploy` completes without queue/workflow errors.
 
 **Docs to update:**
-- `spec/runbook.md` — rewrite operator checks for Instance model; remove template build/promotion procedures; update rollout checklist to remove build workflow references; simplify post-deploy verification.
-- `spec/changelog.md` — add entry documenting the model simplification.
-- `spec/todo.md` — clear completed items; update remaining work for new model.
-- `README.md` — update product description, quickstart, and CLI examples for Instance + Session model.
-- `spec/plan.md` — mark legacy PRs (template catalog, build pipeline, promotion) as superseded; add new simplified PRs.
+- `spec/runbook.md`
+- `spec/changelog.md`
+- `spec/todo.md`
+- `README.md`
 
-### PR 5: End-to-end verification
+### PR 9: End-to-end verification
 
 **Scope:** Verify the entire simplified product works end-to-end in production.
 
