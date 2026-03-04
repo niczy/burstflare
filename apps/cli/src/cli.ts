@@ -582,7 +582,7 @@ const HELP_CATALOG: HelpSection[] = [
           },
           {
             name: "edit",
-            usageTail: "<instanceId> [--name <name>] [--image <base-image>] [--dockerfile <path>] [--context <path>]",
+            usageTail: "<instanceId> [--name <name>] [--description <text>] [--image <base-image>] [--dockerfile <path>] [--context <path>] [--env <KEY=value,...>] [--secret <KEY=value,...>] [--clear-env] [--clear-secrets]",
             summary: "Update an existing instance."
           },
           { name: "rebuild", usageTail: "<instanceId>", summary: "Refresh the server-managed runtime metadata from the saved source config." },
@@ -1049,18 +1049,6 @@ export async function runCli(
   }
   if (command === "instances") {
     command = "instance";
-    subcommand = subcommand || "list";
-  }
-  if (command === "templates") {
-    command = "template";
-    subcommand = subcommand || "list";
-  }
-  if (command === "builds") {
-    command = "build";
-    subcommand = subcommand || "list";
-  }
-  if (command === "releases") {
-    command = "release";
     subcommand = subcommand || "list";
   }
   if (command === "sessions") {
@@ -2144,250 +2132,6 @@ export async function runCli(
       throw createCliError(`'${command}' commands were removed. Use 'flare instance' and 'flare session' instead.`, 410);
     }
 
-    if (command === "template") {
-      if (subcommand === "inspect") {
-        const templateId = rest[0];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates/${templateId}`,
-          {
-            headers: headers(undefined, false)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "create") {
-        const name = rest[0];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates`,
-          {
-            method: "POST",
-            headers: headers(undefined),
-            body: JSON.stringify({ name, description: options.description || "" })
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "upload") {
-        const templateId = rest[0];
-        const created = await requestJsonAuthed(
-          `${baseUrl}/api/templates/${templateId}/versions`,
-          {
-            method: "POST",
-            headers: headers(undefined),
-            body: JSON.stringify({
-              version: options.version,
-              notes: options.notes || "",
-              manifest: {
-                image: `registry.cloudflare.com/local/${templateId}:${options.version}`,
-                features: ["ssh", "browser", "snapshots"],
-                simulateFailure: Boolean(options["simulate-failure"]),
-                sleepTtlSeconds: options["sleep-ttl-seconds"] ? Number(options["sleep-ttl-seconds"]) : undefined,
-                persistedPaths: parseListOption(options["persisted-paths"])
-              }
-            })
-          }
-        );
-        let result = created;
-        if (options.file) {
-          const bundleBody = await readFile(options.file as string);
-          const uploadGrant = await requestJsonAuthed(
-            `${baseUrl}/api/templates/${templateId}/versions/${created.templateVersion.id}/bundle/upload`,
-            {
-              method: "POST",
-              headers: headers(undefined),
-              body: JSON.stringify({
-                contentType: options["content-type"] || "application/octet-stream",
-                bytes: bundleBody.byteLength
-              })
-            }
-          );
-          const uploaded = await uploadWithGrant(
-            uploadGrant.uploadGrant.url,
-            bundleBody,
-            uploadGrant.uploadGrant.contentType || options["content-type"] || "application/octet-stream"
-          );
-          result = {
-            ...created,
-            templateVersion: uploaded.templateVersion,
-            bundle: uploaded.bundle
-          };
-        }
-        print(stdout, JSON.stringify(result, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "promote") {
-        const templateId = rest[0];
-        const versionId = rest[1];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates/${templateId}/promote`,
-          {
-            method: "POST",
-            headers: headers(undefined),
-            body: JSON.stringify({ versionId })
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "rollback") {
-        const templateId = rest[0];
-        const releaseId = rest[1] || null;
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates/${templateId}/rollback`,
-          {
-            method: "POST",
-            headers: headers(undefined),
-            body: JSON.stringify({
-              releaseId
-            })
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "archive") {
-        const templateId = rest[0];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates/${templateId}/archive`,
-          {
-            method: "POST",
-            headers: headers(undefined)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "restore") {
-        const templateId = rest[0];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates/${templateId}/restore`,
-          {
-            method: "POST",
-            headers: headers(undefined)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "list") {
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates`,
-          {
-            headers: headers(undefined, false)
-          }
-        );
-        let result = data;
-        if (options.archived) {
-          result = filterCollection(data, "templates", (entry) => Boolean(entry.archivedAt));
-        } else if (options.active) {
-          result = filterCollection(data, "templates", (entry) => !entry.archivedAt);
-        }
-        print(stdout, JSON.stringify(result, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "delete") {
-        const templateId = rest[0];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/templates/${templateId}`,
-          {
-            method: "DELETE",
-            headers: headers(undefined, false)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-    }
-
-    if (command === "build") {
-      if (subcommand === "list") {
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/template-builds`,
-          {
-            headers: headers(undefined, false)
-          }
-        );
-        const result = options.status ? filterCollection(data, "builds", (entry) => entry.status === options.status) : data;
-        print(stdout, JSON.stringify(result, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "log") {
-        const buildId = rest[0];
-        const data = await requestTextAuthed(
-          `${baseUrl}/api/template-builds/${buildId}/log`,
-          {
-            headers: headers(undefined, false)
-          }
-        );
-        print(stdout, data.trimEnd());
-        return 0;
-      }
-
-      if (subcommand === "artifact") {
-        const buildId = rest[0];
-        const data = await requestTextAuthed(
-          `${baseUrl}/api/template-builds/${buildId}/artifact`,
-          {
-            headers: headers(undefined, false)
-          }
-        );
-        print(stdout, data.trimEnd());
-        return 0;
-      }
-
-      if (subcommand === "process") {
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/template-builds/process`,
-          {
-            method: "POST",
-            headers: headers(undefined)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "retry") {
-        const buildId = rest[0];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/template-builds/${buildId}/retry`,
-          {
-            method: "POST",
-            headers: headers(undefined)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "retry-dead-lettered") {
-        throw createCliError("'build retry-dead-lettered' was removed. Legacy build recovery is no longer supported.", 410);
-      }
-    }
-
-    if (command === "release" && subcommand === "list") {
-      const data = await requestJsonAuthed(
-        `${baseUrl}/api/releases`,
-        {
-          headers: headers(undefined, false)
-        }
-      );
-      const result = options.template ? filterCollection(data, "releases", (entry) => entry.templateId === options.template) : data;
-      print(stdout, JSON.stringify(result, null, 2));
-      return 0;
-    }
-
     if (command === "up") {
       const name = subcommand;
       const instanceId = options.instance || options.template;
@@ -2432,11 +2176,9 @@ export async function runCli(
             entry.runtime?.status === options.status
         );
       }
-      if (options.template) {
-        result = filterCollection(result, "sessions", (entry) => entry.templateId === options.template);
-      }
-      if (options.instance) {
-        result = filterCollection(result, "sessions", (entry) => entry.instanceId === options.instance);
+      if (options.instance || options.template) {
+        const instanceId = options.instance || options.template;
+        result = filterCollection(result, "sessions", (entry) => entry.instanceId === instanceId);
       }
       print(stdout, JSON.stringify(result, null, 2));
       return 0;
