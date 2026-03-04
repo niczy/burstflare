@@ -284,7 +284,7 @@ test("service can queue and complete a managed instance build on the server", as
     objects.readBuildArtifactText(completed.instance.buildArtifactKey),
     JSON.stringify(
       {
-        format: "burstflare.instance-build.v1",
+        format: "burstflare.instance-build.v2",
         instanceId: created.instance.id,
         buildId: completed.build.id,
         baseImage: "python:3.12",
@@ -292,11 +292,48 @@ test("service can queue and complete a managed instance build on the server", as
         dockerContext: ".",
         bootstrapVersion: "v1",
         builtAt: completed.instance.buildCompletedAt,
-        managedRuntimeImage: completed.instance.managedRuntimeImage
+        managedRuntimeImage: completed.instance.managedRuntimeImage,
+        managedImageDigest: completed.instance.managedImageDigest
       },
       null,
       2
     )
+  );
+});
+
+test("service can use a configured remote managed runtime builder", async () => {
+  let tick = Date.parse("2026-03-03T00:00:00.000Z");
+  const service = createBurstFlareService({
+    store: createMemoryStore(),
+    builder: {
+      async buildManagedInstanceRuntime({ instance, buildId }: { instance: any; buildId: string }) {
+        return {
+          managedRuntimeImage: `registry.cloudflare.com/burstflare/${instance.id}:${buildId}`,
+          managedImageDigest: "sha256:feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface"
+        };
+      }
+    },
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "remote-builder@example.com",
+    name: "Remote Builder"
+  });
+
+  const created = await service.createInstance(owner.token, {
+    name: "Remote Built",
+    baseImage: "node:20"
+  });
+
+  assert.equal(created.instance.buildStatus, "ready");
+  assert.match(created.instance.managedRuntimeImage, new RegExp(`^registry\\.cloudflare\\.com/burstflare/${created.instance.id}:bld_`));
+  assert.equal(
+    created.instance.managedImageDigest,
+    "sha256:feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface"
   );
 });
 

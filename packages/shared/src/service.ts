@@ -261,13 +261,15 @@ function hashDigest(value) {
   return `sha256:${chunk.repeat(8)}`;
 }
 
-function createManagedInstanceBuildArtifact(instance, buildId, builtAt) {
+function createManagedInstanceBuildArtifact(instance, buildId, builtAt, overrides: any = {}) {
   const baseImage = resolveInstanceBaseImage(instance);
   const bootstrapVersion = String(instance?.bootstrapVersion || "v1");
-  const artifactKey = `instance-builds/${instance.id}/${buildId}.json`;
-  const managedRuntimeImage = `burstflare/session-runtime:${bootstrapVersion}-${buildId}`;
+  const artifactKey = String(overrides?.artifactKey || `instance-builds/${instance.id}/${buildId}.json`);
+  const managedRuntimeImage = String(
+    overrides?.managedRuntimeImage || `burstflare/session-runtime:${bootstrapVersion}-${buildId}`
+  );
   const manifest = {
-    format: "burstflare.instance-build.v1",
+    format: "burstflare.instance-build.v2",
     instanceId: instance.id,
     buildId,
     baseImage,
@@ -275,8 +277,12 @@ function createManagedInstanceBuildArtifact(instance, buildId, builtAt) {
     dockerContext: instance.dockerContext == null ? null : String(instance.dockerContext),
     bootstrapVersion,
     builtAt,
-    managedRuntimeImage
+    managedRuntimeImage,
+    managedImageDigest: null
   };
+  const seedBody = JSON.stringify(manifest, null, 2);
+  const managedImageDigest = overrides?.managedImageDigest ? String(overrides.managedImageDigest) : hashDigest(seedBody);
+  manifest.managedImageDigest = managedImageDigest;
   const body = JSON.stringify(manifest, null, 2);
   return {
     buildId,
@@ -284,7 +290,7 @@ function createManagedInstanceBuildArtifact(instance, buildId, builtAt) {
     body,
     contentType: "application/vnd.burstflare.instance-build+json; charset=utf-8",
     managedRuntimeImage,
-    managedImageDigest: hashDigest(body)
+    managedImageDigest
   };
 }
 
@@ -856,6 +862,7 @@ export function createBurstFlareService(options: any = {}) {
   const clock = options.clock || (() => Date.now());
   const objects = options.objects || null;
   const jobs = options.jobs || null;
+  const builder = options.builder || null;
   const billingProvider = options.billing || null;
   const billingCatalog = normalizeBillingCatalog(options.billingCatalog);
   const authSessionDeps = {
@@ -985,7 +992,45 @@ export function createBurstFlareService(options: any = {}) {
       instance.buildError = null;
 
       try {
-        const artifact = createManagedInstanceBuildArtifact(instance, buildId, timestamp);
+        let artifact: any;
+        if (builder?.buildManagedInstanceRuntime) {
+          const built = await builder.buildManagedInstanceRuntime({
+            instance: formatInstance(instance),
+            buildId,
+            builtAt: timestamp
+          });
+          ensure(built && typeof built === "object", "Managed runtime builder returned no result");
+          ensure(
+            typeof built.managedRuntimeImage === "string" && built.managedRuntimeImage.trim(),
+            "Managed runtime builder did not return an image"
+          );
+          ensure(
+            typeof built.managedImageDigest === "string" && built.managedImageDigest.trim(),
+            "Managed runtime builder did not return a digest"
+          );
+          const artifactContentType =
+            typeof built.artifactContentType === "string" && built.artifactContentType.trim()
+              ? built.artifactContentType.trim()
+              : "application/vnd.burstflare.instance-build+json; charset=utf-8";
+          const artifactBody =
+            built.artifactBody == null
+              ? null
+              : built.artifactBody instanceof Uint8Array || built.artifactBody instanceof ArrayBuffer
+                ? built.artifactBody
+                : String(built.artifactBody);
+          artifact = createManagedInstanceBuildArtifact(instance, buildId, timestamp, {
+            artifactKey:
+              typeof built.artifactKey === "string" && built.artifactKey.trim() ? built.artifactKey.trim() : undefined,
+            managedRuntimeImage: built.managedRuntimeImage.trim(),
+            managedImageDigest: built.managedImageDigest.trim()
+          });
+          if (artifactBody != null) {
+            artifact.body = artifactBody;
+            artifact.contentType = artifactContentType;
+          }
+        } else {
+          artifact = createManagedInstanceBuildArtifact(instance, buildId, timestamp);
+        }
         if (objects?.putBuildArtifact) {
           await objects.putBuildArtifact({
             instance,

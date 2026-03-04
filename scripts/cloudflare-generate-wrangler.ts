@@ -30,6 +30,12 @@ function renderWrangler(state: any, config: CloudflareConfig): string {
   if (config.resendFrom) {
     vars.push(`RESEND_FROM = "${config.resendFrom}"`);
   }
+  if (config.remoteBuildUrl) {
+    vars.push(`REMOTE_BUILD_URL = "${config.remoteBuildUrl}"`);
+  }
+  if (config.remoteBuildToken) {
+    vars.push(`REMOTE_BUILD_TOKEN = "${config.remoteBuildToken}"`);
+  }
   const lines = [`name = "${config.workerName}"
 main = "apps/edge/src/worker.ts"
 compatibility_date = "2026-02-27"

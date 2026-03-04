@@ -997,6 +997,27 @@ test("worker queue consumer ignores legacy build jobs and still runs reconcile",
   const buildBucket = createBucket();
   const service = createWorkerService({
     BUILD_BUCKET: buildBucket,
+    REMOTE_BUILD_URL: "https://builder.example.test/build",
+    REMOTE_BUILD_TOKEN: "builder-token",
+    fetchImpl: async (url: string, init?: RequestInit) => {
+      if (url === "https://builder.example.test/build") {
+        assert.equal(init?.method, "POST");
+        assert.equal((init?.headers as Record<string, string>)?.authorization, "Bearer builder-token");
+        const body = JSON.parse(String(init?.body || "{}"));
+        return new Response(
+          JSON.stringify({
+            managedRuntimeImage: `registry.cloudflare.com/burstflare/${body.instanceId}:${body.buildId}`,
+            managedImageDigest: "sha256:cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8"
+            }
+          }
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    },
     clock: () => {
       tick += 1000;
       return tick;
@@ -1049,6 +1070,10 @@ test("worker queue consumer ignores legacy build jobs and still runs reconcile",
   assert.equal(detail.session.state, "sleeping");
   const rebuilt = await service.getInstance(owner.token, instance.instance.id);
   assert.equal(rebuilt.instance.buildStatus, "ready");
+  assert.equal(
+    rebuilt.instance.managedImageDigest,
+    "sha256:cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
+  );
   assert.ok(rebuilt.instance.buildArtifactKey);
   assert.ok(await buildBucket.get(rebuilt.instance.buildArtifactKey));
 });
@@ -2008,7 +2033,14 @@ test("worker health reports build dispatch removed", async () => {
   const health = await requestJson(healthApp, "/api/health");
   assert.equal(health.response.status, 200);
   assert.equal(health.data.runtime.workflowEnabled, false);
-  assert.equal(health.data.runtime.buildDispatchMode, null);
+  assert.equal(health.data.runtime.buildDispatchMode, "manifest");
+
+  const remoteHealthApp = createApp({
+    REMOTE_BUILD_URL: "https://builder.example.test/build"
+  });
+  const remoteHealth = await requestJson(remoteHealthApp, "/api/health");
+  assert.equal(remoteHealth.response.status, 200);
+  assert.equal(remoteHealth.data.runtime.buildDispatchMode, "remote-http");
 });
 
 test("worker restores and syncs instance common state", async () => {
