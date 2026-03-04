@@ -50,6 +50,46 @@ export function getAppScript(turnstileKey = ""): string {
       if (!node) return;
       node.textContent = JSON.stringify(data, null, 2);
     }
+    function formatMoney(value, currency){
+      const amount = Number(value);
+      const code = (typeof currency === "string" && currency ? currency : "usd").toUpperCase();
+      if (!Number.isFinite(amount)) return "$0.00";
+      try {
+        return new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: code,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        }).format(amount);
+      } catch (_error) {
+        return "$" + amount.toFixed(2);
+      }
+    }
+    function setBillingFlowStatus(message){
+      setText("billingFlowStatus", message || "Billing flow idle.");
+    }
+    function renderBillingOverview(payload){
+      const data = payload && typeof payload === "object" ? payload : {};
+      const billing = data.billing && typeof data.billing === "object" ? data.billing : {};
+      const estimate = data.pendingInvoiceEstimate && typeof data.pendingInvoiceEstimate === "object"
+        ? data.pendingInvoiceEstimate
+        : {};
+      setText("billingProvider", billing.provider || "Not configured");
+      setText("billingStatusText", billing.billingStatus || "Not configured");
+      setText("billingDefaultMethod", billing.defaultPaymentMethodId || "Not set");
+      setText("billingPendingTotal", formatMoney(estimate.totalUsd || 0, estimate.currency || "usd"));
+    }
+    function renderBillingFlowStatusFromQuery(){
+      if (!byId("billingFlowStatus")) return;
+      const billingState = SEARCH.get("billing") || "";
+      if (billingState === "success") {
+        setBillingFlowStatus("Stripe checkout completed. Refreshing billing state.");
+      } else if (billingState === "cancel") {
+        setBillingFlowStatus("Stripe checkout canceled. No payment method was changed.");
+      } else {
+        setBillingFlowStatus("Billing flow idle.");
+      }
+    }
 
     async function api(path, options){
       const init = options || {};
@@ -263,10 +303,15 @@ export function getAppScript(turnstileKey = ""): string {
       if (!authState) {
         renderAuthSessions({ sessions: [] });
         pretty("billingSummary", {});
+        renderBillingOverview({});
+        renderBillingFlowStatusFromQuery();
         return;
       }
       renderAuthSessions(await api("/api/auth/sessions"));
-      pretty("billingSummary", await api("/api/workspaces/current/billing"));
+      const billing = await api("/api/workspaces/current/billing");
+      pretty("billingSummary", billing);
+      renderBillingOverview(billing);
+      renderBillingFlowStatusFromQuery();
     }
 
     async function refreshAll(){
@@ -424,6 +469,52 @@ export function getAppScript(turnstileKey = ""): string {
       });
       await refreshAll();
     }
+    async function startStripeCheckout(){
+      const successUrl = new URL("/profile", window.location.origin);
+      successUrl.searchParams.set("billing", "success");
+      const cancelUrl = new URL("/profile", window.location.origin);
+      cancelUrl.searchParams.set("billing", "cancel");
+      setBillingFlowStatus("Opening secure Stripe checkout...");
+      const created = await api("/api/workspaces/current/billing/checkout", {
+        method: "POST",
+        body: JSON.stringify({
+          successUrl: successUrl.toString(),
+          cancelUrl: cancelUrl.toString()
+        })
+      });
+      const checkoutUrl = created && created.checkoutSession ? created.checkoutSession.url : "";
+      if (!checkoutUrl) {
+        throw new Error("Checkout session URL missing");
+      }
+      window.location.assign(checkoutUrl);
+    }
+    async function openStripeBillingPortal(){
+      setBillingFlowStatus("Opening Stripe billing portal...");
+      const created = await api("/api/workspaces/current/billing/portal", {
+        method: "POST",
+        body: JSON.stringify({
+          returnUrl: new URL("/profile", window.location.origin).toString()
+        })
+      });
+      const portalUrl = created && created.portalSession ? created.portalSession.url : "";
+      if (!portalUrl) {
+        throw new Error("Billing portal URL missing");
+      }
+      window.location.assign(portalUrl);
+    }
+    async function createUsageInvoice(){
+      setBillingFlowStatus("Creating usage invoice...");
+      const created = await api("/api/workspaces/current/billing/invoice", { method: "POST" });
+      if (created && created.invoice && created.invoice.hostedInvoiceUrl) {
+        setBillingFlowStatus("Invoice created. Opening hosted invoice.");
+        window.open(created.invoice.hostedInvoiceUrl, "_blank", "noopener,noreferrer");
+      } else if (created && created.invoice === null) {
+        setBillingFlowStatus("No unbilled usage yet.");
+      } else {
+        setBillingFlowStatus("Invoice created.");
+      }
+      await loadProfile();
+    }
 
     document.addEventListener("click", async function(event){
       const target = event.target instanceof Element ? event.target.closest("button,[data-action]") : null;
@@ -440,6 +531,10 @@ export function getAppScript(turnstileKey = ""): string {
         if (target.id === "saveWorkspaceButton") return await saveWorkspace();
         if (target.id === "planButton") return await upgradePlan();
         if (target.id === "authSessionsButton") return await loadProfile();
+        if (target.id === "checkoutBillingButton") return await startStripeCheckout();
+        if (target.id === "billingPortalButton") return await openStripeBillingPortal();
+        if (target.id === "billingInvoiceButton") return await createUsageInvoice();
+        if (target.id === "refreshBillingButton") return await loadProfile();
         if (target.id === "logoutAllButton") {
           await api("/api/auth/logout-all", { method: "POST" });
           clearSession();
@@ -467,6 +562,7 @@ export function getAppScript(turnstileKey = ""): string {
       if (SEARCH.get("email")) {
         setValue("email", SEARCH.get("email") || "");
       }
+      renderBillingFlowStatusFromQuery();
       if (getCliLoginState()) {
         setEmailCodeStatus("Sending sign-in code to your email…");
         if (!TURNSTILE_KEY && getValue("email")) {
