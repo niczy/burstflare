@@ -571,13 +571,6 @@ function requireWriteAccess(state, token, clock) {
   return auth;
 }
 
-function requireTemplateAccess(state, authToken, templateId, clock) {
-  const auth = requireAuth(state, authToken, clock);
-  const template = state.templates.find((entry) => entry.id === templateId && entry.workspaceId === auth.workspace.id);
-  ensure(template, "Template not found", 404);
-  return { ...auth, template };
-}
-
 function requireInstanceAccess(state, authToken, instanceId, clock) {
   const auth = requireAuth(state, authToken, clock);
   const instance = state.instances.find((entry) => entry.id === instanceId && entry.userId === auth.user.id);
@@ -820,9 +813,8 @@ export function createBurstFlareService(options: any = {}) {
   const AUTH_DEVICE_SCOPE = [...AUTH_SCOPE, "deviceCodes", "usageEvents"];
   const WORKSPACE_SCOPE = [...AUTH_DEVICE_SCOPE];
   const INSTANCE_SCOPE = [...AUTH_SCOPE, "instances"];
-  const TEMPLATE_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "templateBuilds", "bindingReleases", "sessions", "uploadGrants"];
-  const SESSION_SCOPE = [...AUTH_SCOPE, "instances", "templates", "templateVersions", "sessions", "sessionEvents", "snapshots", "usageEvents"];
-  const ADMIN_SCOPE = [...TEMPLATE_SCOPE, "deviceCodes", "sessionEvents", "snapshots", "usageEvents"];
+  const SESSION_SCOPE = [...AUTH_SCOPE, "instances", "sessions", "sessionEvents", "snapshots", "usageEvents"];
+  const ADMIN_SCOPE = [...AUTH_SCOPE, "instances", "deviceCodes", "sessions", "sessionEvents", "snapshots", "usageEvents", "uploadGrants"];
   const TRANSACTION_ERROR = Symbol("transactionError");
 
   async function transact(collections, work) {
@@ -3062,36 +3054,12 @@ export function createBurstFlareService(options: any = {}) {
           ensure(payload.byteLength === uploadGrant.expectedBytes, "Upload body size does not match grant");
         }
 
+        if (uploadGrant.kind === "template_bundle") {
+          failLegacyTemplateBackendRemoved();
+        }
+
         uploadGrant.usedAt = nowIso(clock);
         const effectiveContentType = contentType || uploadGrant.contentType || "application/octet-stream";
-
-        if (uploadGrant.kind === "template_bundle") {
-          const workspace = state.workspaces.find((entry) => entry.id === uploadGrant.workspaceId);
-          ensure(workspace, "Workspace not found", 404);
-          const template = state.templates.find(
-            (entry) => entry.id === uploadGrant.templateId && entry.workspaceId === uploadGrant.workspaceId
-          );
-          ensure(template, "Template not found", 404);
-          const templateVersion = state.templateVersions.find(
-            (entry) => entry.id === uploadGrant.templateVersionId && entry.templateId === template.id
-          );
-          ensure(templateVersion, "Template version not found", 404);
-          const uploaded = await storeTemplateBundleUpload({
-            state,
-            clock,
-            objects,
-            workspace,
-            template,
-            templateVersion,
-            actorUserId: uploadGrant.actorUserId,
-            body: payload,
-            contentType: effectiveContentType
-          });
-          return {
-            target: "template_bundle",
-            ...uploaded
-          };
-        }
 
         if (uploadGrant.kind === "snapshot") {
           const workspace = state.workspaces.find((entry) => entry.id === uploadGrant.workspaceId);
