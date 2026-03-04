@@ -5,10 +5,7 @@ ARG TARGETARCH=amd64
 
 WORKDIR /src
 
-COPY apps/runtime-agent/go.mod ./go.mod
-COPY apps/runtime-agent/go.sum ./go.sum
-COPY apps/runtime-agent/main.go ./main.go
-COPY apps/runtime-agent/agent ./agent
+COPY runtime-agent/ /src/
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/burstflare-runtime .
 
