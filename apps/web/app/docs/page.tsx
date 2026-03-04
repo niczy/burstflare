@@ -1,5 +1,6 @@
 import { styles } from "../../src/assets.js";
 import { SiteNav, siteNavStyles } from "../components/site-nav.js";
+import { getAppScript } from "../lib/app-script.js";
 
 export const metadata = {
   title: "Docs - BurstFlare",
@@ -7,6 +8,12 @@ export const metadata = {
 };
 
 export default function DocsPage() {
+  const turnstileKey =
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ||
+    process.env.TURNSTILE_SITE_KEY ||
+    "";
+  const appScript = getAppScript(turnstileKey);
+
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: styles }} />
@@ -45,6 +52,7 @@ flare instance push <instance-id>
 flare instance pull <instance-id>`}</pre>
         </section>
       </main>
+      <script type="module" dangerouslySetInnerHTML={{ __html: appScript }} />
     </>
   );
 }

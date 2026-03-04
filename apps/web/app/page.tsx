@@ -1,5 +1,6 @@
 import { styles } from "../src/assets.js";
 import { SiteNav, siteNavStyles } from "./components/site-nav.js";
+import { getAppScript } from "./lib/app-script.js";
 
 export const metadata = {
   title: "BurstFlare",
@@ -7,6 +8,12 @@ export const metadata = {
 };
 
 export default function HomePage() {
+  const turnstileKey =
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ||
+    process.env.TURNSTILE_SITE_KEY ||
+    "";
+  const appScript = getAppScript(turnstileKey);
+
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: styles }} />
@@ -57,6 +64,7 @@ flare ssh <session-id>`}</pre>
           </div>
         </section>
       </main>
+      <script type="module" dangerouslySetInnerHTML={{ __html: appScript }} />
     </>
   );
 }

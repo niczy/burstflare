@@ -4,6 +4,7 @@ export function getAppScript(turnstileKey = ""): string {
     const TOKEN_KEY = "burstflare_token";
     const REFRESH_KEY = "burstflare_refresh_token";
     const SEARCH = new URLSearchParams(window.location.search);
+    let authState = null;
     const TURNSTILE_RENDER_STATE = {
       rendered: false,
       attempts: 0,
@@ -26,6 +27,23 @@ export function getAppScript(turnstileKey = ""): string {
     function clearSession(){
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(REFRESH_KEY);
+    }
+    function setNavState(auth){
+      const session = byId("navSessionState");
+      const cta = byId("navPrimaryCta");
+      const profile = byId("navProfileLink");
+      if (session) {
+        session.textContent = auth && auth.user
+          ? (auth.user.name || auth.user.email || "Signed in")
+          : "Guest mode";
+      }
+      if (cta) {
+        cta.textContent = auth ? "Open app" : "Sign in";
+        cta.href = auth ? "/dashboard" : "/login";
+      }
+      if (profile) {
+        profile.href = auth ? "/profile" : "/login";
+      }
     }
     function pretty(id, data){
       const node = byId(id);
@@ -94,6 +112,21 @@ export function getAppScript(turnstileKey = ""): string {
         deviceCode: deviceCode,
         redirectUrl: redirectUrl
       };
+    }
+
+    function isCliLoginFlow(){
+      return Boolean(getCliLoginState());
+    }
+
+    function redirectTargetForSignedInState(){
+      const path = window.location.pathname || "/";
+      if (path === "/") {
+        return "/dashboard";
+      }
+      if (path === "/login" && !isCliLoginFlow()) {
+        return "/dashboard";
+      }
+      return "";
     }
 
     function renderInstances(instances){
@@ -174,23 +207,26 @@ export function getAppScript(turnstileKey = ""): string {
     }
 
     async function refreshAuth(){
-      if (!token()) {
-        setText("identity", "Not signed in");
-        setText("lastRefresh", "Last refresh: never");
-        return null;
-      }
       try {
         const data = await api("/api/auth/me");
+        authState = data || null;
+        setNavState(authState);
         const label = data && data.user ? (data.user.name || data.user.email || "Signed in") : "Signed in";
         setText("identity", label);
         setText("lastRefresh", "Last refresh: " + new Date().toLocaleTimeString());
         if (data && data.workspace) {
           setValue("workspaceName", data.workspace.name || "");
         }
+        const redirectTarget = redirectTargetForSignedInState();
+        if (redirectTarget) {
+          window.location.replace(redirectTarget);
+        }
         return data;
       } catch (error) {
         if (error && error.status === 401) {
+          authState = null;
           clearSession();
+          setNavState(null);
           setText("identity", "Not signed in");
           setText("lastRefresh", "Last refresh: never");
           return null;
@@ -201,7 +237,7 @@ export function getAppScript(turnstileKey = ""): string {
 
     async function loadDashboard(){
       if (!byId("instances") && !byId("sessions")) return;
-      if (!token()) {
+      if (!authState) {
         renderInstances([]);
         renderSessions([]);
         pretty("usage", {});
@@ -220,7 +256,7 @@ export function getAppScript(turnstileKey = ""): string {
 
     async function loadProfile(){
       if (!byId("authSessions") && !byId("billingSummary")) return;
-      if (!token()) {
+      if (!authState) {
         renderAuthSessions({ sessions: [] });
         pretty("billingSummary", {});
         return;
@@ -242,13 +278,11 @@ export function getAppScript(turnstileKey = ""): string {
 
     async function sendSignInCode(){
       const email = getValue("email");
-      const name = getValue("name");
       const turnstileToken = getValue("turnstileToken");
       const requested = await api("/api/auth/email-code/request", {
         method: "POST",
         body: JSON.stringify({
           email: email,
-          name: name,
           kind: "browser",
           turnstileToken: turnstileToken
         })
@@ -331,32 +365,20 @@ export function getAppScript(turnstileKey = ""): string {
     }
 
     async function handleAuth(action){
-      const email = getValue("email");
-      const name = getValue("name");
-      const turnstileToken = getValue("turnstileToken");
-      const recoveryCode = getValue("recoveryCode");
-      if (action === "register") {
-        storeSession(await api("/api/auth/register", {
-          method: "POST",
-          body: JSON.stringify({ email: email, name: name, turnstileToken: turnstileToken })
-        }));
-      } else if (action === "login") {
+      if (action === "login") {
         await sendSignInCode();
         return;
       } else if (action === "verify-email-code") {
         await verifyEmailCode();
         return;
-      } else if (action === "recover") {
-        storeSession(await api("/api/auth/recover", {
-          method: "POST",
-          body: JSON.stringify({ email: email, code: recoveryCode, turnstileToken: turnstileToken })
-        }));
       } else if (action === "logout") {
         await api("/api/auth/logout", {
           method: "POST",
           body: JSON.stringify({ refreshToken: refreshToken() })
         });
+        authState = null;
         clearSession();
+        setNavState(null);
       }
       await refreshAll();
     }
@@ -405,10 +427,8 @@ export function getAppScript(turnstileKey = ""): string {
       const target = event.target instanceof Element ? event.target.closest("button,[data-action]") : null;
       if (!target) return;
       try {
-        if (target.id === "registerButton") return await handleAuth("register");
         if (target.id === "loginButton") return await handleAuth("login");
         if (target.id === "verifyEmailCodeButton") return await handleAuth("verify-email-code");
-        if (target.id === "recoverButton") return await handleAuth("recover");
         if (target.id === "logoutButton") return await handleAuth("logout");
         if (target.id === "refreshButton" || target.id === "refreshProfileButton") return await refreshAll();
         if (target.id === "createInstanceButton") return await createInstance();
@@ -443,24 +463,42 @@ export function getAppScript(turnstileKey = ""): string {
 
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", function(){
-        if (!getValue("email") && SEARCH.get("email")) {
+        if (SEARCH.get("email")) {
           setValue("email", SEARCH.get("email") || "");
         }
         if (getCliLoginState()) {
           setEmailCodeStatus("Complete browser sign-in, then this page will finish the pending CLI login.");
         }
+        setNavState(null);
         renderTurnstile();
         refreshAll();
+        window.addEventListener("storage", function(event){
+          if (!event || !event.key || event.key === TOKEN_KEY || event.key === REFRESH_KEY) {
+            refreshAll();
+          }
+        });
+        window.addEventListener("focus", function(){
+          refreshAll();
+        });
       });
     } else {
-      if (!getValue("email") && SEARCH.get("email")) {
+      if (SEARCH.get("email")) {
         setValue("email", SEARCH.get("email") || "");
       }
       if (getCliLoginState()) {
         setEmailCodeStatus("Complete browser sign-in, then this page will finish the pending CLI login.");
       }
+      setNavState(null);
       renderTurnstile();
       refreshAll();
+      window.addEventListener("storage", function(event){
+        if (!event || !event.key || event.key === TOKEN_KEY || event.key === REFRESH_KEY) {
+          refreshAll();
+        }
+      });
+      window.addEventListener("focus", function(){
+        refreshAll();
+      });
     }
   })();`;
 }

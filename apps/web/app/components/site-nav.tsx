@@ -7,16 +7,29 @@ export function SiteNav({ active }: { active?: Page }) {
         <span className="site-nav-wordmark">BurstFlare</span>
       </a>
       <div className="site-nav-links">
-        <a href="/dashboard" className={`site-nav-link${active === "dashboard" ? " site-nav-link--active" : ""}`}>
+        <span className="site-nav-session" id="navSessionState">Guest mode</span>
+        <a
+          id="navDashboardLink"
+          href="/dashboard"
+          className={`site-nav-link${active === "dashboard" ? " site-nav-link--active" : ""}`}
+        >
           Dashboard
         </a>
-        <a href="/profile" className={`site-nav-link${active === "profile" ? " site-nav-link--active" : ""}`}>
+        <a
+          id="navProfileLink"
+          href="/profile"
+          className={`site-nav-link${active === "profile" ? " site-nav-link--active" : ""}`}
+        >
           Profile
         </a>
         <a href="/docs" className={`site-nav-link${active === "docs" ? " site-nav-link--active" : ""}`}>
           Docs
         </a>
-        <a href="/login" className={`site-nav-cta${active === "login" ? " site-nav-link--active" : ""}`}>
+        <a
+          id="navPrimaryCta"
+          href="/login"
+          className={`site-nav-cta${active === "login" ? " site-nav-link--active" : ""}`}
+        >
           Sign in
         </a>
       </div>
@@ -55,7 +68,20 @@ export const siteNavStyles = `
 .site-nav-links {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+}
+
+.site-nav-session {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(22, 33, 40, 0.08);
+  background: rgba(255, 255, 255, 0.54);
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 760;
+  letter-spacing: 0.02em;
 }
 
 .site-nav-link {
@@ -98,6 +124,7 @@ export const siteNavStyles = `
 }
 
 @media (max-width: 540px) {
+  .site-nav-session,
   .site-nav-link { display: none; }
 }
 `;

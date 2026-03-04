@@ -8,7 +8,7 @@ export default function RawDocsPage() {
     <pre>{`BurstFlare simplified model
 
 1. Auth
-   Register or sign in to a single-owner workspace.
+   Sign in with email to open a single-owner workspace.
 
 2. Instances
    Instances define the image, env vars, secrets, persisted paths, and shared /home/flare state.
