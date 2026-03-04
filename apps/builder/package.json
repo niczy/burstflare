@@ -1,0 +1,9 @@
+{
+  "name": "@burstflare/builder",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "start": "node --import tsx/esm src/server.ts"
+  }
+}
