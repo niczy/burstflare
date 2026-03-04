@@ -4,6 +4,11 @@ export function getAppScript(turnstileKey = ""): string {
     const TOKEN_KEY = "burstflare_token";
     const REFRESH_KEY = "burstflare_refresh_token";
     const SEARCH = new URLSearchParams(window.location.search);
+    const TURNSTILE_RENDER_STATE = {
+      rendered: false,
+      attempts: 0,
+      timer: null
+    };
 
     function byId(id){ return document.getElementById(id); }
     function setText(id, value){ const node = byId(id); if (node) node.textContent = String(value || ""); }
@@ -57,7 +62,18 @@ export function getAppScript(turnstileKey = ""): string {
     }
 
     function renderTurnstile(){
-      if (!TURNSTILE_KEY || !window.turnstile || !byId("turnstileWidget")) return;
+      if (!TURNSTILE_KEY || TURNSTILE_RENDER_STATE.rendered || !byId("turnstileWidget")) return;
+      if (!window.turnstile || typeof window.turnstile.render !== "function") {
+        TURNSTILE_RENDER_STATE.attempts += 1;
+        if (TURNSTILE_RENDER_STATE.attempts <= 40 && !TURNSTILE_RENDER_STATE.timer) {
+          TURNSTILE_RENDER_STATE.timer = setTimeout(function(){
+            TURNSTILE_RENDER_STATE.timer = null;
+            renderTurnstile();
+          }, TURNSTILE_RENDER_STATE.attempts < 5 ? 100 : 250);
+        }
+        return;
+      }
+      TURNSTILE_RENDER_STATE.attempts = 0;
       window.turnstile.render("#turnstileWidget", {
         sitekey: TURNSTILE_KEY,
         callback: function(nextToken){
@@ -65,6 +81,7 @@ export function getAppScript(turnstileKey = ""): string {
           if (input) input.value = nextToken;
         }
       });
+      TURNSTILE_RENDER_STATE.rendered = true;
     }
 
     function getCliLoginState(){
