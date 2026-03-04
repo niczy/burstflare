@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     },
     {
       path: "/login",
-      required: ["Register", "Login", "Recover", "rel=\"modulepreload\""],
+      required: ["Register", "Send Sign-In Code", "Recover", "rel=\"modulepreload\""],
       forbidden: ["Passkeys", "Device approvals"]
     },
     {

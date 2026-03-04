@@ -1369,6 +1369,11 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     return matchesDomainMailbox(configuredDomain);
   }
 
+  function shouldRequireTurnstileForEmailCodeRequest(body: any): boolean {
+    const kind = String(body?.kind || "browser").trim().toLowerCase();
+    return kind !== "api";
+  }
+
   function getSessionContainer(sessionId: string): any {
     if (!hasContainerBinding()) {
       return null;
@@ -2035,6 +2040,9 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
         },
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
+          if (shouldRequireTurnstileForEmailCodeRequest(body)) {
+            await verifyTurnstile(request, body);
+          }
           const result = await service.requestEmailAuthCode(body);
           const exposeCode = shouldExposeEmailAuthCode(request, result.email);
           if (!exposeCode) {
@@ -2361,7 +2369,6 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
         },
         withErrorHandling(async (request) => {
           const body = await parseJson(await request.text());
-          await verifyTurnstile(request, body);
           return toJson(await service.deviceStart(body));
         })
       )

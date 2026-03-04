@@ -32,7 +32,7 @@ export default function LoginPage() {
         <section className="card stack" style={{ maxWidth: 760, margin: "0 auto" }}>
           <div className="card-head">
             <h1 style={{ margin: 0 }}>Sign in</h1>
-            <p>Use email for registration, browser login, recovery, or logout.</p>
+            <p>Use email for registration, send a sign-in code, verify it in the browser, recover access, or sign out.</p>
           </div>
 
           <div className="row">
@@ -60,8 +60,17 @@ export default function LoginPage() {
 
           <div className="row">
             <button id="registerButton">Register</button>
-            <button className="secondary" id="loginButton">Login</button>
+            <button className="secondary" id="loginButton">Send Sign-In Code</button>
+            <button className="secondary" id="verifyEmailCodeButton">Verify Sign-In Code</button>
             <button className="secondary" id="logoutButton">Logout</button>
+          </div>
+
+          <div>
+            <label htmlFor="emailCode">Verification code</label>
+            <input id="emailCode" type="text" inputMode="numeric" placeholder="123456" />
+          </div>
+          <div className="surface-note" id="emailCodeStatus">
+            Request a verification code, then enter it here to complete browser sign-in.
           </div>
 
           <div>

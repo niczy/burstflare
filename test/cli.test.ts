@@ -24,6 +24,84 @@ function createFetch(app: { fetch: (req: Request) => Promise<Response> }) {
     );
 }
 
+function createMockStdin() {
+  const listeners = new Set<(chunk: string) => void>();
+  return {
+    isTTY: true,
+    setEncoding() {},
+    resume() {},
+    pause() {},
+    on(event: string, handler: (chunk: string) => void) {
+      if (event === "data") {
+        listeners.add(handler);
+      }
+    },
+    removeListener(event: string, handler: (chunk: string) => void) {
+      if (event === "data") {
+        listeners.delete(handler);
+      }
+    },
+    pushLine(value: string) {
+      for (const handler of [...listeners]) {
+        handler(`${value}\n`);
+      }
+    }
+  };
+}
+
+async function completeCliBrowserLogin(
+  app: { fetch: (req: Request) => Promise<Response> },
+  loginUrlValue: string,
+  label: string
+): Promise<void> {
+  const fetchImpl = createFetch(app);
+  const loginUrl = new URL(loginUrlValue);
+  const email = loginUrl.searchParams.get("email") || "";
+  const deviceCode = loginUrl.searchParams.get("device_code") || "";
+  const cliRedirect = loginUrl.searchParams.get("cli_redirect") || "";
+
+  const deliveryResponse = await fetchImpl(`${loginUrl.origin}/api/auth/email-code/request`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      email,
+      name: label
+    })
+  });
+  const delivery = await deliveryResponse.json();
+
+  const verifyResponse = await fetchImpl(`${loginUrl.origin}/api/auth/email-code/verify`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      email,
+      code: delivery.code
+    })
+  });
+  const verified = await verifyResponse.json();
+
+  await fetchImpl(`${loginUrl.origin}/api/cli/device/approve`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${verified.token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      deviceCode
+    })
+  });
+
+  if (cliRedirect) {
+    const redirectTarget = new URL(cliRedirect);
+    redirectTarget.searchParams.set("device_code", deviceCode);
+    await fetch(redirectTarget);
+  }
+}
+
 function toBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) {
     return value.slice();
@@ -85,6 +163,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
   const bundlePath = path.join(os.tmpdir(), `flare-bundle-${Date.now()}.txt`);
   const exportPath = path.join(os.tmpdir(), `flare-export-${Date.now()}.json`);
   const toolDir = path.join(os.tmpdir(), `flare-tools-${Date.now()}`);
+  const cliEmail = "smoke_test+cli@burstflare.dev";
 
   try {
     await writeFile(bundlePath, "cli bundle payload");
@@ -94,7 +173,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
     await writeFile(path.join(toolDir, "ssh-keygen"), "#!/bin/sh\nexit 0\n");
     await chmod(path.join(toolDir, "ssh-keygen"), 0o755);
 
-    let code = await runCli(["auth", "register", "--email", "cli@example.com", "--name", "CLI User", "--url", "http://local"], {
+    let code = await runCli(["auth", "register", "--email", cliEmail, "--name", "CLI User", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -156,7 +235,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
 
     stdout.data = "";
 
-    code = await runCli(["auth", "device-start", "--email", "cli@example.com", "--url", "http://local"], {
+    code = await runCli(["auth", "device-start", "--email", cliEmail, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -213,7 +292,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
     });
     assert.equal(code, 0);
     const whoamiOutput = JSON.parse(stdout.data.trim());
-    assert.equal(whoamiOutput.user.email, "cli@example.com");
+    assert.equal(whoamiOutput.user.email, cliEmail);
     const refreshedConfig = JSON.parse(await readFile(configPath, "utf8"));
     assert.notEqual(refreshedConfig.token, "browser_invalid");
 
@@ -627,10 +706,15 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
 
     stdout.data = "";
 
-    code = await runCli(["auth", "login", "--email", "cli@example.com", "--url", "http://local"], {
+    const loginStdin = createMockStdin();
+    code = await runCli(["auth", "login", "--email", cliEmail, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
+      stdin: loginStdin,
+      openUrlImpl: async (loginUrl: string) => {
+        await completeCliBrowserLogin(app, loginUrl, "CLI User");
+      },
       configPath
     });
     assert.equal(code, 0);
@@ -701,7 +785,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
 
     stdout.data = "";
 
-    code = await runCli(["auth", "recover", "--email", "cli@example.com", "--code", recoveryCode, "--url", "http://local"], {
+    code = await runCli(["auth", "recover", "--email", cliEmail, "--code", recoveryCode, "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,

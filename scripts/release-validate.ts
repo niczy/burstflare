@@ -80,7 +80,7 @@ async function signInWithEmailCode(baseUrl: string, email: string, name: string)
     body: JSON.stringify({
       email,
       name,
-      kind: "browser"
+      kind: "api"
     })
   });
   if (!delivery.code) {
