@@ -94,10 +94,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div>
-              <label htmlFor="turnstileToken">Verification token</label>
-              <input id="turnstileToken" type="text" placeholder="Only needed for local testing." />
-            </div>
+            <input id="turnstileToken" type="hidden" />
 
             <div className="row">
               <button id="loginButton">Send Sign-In Code</button>

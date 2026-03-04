@@ -965,10 +965,7 @@ flare ssh &lt;sessionId&gt;</pre>
             <label>Verification Challenge</label>
             <div class="turnstile-shell muted" id="turnstileWidget">The verification challenge loads automatically in the hosted app.</div>
           </div>
-          <div>
-            <label for="turnstileToken">Verification Token</label>
-            <input id="turnstileToken" type="text" placeholder="Leave blank unless you are testing a local environment" />
-          </div>
+          <input id="turnstileToken" type="hidden" />
           <div class="row">
             <button id="registerButton">Register</button>
             <button class="secondary" id="loginButton">Login</button>
