@@ -575,69 +575,6 @@ function createBillingCatalog(options: any): { currency: string; runtimeMinuteUs
   };
 }
 
-function createManagedInstanceBuilder(options: any): any {
-  const remoteBuildUrl = String(options.REMOTE_BUILD_URL || "").trim();
-  const remoteBuildToken = String(options.REMOTE_BUILD_TOKEN || "").trim();
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
-
-  if (!remoteBuildUrl) {
-    return {
-      mode: "manifest"
-    };
-  }
-
-  return {
-    mode: "remote-http",
-    async buildManagedInstanceRuntime({
-      instance,
-      buildId,
-      builtAt
-    }: {
-      instance: any;
-      buildId: string;
-      builtAt: string;
-    }): Promise<any> {
-      const response = await fetchImpl(remoteBuildUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          ...(remoteBuildToken ? { authorization: `Bearer ${remoteBuildToken}` } : {})
-        },
-        body: JSON.stringify({
-          instanceId: instance.id,
-          buildId,
-          builtAt,
-          baseImage: instance.baseImage || instance.image || "",
-          dockerfilePath: instance.dockerfilePath || null,
-          dockerContext: instance.dockerContext || null,
-          bootstrapVersion: instance.bootstrapVersion || "v1"
-        })
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data || typeof data !== "object") {
-        throw new Error(`Remote builder request failed (${response.status})`);
-      }
-      const managedRuntimeImage = String((data as any).managedRuntimeImage || (data as any).image || "").trim();
-      const managedImageDigest = String((data as any).managedImageDigest || (data as any).digest || "").trim();
-      if (!managedRuntimeImage || !managedImageDigest) {
-        throw new Error("Remote builder returned an incomplete build result");
-      }
-      return {
-        managedRuntimeImage,
-        managedImageDigest,
-        artifactKey: typeof (data as any).artifactKey === "string" ? (data as any).artifactKey : undefined,
-        artifactBody:
-          typeof (data as any).artifactBody === "string" ||
-          (data as any).artifactBody instanceof Uint8Array ||
-          (data as any).artifactBody instanceof ArrayBuffer
-            ? (data as any).artifactBody
-            : undefined,
-        artifactContentType: typeof (data as any).artifactContentType === "string" ? (data as any).artifactContentType : undefined
-      };
-    }
-  };
-}
-
 function usdToMinorUnits(amountUsd: unknown): number {
   const cents = Math.round(Number(amountUsd || 0) * 100);
   if (!Number.isFinite(cents) || cents < 0) {
@@ -909,24 +846,11 @@ async function parseStripeWebhookEvent(request: Request, options: any): Promise<
 }
 
 function createJobQueue(options: any): any {
-  if (!options.RECONCILE_QUEUE && !options.BUILD_QUEUE) {
+  if (!options.RECONCILE_QUEUE) {
     return null;
   }
 
   return {
-    async enqueueInstanceBuild(instanceId: string, buildId: string, reason = "refresh") {
-      if (!options.BUILD_QUEUE) {
-        return null;
-      }
-      await options.BUILD_QUEUE.send({
-        type: "instance-build",
-        instanceId,
-        buildId,
-        reason
-      });
-      return { ok: true };
-    },
-
     async enqueueReconcile() {
       if (!options.RECONCILE_QUEUE) {
         return null;
@@ -1234,7 +1158,6 @@ export function createWorkerService(options: any = {}): any {
     store: options.DB ? createCloudflareStateStore(options.DB) : createMemoryStore(),
     objects: createObjectStore(options),
     jobs: createJobQueue(options),
-    builder: createManagedInstanceBuilder(options),
     billing: createStripeBillingProvider(options),
     billingCatalog: createBillingCatalog(options)
   });
@@ -1403,10 +1326,7 @@ export async function handleQueueBatch(batch: any, options: any = {}): Promise<v
   const service = createWorkerService(options);
   for (const message of batch.messages) {
     const body = message.body || {};
-    if (body.type === "instance-build" && body.instanceId) {
-      await service.processSystemInstanceBuild(String(body.instanceId), body.buildId ? String(body.buildId) : null, {
-        reason: body.reason || "queue"
-      });
+    if (body.type === "instance-build" || body.type === "build") {
       continue;
     }
     if (body.type === "reconcile") {
@@ -1424,7 +1344,6 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   const rateLimiter = createRateLimiter(options);
   const turnstile = createTurnstileVerifier(options);
   const emailAuthSender = createEmailAuthSender(options);
-  const managedInstanceBuilder = createManagedInstanceBuilder(options);
   const webAuthnChallenges = createWebAuthnChallengeStore(options);
   const frontendHandler = options.frontendHandler || null;
   const getFrontendAssetResponse = options.getFrontendAssetResponse || null;
@@ -2106,8 +2025,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           runtime: {
             containersEnabled: hasContainerBinding(),
             turnstileEnabled: turnstile.enabled,
-            workflowEnabled: false,
-            buildDispatchMode: managedInstanceBuilder.mode
+            workflowEnabled: false
           }
         })
     },

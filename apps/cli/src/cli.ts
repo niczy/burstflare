@@ -585,7 +585,6 @@ const HELP_CATALOG: HelpSection[] = [
             usageTail: "<instanceId> [--name <name>] [--description <text>] [--image <base-image>] [--dockerfile <path>] [--context <path>] [--env <KEY=value,...>] [--secret <KEY=value,...>] [--clear-env] [--clear-secrets]",
             summary: "Update an existing instance."
           },
-          { name: "rebuild", usageTail: "<instanceId>", summary: "Refresh the server-managed runtime metadata from the saved source config." },
           { name: "push", usageTail: "<instanceId>", summary: "Capture /home/flare from a running session into the instance common state." },
           { name: "pull", usageTail: "<instanceId>", summary: "Apply the saved /home/flare common state into running sessions." },
           { name: "delete", usageTail: "<instanceId>", summary: "Delete an instance." }
@@ -2048,49 +2047,6 @@ export async function runCli(
         print(stdout, JSON.stringify(data, null, 2));
         return 0;
       }
-
-      if (subcommand === "rebuild") {
-        const instanceId = rest[0];
-        if (!instanceId) {
-          throw createCliError("Instance id is required", 400);
-        }
-        const current = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
-          headers: headers(undefined, false)
-        });
-        const imageInput = await prepareInstanceImage({
-          name: current.instance.name,
-          image: current.instance.baseImage || current.instance.image,
-          dockerfilePath: current.instance.dockerfilePath,
-          dockerContext: current.instance.dockerContext
-        });
-        const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
-          method: "PATCH",
-          headers: headers(undefined),
-          body: JSON.stringify({
-            baseImage: imageInput.image,
-            dockerfilePath: imageInput.dockerfilePath,
-            dockerContext: imageInput.dockerContext
-          })
-        });
-        print(
-          stdout,
-          JSON.stringify(
-            {
-              ...data,
-              rebuild: {
-                baseImage: imageInput.image,
-                managedImageDigest: data?.instance?.managedImageDigest || null,
-                dockerfilePath: imageInput.dockerfilePath,
-                dockerContext: imageInput.dockerContext
-              }
-            },
-            null,
-            2
-          )
-        );
-        return 0;
-      }
-
       if (subcommand === "delete") {
         const instanceId = rest[0];
         const data = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {

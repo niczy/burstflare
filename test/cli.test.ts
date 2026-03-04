@@ -1340,22 +1340,6 @@ test("cli stores docker source metadata without local docker builds", async () =
     assert.equal(spawned.length, 0);
     stdout.data = "";
 
-    code = await runCli(["instance", "rebuild", created.instance.id, "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath,
-      spawnImpl
-    });
-    assert.equal(code, 0);
-    const rebuilt = JSON.parse(stdout.data.trim());
-    assert.equal(rebuilt.instance.id, created.instance.id);
-    assert.equal(rebuilt.rebuild.baseImage, created.instance.baseImage);
-    assert.match(rebuilt.rebuild.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
-    assert.notEqual(rebuilt.rebuild.managedImageDigest, created.instance.managedImageDigest);
-    assert.equal(rebuilt.rebuild.dockerfilePath, "./Dockerfile");
-    assert.equal(rebuilt.rebuild.dockerContext, ".");
-    assert.equal(spawned.length, 0);
   } finally {
     await rm(configPath, { force: true });
   }
