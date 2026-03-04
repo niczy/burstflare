@@ -4,7 +4,7 @@ import { getAppScript } from "./lib/app-script.js";
 
 export const metadata = {
   title: "BurstFlare",
-  description: "Create an instance, launch a session, and share /home/flare state across restarts."
+  description: "Spin up ready-to-code cloud workspaces in minutes with shared instance state and per-session state that stays yours."
 };
 
 export default function HomePage() {
@@ -24,42 +24,42 @@ export default function HomePage() {
         <section className="card stack" style={{ padding: 32 }}>
           <div className="card-head">
             <h1 style={{ margin: 0, fontSize: "clamp(2rem, 5vw, 4rem)", lineHeight: 1, letterSpacing: "-0.05em" }}>
-              Instances first.
+              Ship faster with reusable cloud workspaces.
             </h1>
             <p style={{ maxWidth: 720 }}>
-              BurstFlare is now centered on one loop: define an instance, launch sessions from it,
-              and keep shared files in <code>/home/flare</code> without extra packaging steps.
+              Launch production-ready dev sessions in minutes, share one golden instance baseline with your team,
+              and combine synced <code>/home/flare</code> state with each session's own local state for focused work.
             </p>
           </div>
 
           <div className="grid grid-3">
             <div className="surface-note">
               <strong>1. Create</strong>
-              <span>Use a registry image or a Dockerfile source.</span>
+              <span>Start from a proven base image like <code>ubuntu:24.04</code> or <code>debian:12</code>.</span>
             </div>
             <div className="surface-note">
               <strong>2. Launch</strong>
-              <span>Start one or many sessions from the same instance.</span>
+              <span>Launch one or many sessions that share the instance baseline, each with its own writable state.</span>
             </div>
             <div className="surface-note">
               <strong>3. Sync</strong>
-              <span>Push and pull <code>/home/flare</code> between running sessions and object storage.</span>
+              <span>Sync shared <code>/home/flare</code> while preserving each session's own changes for experiments.</span>
             </div>
           </div>
 
-          <pre className="code-block">{`flare instance create node-dev --image node:20
-flare session up sandbox --instance <instance-id>
-flare ssh <session-id>`}</pre>
+          <pre className="code-block">{`flare instance create node-dev --image ubuntu:24.04
+flare session up sandbox --instance <instanceId>
+flare ssh <sessionId>`}</pre>
 
           <div className="row">
             <a className="secondary" href="/dashboard" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
-              Open dashboard
+              Try the dashboard
             </a>
             <a className="secondary" href="/docs" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
               Read docs
             </a>
             <a href="/login" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
-              Sign in
+              Get started free
             </a>
           </div>
         </section>
