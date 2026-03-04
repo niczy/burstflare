@@ -12,7 +12,7 @@ COPY apps/runtime-agent/agent ./agent
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/burstflare-runtime .
 
-FROM node:20-alpine
+FROM alpine:3.20
 
 RUN apk add --no-cache openssh-server openssh-sftp-server \
   && adduser -D flare \
@@ -20,11 +20,7 @@ RUN apk add --no-cache openssh-server openssh-sftp-server \
   && mkdir -p /run/sshd /var/run/sshd /home/flare/.ssh \
   && chown -R flare:flare /home/flare
 
-WORKDIR /app
-
 COPY --from=burstflare-runtime-build /out/burstflare-runtime /usr/local/bin/burstflare-runtime
-COPY containers/session/server.mjs /app/server.mjs
-COPY containers/session/runtime-contract.mjs /app/runtime-contract.mjs
 
 ENV PORT=8080
 

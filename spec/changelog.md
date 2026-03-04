@@ -109,7 +109,7 @@ This file records what has already been implemented in the repository and what h
 
 - Added the Cloudflare Containers dependency.
 - Added the session container image in `containers/session/Dockerfile`.
-- Added the container HTTP service in `containers/session/server.mjs`.
+- Added the original container HTTP service in `containers/session/server.mjs` (now superseded by the Go runtime agent).
 - Added conditional Wrangler generation for:
   - Durable Object bindings
   - Durable Object migrations
