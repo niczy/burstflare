@@ -49,7 +49,6 @@ const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
 const EMAIL_AUTH_CODE_TTL_MS = 1000 * 60 * 10;
 const UPLOAD_GRANT_TTL_MS = 1000 * 60 * 10;
 const MAX_BUILD_ATTEMPTS = 3;
-const STUCK_BUILD_TTL_MS = 1000 * 60 * 5;
 const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const MAX_COMMON_STATE_BYTES = 512 * 1024;
@@ -1541,33 +1540,13 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
       }
     }
 
-    const buildRecords = getWorkspaceBuildRecords(state, workspaceId);
-    const stuckBuilds = [];
-    const queuedBuilds = [];
-
-    for (const record of buildRecords) {
-      if (["queued", "retrying"].includes(record.build.status)) {
-        queuedBuilds.push(record);
-      }
-      if (record.build.status !== "building") {
-        continue;
-      }
-      const referenceTime = record.build.startedAt || record.build.updatedAt || record.build.createdAt;
-      if (!referenceTime) {
-        continue;
-      }
-      if (checkedAtMs - new Date(referenceTime).getTime() >= STUCK_BUILD_TTL_MS) {
-        stuckBuilds.push(record);
-      }
-    }
-
     return {
       checkedAt: new Date(checkedAtMs).toISOString(),
       runningSessions,
       staleSleepingSessions,
       deletedSessions,
-      stuckBuilds,
-      queuedBuilds
+      stuckBuilds: [],
+      queuedBuilds: []
     };
   }
 
@@ -1609,112 +1588,6 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
     return {
       sleptSessions: sleptSessionIds.length,
       sessionIds: sleptSessionIds
-    };
-  }
-
-  async function recoverStuckBuildsInState(
-    state,
-    { workspaceId = null, actorUserId = null, source = "reconcile" }: any = {}
-  ) {
-    const candidates = getReconcileCandidates(state, workspaceId);
-    const recoveredBuildIds = [];
-
-    for (const record of candidates.stuckBuilds) {
-      const recoveredAt = nowIso(clock);
-      record.build.updatedAt = recoveredAt;
-      record.build.lastError = "Reconcile recovered stuck build";
-      record.build.lastFailureAt = recoveredAt;
-      record.version.status = "queued";
-
-      if (record.build.attempts >= MAX_BUILD_ATTEMPTS) {
-        record.build.status = "dead_lettered";
-        record.build.deadLetteredAt = recoveredAt;
-        if (record.build.dispatchMode === "workflow") {
-          record.build.workflowStatus = "dead_lettered";
-          record.build.workflowFinishedAt = recoveredAt;
-        }
-        writeAudit(state, clock, {
-          action: "template.build_dead_lettered",
-          actorUserId,
-          workspaceId: record.template.workspaceId,
-          targetType: "template_build",
-          targetId: record.build.id,
-          details: {
-            templateId: record.template.id,
-            templateVersionId: record.version.id,
-            source,
-            attempts: record.build.attempts,
-            maxAttempts: MAX_BUILD_ATTEMPTS,
-            error: record.build.lastError
-          }
-        });
-      } else {
-        record.build.status = "retrying";
-        record.build.deadLetteredAt = null;
-        await enqueueBuildDispatch({ jobs, build: record.build, clock });
-        writeAudit(state, clock, {
-          action: "template.build_recovered",
-          actorUserId,
-          workspaceId: record.template.workspaceId,
-          targetType: "template_build",
-          targetId: record.build.id,
-          details: {
-            templateId: record.template.id,
-            templateVersionId: record.version.id,
-            source,
-            attempts: record.build.attempts,
-            maxAttempts: MAX_BUILD_ATTEMPTS
-          }
-        });
-      }
-      recoveredBuildIds.push(record.build.id);
-    }
-
-    return {
-      recoveredStuckBuilds: recoveredBuildIds.length,
-      buildIds: recoveredBuildIds
-    };
-  }
-
-  async function processQueuedBuildsInState(
-    state,
-    { workspaceId = null, actorUserId = null, source = "reconcile" }: any = {}
-  ) {
-    const processedBuildIds = [];
-
-    for (const record of getWorkspaceBuildRecords(state, workspaceId)) {
-      if (!["queued", "retrying"].includes(record.build.status)) {
-        continue;
-      }
-      if (jobs?.buildStrategy === "workflow") {
-        if (["queued", "running"].includes(record.build.workflowStatus)) {
-          continue;
-        }
-        const dispatched = await enqueueBuildDispatch({ jobs, build: record.build, clock });
-        if (dispatched) {
-          processedBuildIds.push(record.build.id);
-        }
-        continue;
-      }
-      const processedBuild = await processBuildRecord({
-        state,
-        clock,
-        objects,
-        jobs,
-        build: record.build,
-        template: record.template,
-        templateVersion: record.version,
-        source,
-        actorUserId
-      });
-      if (processedBuild) {
-        processedBuildIds.push(record.build.id);
-      }
-    }
-
-    return {
-      processedBuilds: processedBuildIds.length,
-      buildIds: processedBuildIds
     };
   }
 
@@ -3434,10 +3307,7 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
     },
 
     async retryDeadLetteredBuilds() {
-      return {
-        recovered: 0,
-        buildIds: []
-      };
+      failLegacyTemplateBackendRemoved();
     },
 
     async promoteTemplateVersion() {
@@ -4205,12 +4075,8 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
 
     async recoverStuckBuilds(token) {
       return transact(ADMIN_SCOPE, async (state) => {
-        const auth = requireManageWorkspace(state, token, clock);
-        return recoverStuckBuildsInState(state, {
-          workspaceId: auth.workspace.id,
-          actorUserId: auth.user.id,
-          source: "operator"
-        });
+        requireManageWorkspace(state, token, clock);
+        failLegacyTemplateBackendRemoved();
       });
     },
 
@@ -4340,18 +4206,6 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
           reason: "reconcile"
         });
 
-        const recovered = await recoverStuckBuildsInState(state, {
-          workspaceId,
-          actorUserId: auth?.user.id || null,
-          source: "reconcile"
-        });
-
-        const processed = await processQueuedBuildsInState(state, {
-          workspaceId,
-          actorUserId: auth?.user.id || null,
-          source: "reconcile"
-        });
-
         const candidates = getReconcileCandidates(state, workspaceId);
         const stalePurged = await purgeSessionsInState(state, candidates.staleSleepingSessions, {
           actorUserId: auth?.user.id || null,
@@ -4374,8 +4228,8 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
 
         return {
           sleptSessions: slept.sleptSessions,
-          recoveredStuckBuilds: recovered.recoveredStuckBuilds,
-          processedBuilds: processed.processedBuilds,
+          recoveredStuckBuilds: 0,
+          processedBuilds: 0,
           purgedDeletedSessions: deletedPurged.purgedSessions,
           purgedStaleSleepingSessions: stalePurged.purgedSessions,
           purgedSnapshots: stalePurged.purgedSnapshots + deletedPurged.purgedSnapshots

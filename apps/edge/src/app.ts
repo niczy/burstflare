@@ -2969,17 +2969,6 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     },
     {
       method: "POST",
-      pattern: "/api/admin/builds/retry-dead-lettered",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.retryDeadLetteredBuilds(token));
-      })
-    },
-    {
-      method: "POST",
       pattern: "/api/admin/reconcile",
       handler: withErrorHandling(async (request) => {
         const token = requireToken(request, service);
@@ -2998,17 +2987,6 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           return unauthorized();
         }
         return toJson(await service.sleepRunningSessions(token));
-      })
-    },
-    {
-      method: "POST",
-      pattern: "/api/admin/reconcile/recover-builds",
-      handler: withErrorHandling(async (request) => {
-        const token = requireToken(request, service);
-        if (!token) {
-          return unauthorized();
-        }
-        return toJson(await service.recoverStuckBuilds(token));
       })
     },
     {

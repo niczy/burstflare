@@ -837,11 +837,7 @@ test("service rejects legacy template backend methods", async () => {
   await assert.rejects(() => service.listBindingReleases(), /Legacy template backend removed/);
   await assert.rejects(() => service.rollbackTemplate(), /Legacy template backend removed/);
 
-  const recovered = await service.retryDeadLetteredBuilds();
-  assert.deepEqual(recovered, {
-    recovered: 0,
-    buildIds: []
-  });
+  await assert.rejects(() => service.retryDeadLetteredBuilds(), /Legacy template backend removed/);
 
   await assert.rejects(
     () =>
@@ -938,11 +934,8 @@ test("service exposes targeted operator reconcile workflows", async () => {
   assert.deepEqual(preview.preview.buildIds.stuck, []);
   assert.deepEqual(preview.preview.buildIds.queued, []);
 
-  const recovered = await service.recoverStuckBuilds(owner.token);
-  assert.equal(recovered.recoveredStuckBuilds, 0);
-  assert.deepEqual(recovered.buildIds, []);
-  const recoveredAgain = await service.recoverStuckBuilds(owner.token);
-  assert.equal(recoveredAgain.recoveredStuckBuilds, 0);
+  await assert.rejects(() => service.recoverStuckBuilds(owner.token), /Legacy template backend removed/);
+  await assert.rejects(() => service.recoverStuckBuilds(owner.token), /Legacy template backend removed/);
 
   const purgedSleeping = await service.purgeStaleSleepingSessions(owner.token);
   assert.equal(purgedSleeping.purgedStaleSleepingSessions, 1);
