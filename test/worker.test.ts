@@ -517,7 +517,7 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
     headers: {
       cookie: ownerCookieHeader
     },
-    body: JSON.stringify({ name: "blocked-cookie", image: "node:20" })
+    body: JSON.stringify({ name: "blocked-cookie", image: "ubuntu:24.04" })
   });
   assert.equal(csrfBlocked.response.status, 403);
 
@@ -527,7 +527,7 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
       cookie: ownerCookieHeader,
       "x-burstflare-csrf": owner.data.csrfToken
     },
-    body: JSON.stringify({ name: "cookie-instance", image: "node:20" })
+    body: JSON.stringify({ name: "cookie-instance", image: "ubuntu:24.04" })
   });
   assert.equal(csrfAllowed.response.status, 200);
 
@@ -553,17 +553,17 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
     body: JSON.stringify({
       name: "python-dev",
       description: "Python toolchain",
-      image: "registry.cloudflare.com/test/python-dev:2.0.0"
+      image: "debian:12"
     })
   });
   assert.equal(instance.response.status, 200);
   const instanceId = instance.data.instance.id;
   assert.equal(
     queuedBuilds.some((entry: any) => entry && entry.type === "instance-build" && entry.instanceId === instanceId),
-    true
+    false
   );
-  assert.equal(instance.data.instance.buildStatus, "queued");
-  assert.equal(instance.data.instance.managedImageDigest, null);
+  assert.equal(instance.data.instance.buildStatus, "ready");
+  assert.match(instance.data.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
 
   const instanceList = await requestJson(app, "/api/instances", {
     headers: ownerHeaders

@@ -319,7 +319,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
         "--description",
         "Go runtime",
         "--image",
-        "node:20",
+        "ubuntu:24.04",
         "--env",
         "MODE=dev",
         "--secret",
@@ -337,7 +337,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
     assert.equal(code, 0);
     const instanceOutput = JSON.parse(stdout.data.trim());
     const instanceId = instanceOutput.instance.id;
-    assert.equal(instanceOutput.instance.image, "node:20");
+    assert.equal(instanceOutput.instance.image, "ubuntu:24.04");
     assert.deepEqual(instanceOutput.instance.secretNames, ["API_KEY"]);
 
     stdout.data = "";
@@ -367,7 +367,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
 
     stdout.data = "";
 
-    code = await runCli(["instance", "create", "trash-dev", "--description", "Disposable instance", "--image", "alpine:3.20", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "trash-dev", "--description", "Disposable instance", "--image", "debian:12", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1014,7 +1014,7 @@ test("cli supports noun-first aliases and local list filters", async () => {
     assert.equal(currentWorkspace.workspace.id, workspaceId);
     stdout.data = "";
 
-    code = await runCli(["instance", "create", "alias-active", "--image", "node:20", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "alias-active", "--image", "ubuntu:24.04", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1133,7 +1133,7 @@ test("cli exposes targeted operator reconcile commands", async () => {
     assert.equal(code, 0);
     stdout.data = "";
 
-    code = await runCli(["instance", "create", "operator-cli-instance", "--image", "node:20", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "operator-cli-instance", "--image", "ubuntu:24.04", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1323,7 +1323,7 @@ test("cli stores docker source metadata without local docker builds", async () =
     assert.equal(code, 0);
     stdout.data = "";
 
-    code = await runCli(["instance", "create", "docker-cli", "--image", "node:20", "--dockerfile", "./Dockerfile", "--context", ".", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "docker-cli", "--image", "ubuntu:24.04", "--dockerfile", "./Dockerfile", "--context", ".", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
@@ -1334,8 +1334,8 @@ test("cli stores docker source metadata without local docker builds", async () =
     const created = JSON.parse(stdout.data.trim());
     assert.equal(created.instance.dockerfilePath, "./Dockerfile");
     assert.equal(created.instance.dockerContext, ".");
-    assert.equal(created.instance.image, "node:20");
-    assert.equal(created.instance.baseImage, "node:20");
+    assert.equal(created.instance.image, "ubuntu:24.04");
+    assert.equal(created.instance.baseImage, "ubuntu:24.04");
     assert.match(created.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
     assert.equal(spawned.length, 0);
     stdout.data = "";

@@ -6,7 +6,7 @@ BurstFlare is a hosted workspace product for creating reusable dev environments,
 
 - account and workspace management
 - browser sessions, recovery flows, and workspace settings
-- instance creation, editing, rebuilds, and shared home-state sync
+- instance creation, editing, and shared home-state sync on a fixed managed runtime image
 - live workspace sessions with preview, terminal, editor, and SSH access
 - latest snapshots, activity history, reporting, billing, and export tools
 
@@ -38,10 +38,10 @@ flare doctor
 flare auth register --email you@example.com
 ```
 
-4. Create an instance:
+4. Create an instance (supports curated base images like `ubuntu:24.04` and `debian:12`):
 
 ```bash
-flare instance create node-dev --image node:20
+flare instance create node-dev --image ubuntu:24.04
 ```
 
 5. Launch a workspace and attach:

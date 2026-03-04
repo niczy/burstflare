@@ -55,6 +55,17 @@ const MAX_COMMON_STATE_BYTES = 512 * 1024;
 const MAX_RUNTIME_SECRETS = 32;
 const MAX_RUNTIME_SECRET_VALUE_BYTES = 4096;
 
+const DEFAULT_INSTANCE_BASE_IMAGE = "burstflare/session-runtime:v1";
+const FIXED_INSTANCE_BOOTSTRAP_VERSION = "v1";
+const SUPPORTED_INSTANCE_BASE_IMAGES = new Set([
+  DEFAULT_INSTANCE_BASE_IMAGE,
+  "ubuntu:24.04",
+  "debian:12",
+  "node:20",
+  "node:22",
+  "python:3.12"
+]);
+
 const PLANS = {
   free: {
     maxTemplates: 10,
@@ -234,15 +245,25 @@ function normalizeSleepTtlSeconds(value) {
   return value;
 }
 
+function isSupportedInstanceBaseImage(value: string): boolean {
+  return (
+    SUPPORTED_INSTANCE_BASE_IMAGES.has(value) ||
+    /^registry\.cloudflare\.com\//.test(value)
+  );
+}
+
 function resolveInstanceBaseImage(input: any): string {
   const rawValue =
     input && Object.prototype.hasOwnProperty.call(input, "baseImage") && input.baseImage != null
       ? input.baseImage
       : input && Object.prototype.hasOwnProperty.call(input, "image")
         ? input.image
-        : "";
-  const value = String(rawValue || "").trim();
-  ensure(value, "Instance base image is required");
+        : DEFAULT_INSTANCE_BASE_IMAGE;
+  const value = String(rawValue || "").trim() || DEFAULT_INSTANCE_BASE_IMAGE;
+  ensure(
+    isSupportedInstanceBaseImage(value),
+    `Instance base image must be one of: ${Array.from(SUPPORTED_INSTANCE_BASE_IMAGES).join(", ")}`
+  );
   return value;
 }
 
@@ -2676,8 +2697,9 @@ export function createBurstFlareService(options: any = {}) {
         ensure(nextName.length <= 80, "Instance name is too long");
         const runtimeSpec = resolveInstanceRuntimeSpec({
           baseImage: resolveInstanceBaseImage({ baseImage, image }),
-          dockerfilePath,
-          dockerContext
+          dockerfilePath: dockerfilePath == null ? null : String(dockerfilePath),
+          dockerContext: dockerContext == null ? null : String(dockerContext),
+          bootstrapVersion: FIXED_INSTANCE_BOOTSTRAP_VERSION
         });
         ensure(
           !state.instances.some(
@@ -2694,11 +2716,11 @@ export function createBurstFlareService(options: any = {}) {
           description: String(description || ""),
           image: runtimeSpec.baseImage,
           baseImage: runtimeSpec.baseImage,
-          managedRuntimeImage: null,
-          managedImageDigest: null,
+          managedRuntimeImage: runtimeSpec.managedRuntimeImage,
+          managedImageDigest: runtimeSpec.managedImageDigest,
           bootstrapVersion: runtimeSpec.bootstrapVersion,
           buildId: null,
-          buildStatus: "pending",
+          buildStatus: "ready",
           buildRequestedAt: null,
           buildCompletedAt: null,
           buildArtifactKey: null,
@@ -2731,7 +2753,7 @@ export function createBurstFlareService(options: any = {}) {
           instanceId: instance.id
         };
       });
-      return queueManagedInstanceBuild(created.instanceId, "created");
+      return getSystemInstanceBuild(created.instanceId);
     },
 
     async listInstances(token) {
@@ -2788,7 +2810,6 @@ export function createBurstFlareService(options: any = {}) {
     async updateInstance(token, instanceId, updates: any = {}) {
       const result = await transact(INSTANCE_SCOPE, (state) => {
         const auth = requireInstanceAccess(state, token, instanceId, clock);
-        let shouldRebuild = false;
         if (Object.prototype.hasOwnProperty.call(updates, "name")) {
           ensure(typeof updates.name === "string" && updates.name.trim(), "Instance name is required");
           const nextName = updates.name.trim();
@@ -2814,32 +2835,31 @@ export function createBurstFlareService(options: any = {}) {
           Object.prototype.hasOwnProperty.call(updates, "dockerfilePath") ||
           Object.prototype.hasOwnProperty.call(updates, "dockerContext")
         ) {
-          shouldRebuild = true;
-          const nextBaseImage = Object.prototype.hasOwnProperty.call(updates, "baseImage")
-            ? updates.baseImage
-            : Object.prototype.hasOwnProperty.call(updates, "image")
-              ? updates.image
-              : auth.instance.baseImage;
+          const nextBaseImage = resolveInstanceBaseImage({
+            baseImage: Object.prototype.hasOwnProperty.call(updates, "baseImage") ? updates.baseImage : null,
+            image: Object.prototype.hasOwnProperty.call(updates, "image") ? updates.image : auth.instance.baseImage
+          });
           const runtimeSpec = resolveInstanceRuntimeSpec({
-            baseImage: resolveInstanceBaseImage({ baseImage: nextBaseImage, image: auth.instance.image }),
-            dockerfilePath: Object.prototype.hasOwnProperty.call(updates, "dockerfilePath")
-              ? updates.dockerfilePath
-              : auth.instance.dockerfilePath,
-            dockerContext: Object.prototype.hasOwnProperty.call(updates, "dockerContext")
-              ? updates.dockerContext
-              : auth.instance.dockerContext
+            baseImage: nextBaseImage,
+            dockerfilePath: null,
+            dockerContext: null,
+            bootstrapVersion: FIXED_INSTANCE_BOOTSTRAP_VERSION
           });
           auth.instance.image = runtimeSpec.baseImage;
           auth.instance.baseImage = runtimeSpec.baseImage;
           auth.instance.managedRuntimeImage = runtimeSpec.managedRuntimeImage;
           auth.instance.managedImageDigest = runtimeSpec.managedImageDigest;
+          auth.instance.dockerfilePath = Object.prototype.hasOwnProperty.call(updates, "dockerfilePath")
+            ? updates.dockerfilePath == null
+              ? null
+              : String(updates.dockerfilePath)
+            : auth.instance.dockerfilePath;
+          auth.instance.dockerContext = Object.prototype.hasOwnProperty.call(updates, "dockerContext")
+            ? updates.dockerContext == null
+              ? null
+              : String(updates.dockerContext)
+            : auth.instance.dockerContext;
           auth.instance.bootstrapVersion = runtimeSpec.bootstrapVersion;
-        }
-        if (Object.prototype.hasOwnProperty.call(updates, "dockerfilePath")) {
-          auth.instance.dockerfilePath = updates.dockerfilePath == null ? null : String(updates.dockerfilePath);
-        }
-        if (Object.prototype.hasOwnProperty.call(updates, "dockerContext")) {
-          auth.instance.dockerContext = updates.dockerContext == null ? null : String(updates.dockerContext);
         }
         if (Object.prototype.hasOwnProperty.call(updates, "envVars")) {
           auth.instance.envVars = normalizeInstanceEnvVars(updates.envVars);
@@ -2862,13 +2882,9 @@ export function createBurstFlareService(options: any = {}) {
           targetId: auth.instance.id
         });
         return {
-          instance: formatInstance(auth.instance),
-          shouldRebuild
+          instance: formatInstance(auth.instance)
         };
       });
-      if (result.shouldRebuild) {
-        return queueManagedInstanceBuild(instanceId, "updated");
-      }
       return {
         instance: result.instance
       };
