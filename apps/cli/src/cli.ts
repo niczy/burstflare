@@ -550,11 +550,7 @@ const HELP_CATALOG: HelpSection[] = [
         commands: [
           { name: "current", usageTail: "", summary: "Show the selected workspace." },
           { name: "list", usageTail: "", summary: "List every workspace the user can access." },
-          { name: "members", usageTail: "", summary: "List members in the current workspace." },
           { name: "rename", usageTail: "<name>", summary: "Rename the current workspace." },
-          { name: "invite", usageTail: "--email <email> [--role <role>]", summary: "Invite a teammate into the workspace." },
-          { name: "accept-invite", usageTail: "--code <inviteCode>", summary: "Accept a workspace invite." },
-          { name: "set-role", usageTail: "<userId> --role <role>", summary: "Change a member role." },
           { name: "plan", usageTail: "<free|pro|enterprise>", summary: "Change the workspace plan." },
           { name: "quota-overrides", usageTail: "[--max-running-sessions <count>] [--max-storage-bytes <bytes>] [--clear]", summary: "Override or clear workspace quota limits." },
           { name: "secrets", usageTail: "", summary: "List workspace secrets without values." },
@@ -1734,17 +1730,6 @@ export async function runCli(
         return 0;
       }
 
-      if (subcommand === "members") {
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/workspaces/current/members`,
-          {
-            headers: headers(undefined, false)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
       if (subcommand === "rename") {
         const name = rest[0];
         const data = await requestJsonAuthed(
@@ -1753,46 +1738,6 @@ export async function runCli(
             method: "PATCH",
             headers: headers(undefined),
             body: JSON.stringify({ name })
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "invite") {
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/workspaces/current/invites`,
-          {
-            method: "POST",
-            headers: headers(undefined),
-            body: JSON.stringify({ email: options.email, role: options.role || "member" })
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "accept-invite") {
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/workspaces/current/invites/accept`,
-          {
-            method: "POST",
-            headers: headers(undefined),
-            body: JSON.stringify({ inviteCode: options.code })
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
-      }
-
-      if (subcommand === "set-role") {
-        const userId = rest[0];
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/workspaces/current/members/${userId}/role`,
-          {
-            method: "POST",
-            headers: headers(undefined),
-            body: JSON.stringify({ role: options.role })
           }
         );
         print(stdout, JSON.stringify(data, null, 2));
