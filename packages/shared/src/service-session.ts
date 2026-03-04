@@ -6,6 +6,45 @@ function nowIso(clock) {
   return new Date(nowMs(clock)).toISOString();
 }
 
+const DEFAULT_BOOTSTRAP_VERSION = "v1";
+const DEFAULT_MANAGED_RUNTIME_IMAGE = `burstflare/session-runtime:${DEFAULT_BOOTSTRAP_VERSION}`;
+
+function hashHex(input) {
+  let hash = 0x811c9dc5;
+  const value = String(input || "");
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+export function resolveInstanceRuntimeSpec(instance) {
+  const rawBaseImage =
+    instance && Object.prototype.hasOwnProperty.call(instance, "baseImage") && instance.baseImage != null
+      ? instance.baseImage
+      : instance?.image;
+  const baseImage = String(rawBaseImage || "").trim();
+  const dockerfilePath = instance?.dockerfilePath == null ? null : String(instance.dockerfilePath || "");
+  const dockerContext = instance?.dockerContext == null ? null : String(instance.dockerContext || "");
+  const bootstrapVersion = String(instance?.bootstrapVersion || DEFAULT_BOOTSTRAP_VERSION);
+  const managedRuntimeImage = String(instance?.managedRuntimeImage || `burstflare/session-runtime:${bootstrapVersion}`);
+  const digestSeed = [
+    bootstrapVersion,
+    baseImage,
+    dockerfilePath || "",
+    dockerContext || "",
+    managedRuntimeImage
+  ].join("\n");
+  const digestChunk = hashHex(digestSeed);
+  return {
+    baseImage,
+    bootstrapVersion,
+    managedRuntimeImage,
+    managedImageDigest: String(instance?.managedImageDigest || `sha256:${digestChunk.repeat(8)}`)
+  };
+}
+
 export function getSessionInstance(state, session) {
   if (!session?.instanceId) {
     return null;
@@ -43,10 +82,16 @@ export function requireLatestSnapshot(state, sessionId, snapshotId, deps) {
 }
 
 export function formatInstance(instance) {
+  const runtimeSpec = resolveInstanceRuntimeSpec(instance);
   const { secrets: _secrets, ...baseInstance } = instance;
   const secretNames = Object.keys(instance.secrets || {}).sort();
   return {
     ...baseInstance,
+    image: runtimeSpec.baseImage,
+    baseImage: runtimeSpec.baseImage,
+    bootstrapVersion: runtimeSpec.bootstrapVersion,
+    managedRuntimeImage: runtimeSpec.managedRuntimeImage,
+    managedImageDigest: runtimeSpec.managedImageDigest,
     envVars: { ...(instance.envVars || {}) },
     persistedPaths: Array.isArray(instance.persistedPaths) ? [...instance.persistedPaths] : [],
     secretNames,

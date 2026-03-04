@@ -1293,20 +1293,15 @@ test("cli exposes targeted operator reconcile commands", async () => {
   }
 });
 
-test("cli can create and rebuild docker-backed instances", async () => {
+test("cli stores docker source metadata without local docker builds", async () => {
   const app = createApp();
   const fetchImpl = createFetch(app);
   const stdout = capture();
   const stderr = capture();
   const configPath = path.join(os.tmpdir(), `flare-cli-docker-${Date.now()}.json`);
-  const toolDir = path.join(os.tmpdir(), `flare-docker-tools-${Date.now()}`);
   const spawned: Array<{ command: string; args: string[]; options: any }> = [];
 
   try {
-    await mkdir(toolDir, { recursive: true });
-    await writeFile(path.join(toolDir, "docker"), "#!/bin/sh\nexit 0\n");
-    await chmod(path.join(toolDir, "docker"), 0o755);
-
     const spawnImpl = (command: string, args: string[], options: any) => {
       spawned.push({ command, args, options });
       return {
@@ -1328,27 +1323,21 @@ test("cli can create and rebuild docker-backed instances", async () => {
     assert.equal(code, 0);
     stdout.data = "";
 
-    code = await runCli(["instance", "create", "docker-cli", "--dockerfile", "./Dockerfile", "--context", ".", "--url", "http://local"], {
+    code = await runCli(["instance", "create", "docker-cli", "--image", "node:20", "--dockerfile", "./Dockerfile", "--context", ".", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath,
-      spawnImpl,
-      env: {
-        PATH: toolDir
-      }
+      spawnImpl
     });
     assert.equal(code, 0);
     const created = JSON.parse(stdout.data.trim());
     assert.equal(created.instance.dockerfilePath, "./Dockerfile");
     assert.equal(created.instance.dockerContext, ".");
-    assert.match(created.instance.image, /^registry\.cloudflare\.com\/local\/docker-cli:/);
-    assert.equal(spawned.length, 2);
-    assert.equal(spawned[0].command, "docker");
-    assert.deepEqual(spawned[0].args, ["build", "-f", "./Dockerfile", "-t", created.instance.image, "."]);
-    assert.equal(spawned[0].options.stdio, "inherit");
-    assert.equal(spawned[1].command, "docker");
-    assert.deepEqual(spawned[1].args, ["push", created.instance.image]);
+    assert.equal(created.instance.image, "node:20");
+    assert.equal(created.instance.baseImage, "node:20");
+    assert.match(created.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(spawned.length, 0);
     stdout.data = "";
 
     code = await runCli(["instance", "rebuild", created.instance.id, "--url", "http://local"], {
@@ -1356,24 +1345,17 @@ test("cli can create and rebuild docker-backed instances", async () => {
       stdout,
       stderr,
       configPath,
-      spawnImpl,
-      env: {
-        PATH: toolDir
-      }
+      spawnImpl
     });
     assert.equal(code, 0);
     const rebuilt = JSON.parse(stdout.data.trim());
     assert.equal(rebuilt.instance.id, created.instance.id);
-    assert.equal(rebuilt.rebuild.image, created.instance.image);
+    assert.equal(rebuilt.rebuild.baseImage, created.instance.baseImage);
+    assert.equal(rebuilt.rebuild.managedImageDigest, created.instance.managedImageDigest);
     assert.equal(rebuilt.rebuild.dockerfilePath, "./Dockerfile");
     assert.equal(rebuilt.rebuild.dockerContext, ".");
-    assert.equal(spawned.length, 4);
-    assert.equal(spawned[2].command, "docker");
-    assert.deepEqual(spawned[2].args, ["build", "-f", "./Dockerfile", "-t", created.instance.image, "."]);
-    assert.equal(spawned[3].command, "docker");
-    assert.deepEqual(spawned[3].args, ["push", created.instance.image]);
+    assert.equal(spawned.length, 0);
   } finally {
     await rm(configPath, { force: true });
-    await rm(toolDir, { force: true, recursive: true });
   }
 });

@@ -137,9 +137,10 @@ export function getAppScript(turnstileKey = ""): string {
         root.innerHTML = '<div class="muted">No instances yet.</div>';
       } else {
         root.innerHTML = items.map(function(instance){
+          const baseImage = instance.baseImage || instance.image || "";
           return '<div class="surface-note" style="margin-bottom:10px">' +
             '<strong>' + instance.name + '</strong><br />' +
-            '<span class="muted">' + instance.image + '</span><br />' +
+            '<span class="muted">' + baseImage + '</span><br />' +
             '<span class="muted">common state: ' + (instance.commonStateBytes || 0) + ' bytes</span><br />' +
             '<div class="row" style="margin-top:8px">' +
               '<button class="secondary" data-action="instance-push" data-instance-id="' + instance.id + '">Push</button>' +
@@ -389,7 +390,7 @@ export function getAppScript(turnstileKey = ""): string {
       const description = getValue("instanceDescription");
       await api("/api/instances", {
         method: "POST",
-        body: JSON.stringify({ name: name, image: image, description: description })
+        body: JSON.stringify({ name: name, baseImage: image, description: description })
       });
       setValue("instanceName", "");
       await loadDashboard();
