@@ -26,6 +26,8 @@ const (
 	CommonStateRestorePath = "/common-state/restore"
 	CommonStateExportPath  = "/common-state/export"
 	EditorPath             = "/editor"
+	ShellPath              = "/shell"
+	SSHPath                = "/ssh"
 
 	SnapshotFormat    = "burstflare.snapshot.v2"
 	CommonStateFormat = "burstflare.common-state.v1"
@@ -734,6 +736,12 @@ func (s *RuntimeState) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.URL.Path == EditorPath && (r.Method == http.MethodGet || r.Method == http.MethodPost):
 		s.handleEditor(w, r)
+		return
+	case r.URL.Path == ShellPath:
+		s.handleShell(w, r)
+		return
+	case r.URL.Path == SSHPath:
+		s.handleSSH(w, r)
 		return
 	default:
 		w.Header().Set("content-type", "text/html; charset=utf-8")
