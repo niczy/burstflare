@@ -1522,7 +1522,8 @@ export async function runCli(
         token = authConfig.token as string;
         refreshToken = authConfig.refreshToken || "";
         await syncKnownSshKeysForAuth(token);
-        print(stdout, JSON.stringify(data, null, 2));
+        const signedInAs = data && data.user && data.user.email ? data.user.email : "your account";
+        print(stdout, `Signed in as ${signedInAs}. You're all set!`);
         return 0;
       }
 

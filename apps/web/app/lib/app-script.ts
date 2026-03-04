@@ -97,6 +97,9 @@ export function getAppScript(turnstileKey = ""): string {
         callback: function(nextToken){
           const input = byId("turnstileToken");
           if (input) input.value = nextToken;
+          if (isCliLoginFlow() && getValue("email")) {
+            sendSignInCode().catch(function(error){ setError(error.message || String(error)); });
+          }
         }
       });
       TURNSTILE_RENDER_STATE.rendered = true;
@@ -340,12 +343,10 @@ export function getAppScript(turnstileKey = ""): string {
           deviceCode: state.deviceCode
         })
       });
-      const redirected = await attemptCliRedirect(state.redirectUrl, state.deviceCode);
-      setEmailCodeStatus(
-        redirected
-          ? "Browser sign-in complete. Your local CLI should finish automatically."
-          : "Browser sign-in complete. If the CLI is waiting on another machine, paste this code there: " + state.deviceCode
-      );
+      await attemptCliRedirect(state.redirectUrl, state.deviceCode);
+      const successUrl = new URL("/login/success", window.location.href);
+      successUrl.searchParams.set("device_code", state.deviceCode);
+      window.location.replace(successUrl.toString());
       return true;
     }
 
@@ -462,32 +463,17 @@ export function getAppScript(turnstileKey = ""): string {
       }
     });
 
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", function(){
-        if (SEARCH.get("email")) {
-          setValue("email", SEARCH.get("email") || "");
-        }
-        if (getCliLoginState()) {
-          setEmailCodeStatus("Complete browser sign-in, then this page will finish the pending CLI login.");
-        }
-        setNavState(null);
-        renderTurnstile();
-        refreshAll();
-        window.addEventListener("storage", function(event){
-          if (!event || !event.key || event.key === TOKEN_KEY || event.key === REFRESH_KEY) {
-            refreshAll();
-          }
-        });
-        window.addEventListener("focus", function(){
-          refreshAll();
-        });
-      });
-    } else {
+    function initPage(){
       if (SEARCH.get("email")) {
         setValue("email", SEARCH.get("email") || "");
       }
       if (getCliLoginState()) {
-        setEmailCodeStatus("Complete browser sign-in, then this page will finish the pending CLI login.");
+        setEmailCodeStatus("Sending sign-in code to your email…");
+        if (!TURNSTILE_KEY && getValue("email")) {
+          sendSignInCode()
+            .then(function(){ setEmailCodeStatus("Sign-in code sent. Check your email and enter the code below."); })
+            .catch(function(error){ setError(error.message || String(error)); });
+        }
       }
       setNavState(null);
       renderTurnstile();
@@ -500,6 +486,12 @@ export function getAppScript(turnstileKey = ""): string {
       window.addEventListener("focus", function(){
         refreshAll();
       });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initPage);
+    } else {
+      initPage();
     }
   })();`;
 }
