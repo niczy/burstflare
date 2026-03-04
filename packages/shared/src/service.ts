@@ -246,6 +246,48 @@ function resolveInstanceBaseImage(input: any): string {
   return value;
 }
 
+function hashHex(value) {
+  let hash = 0x811c9dc5;
+  const text = String(value || "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function hashDigest(value) {
+  const chunk = hashHex(value);
+  return `sha256:${chunk.repeat(8)}`;
+}
+
+function createManagedInstanceBuildArtifact(instance, buildId, builtAt) {
+  const baseImage = resolveInstanceBaseImage(instance);
+  const bootstrapVersion = String(instance?.bootstrapVersion || "v1");
+  const artifactKey = `instance-builds/${instance.id}/${buildId}.json`;
+  const managedRuntimeImage = `burstflare/session-runtime:${bootstrapVersion}-${buildId}`;
+  const manifest = {
+    format: "burstflare.instance-build.v1",
+    instanceId: instance.id,
+    buildId,
+    baseImage,
+    dockerfilePath: instance.dockerfilePath == null ? null : String(instance.dockerfilePath),
+    dockerContext: instance.dockerContext == null ? null : String(instance.dockerContext),
+    bootstrapVersion,
+    builtAt,
+    managedRuntimeImage
+  };
+  const body = JSON.stringify(manifest, null, 2);
+  return {
+    buildId,
+    artifactKey,
+    body,
+    contentType: "application/vnd.burstflare.instance-build+json; charset=utf-8",
+    managedRuntimeImage,
+    managedImageDigest: hashDigest(body)
+  };
+}
+
 function getWorkspaceRuntimeSecrets(workspace) {
   if (!Array.isArray(workspace.runtimeSecrets)) {
     workspace.runtimeSecrets = [];
@@ -852,6 +894,156 @@ export function createBurstFlareService(options: any = {}) {
       throw result[TRANSACTION_ERROR];
     }
     return result;
+  }
+
+  function findOwnerWorkspaceForInstance(state, instance) {
+    return state.workspaces.find((entry) => entry.ownerUserId === instance.userId) || null;
+  }
+
+  async function queueManagedInstanceBuild(instanceId, reason = "refresh") {
+    const queued = await transact(INSTANCE_SCOPE, (state) => {
+      const instance = state.instances.find((entry) => entry.id === instanceId);
+      ensure(instance, "Instance not found", 404);
+      const timestamp = nowIso(clock);
+      const buildId = createId("bld");
+      instance.buildId = buildId;
+      instance.buildStatus = "queued";
+      instance.buildRequestedAt = timestamp;
+      instance.buildCompletedAt = null;
+      instance.buildError = null;
+      instance.updatedAt = timestamp;
+      const workspace = findOwnerWorkspaceForInstance(state, instance);
+      writeAudit(state, clock, {
+        action: "instance.build_queued",
+        actorUserId: null,
+        workspaceId: workspace?.id || null,
+        targetType: "instance",
+        targetId: instance.id,
+        details: {
+          buildId,
+          reason
+        }
+      });
+      return {
+        instanceId: instance.id,
+        buildId
+      };
+    });
+
+    if (jobs?.enqueueInstanceBuild) {
+      await jobs.enqueueInstanceBuild(queued.instanceId, queued.buildId, reason);
+      return getSystemInstanceBuild(queued.instanceId);
+    }
+
+    return runSystemInstanceBuild(queued.instanceId, queued.buildId, reason);
+  }
+
+  async function getSystemInstanceBuild(instanceId) {
+    return transact(INSTANCE_SCOPE, (state) => {
+      const instance = state.instances.find((entry) => entry.id === instanceId);
+      ensure(instance, "Instance not found", 404);
+      return {
+        instance: formatInstance(instance),
+        build: {
+          id: instance.buildId || null,
+          status: instance.buildStatus || null,
+          requestedAt: instance.buildRequestedAt || null,
+          completedAt: instance.buildCompletedAt || null,
+          artifactKey: instance.buildArtifactKey || null,
+          error: instance.buildError || null
+        }
+      };
+    });
+  }
+
+  async function runSystemInstanceBuild(instanceId, expectedBuildId = null, reason = "system") {
+    return transact(INSTANCE_SCOPE, async (state) => {
+      const instance = state.instances.find((entry) => entry.id === instanceId);
+      ensure(instance, "Instance not found", 404);
+      if (expectedBuildId && instance.buildId && instance.buildId !== expectedBuildId) {
+        return {
+          instance: formatInstance(instance),
+          build: {
+            id: instance.buildId,
+            status: instance.buildStatus || null,
+            requestedAt: instance.buildRequestedAt || null,
+            completedAt: instance.buildCompletedAt || null,
+            artifactKey: instance.buildArtifactKey || null,
+            error: instance.buildError || null
+          },
+          stale: true
+        };
+      }
+
+      const timestamp = nowIso(clock);
+      const buildId = expectedBuildId || instance.buildId || createId("bld");
+      const workspace = findOwnerWorkspaceForInstance(state, instance);
+      instance.buildId = buildId;
+      instance.buildStatus = "building";
+      instance.buildRequestedAt = instance.buildRequestedAt || timestamp;
+      instance.buildCompletedAt = null;
+      instance.buildError = null;
+
+      try {
+        const artifact = createManagedInstanceBuildArtifact(instance, buildId, timestamp);
+        if (objects?.putBuildArtifact) {
+          await objects.putBuildArtifact({
+            instance,
+            buildId,
+            artifactKey: artifact.artifactKey,
+            body: artifact.body,
+            contentType: artifact.contentType
+          });
+        }
+        instance.managedRuntimeImage = artifact.managedRuntimeImage;
+        instance.managedImageDigest = artifact.managedImageDigest;
+        instance.buildArtifactKey = artifact.artifactKey;
+        instance.buildStatus = "ready";
+        instance.buildCompletedAt = timestamp;
+        instance.updatedAt = timestamp;
+        writeAudit(state, clock, {
+          action: "instance.build_completed",
+          actorUserId: null,
+          workspaceId: workspace?.id || null,
+          targetType: "instance",
+          targetId: instance.id,
+          details: {
+            buildId,
+            reason,
+            managedImageDigest: artifact.managedImageDigest
+          }
+        });
+      } catch (error) {
+        instance.buildStatus = "failed";
+        instance.buildCompletedAt = timestamp;
+        instance.buildError = error instanceof Error ? error.message : String(error || "Unknown build error");
+        instance.updatedAt = timestamp;
+        writeAudit(state, clock, {
+          action: "instance.build_failed",
+          actorUserId: null,
+          workspaceId: workspace?.id || null,
+          targetType: "instance",
+          targetId: instance.id,
+          details: {
+            buildId,
+            reason,
+            error: instance.buildError
+          }
+        });
+      }
+
+      return {
+        instance: formatInstance(instance),
+        build: {
+          id: instance.buildId || null,
+          status: instance.buildStatus || null,
+          requestedAt: instance.buildRequestedAt || null,
+          completedAt: instance.buildCompletedAt || null,
+          artifactKey: instance.buildArtifactKey || null,
+          error: instance.buildError || null
+        }
+      };
+    });
   }
 
   function requireBillingProvider() {
@@ -2431,7 +2623,7 @@ export function createBurstFlareService(options: any = {}) {
         sleepTtlSeconds = null
       }
     ) {
-      return transact(INSTANCE_SCOPE, (state) => {
+      const created = await transact(INSTANCE_SCOPE, (state) => {
         const auth = requireAuth(state, token, clock);
         ensure(typeof name === "string" && name.trim(), "Instance name is required");
         const nextName = name.trim();
@@ -2457,9 +2649,15 @@ export function createBurstFlareService(options: any = {}) {
           description: String(description || ""),
           image: runtimeSpec.baseImage,
           baseImage: runtimeSpec.baseImage,
-          managedRuntimeImage: runtimeSpec.managedRuntimeImage,
-          managedImageDigest: runtimeSpec.managedImageDigest,
+          managedRuntimeImage: null,
+          managedImageDigest: null,
           bootstrapVersion: runtimeSpec.bootstrapVersion,
+          buildId: null,
+          buildStatus: "pending",
+          buildRequestedAt: null,
+          buildCompletedAt: null,
+          buildArtifactKey: null,
+          buildError: null,
           dockerfilePath: dockerfilePath == null ? null : String(dockerfilePath),
           dockerContext: dockerContext == null ? null : String(dockerContext),
           envVars: normalizeInstanceEnvVars(envVars),
@@ -2485,9 +2683,10 @@ export function createBurstFlareService(options: any = {}) {
           }
         });
         return {
-          instance: formatInstance(instance)
+          instanceId: instance.id
         };
       });
+      return queueManagedInstanceBuild(created.instanceId, "created");
     },
 
     async listInstances(token) {
@@ -2542,8 +2741,9 @@ export function createBurstFlareService(options: any = {}) {
     },
 
     async updateInstance(token, instanceId, updates: any = {}) {
-      return transact(INSTANCE_SCOPE, (state) => {
+      const result = await transact(INSTANCE_SCOPE, (state) => {
         const auth = requireInstanceAccess(state, token, instanceId, clock);
+        let shouldRebuild = false;
         if (Object.prototype.hasOwnProperty.call(updates, "name")) {
           ensure(typeof updates.name === "string" && updates.name.trim(), "Instance name is required");
           const nextName = updates.name.trim();
@@ -2569,6 +2769,7 @@ export function createBurstFlareService(options: any = {}) {
           Object.prototype.hasOwnProperty.call(updates, "dockerfilePath") ||
           Object.prototype.hasOwnProperty.call(updates, "dockerContext")
         ) {
+          shouldRebuild = true;
           const nextBaseImage = Object.prototype.hasOwnProperty.call(updates, "baseImage")
             ? updates.baseImage
             : Object.prototype.hasOwnProperty.call(updates, "image")
@@ -2616,9 +2817,16 @@ export function createBurstFlareService(options: any = {}) {
           targetId: auth.instance.id
         });
         return {
-          instance: formatInstance(auth.instance)
+          instance: formatInstance(auth.instance),
+          shouldRebuild
         };
       });
+      if (result.shouldRebuild) {
+        return queueManagedInstanceBuild(instanceId, "updated");
+      }
+      return {
+        instance: result.instance
+      };
     },
 
     async deleteInstance(token, instanceId) {
@@ -2663,6 +2871,10 @@ export function createBurstFlareService(options: any = {}) {
           auditAction: "instance.common_state_saved_system"
         });
       });
+    },
+
+    async processSystemInstanceBuild(instanceId, buildId = null, options: any = {}) {
+      return runSystemInstanceBuild(instanceId, buildId, String(options?.reason || "system"));
     },
 
     async createTemplate() {

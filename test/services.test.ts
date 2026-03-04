@@ -73,8 +73,20 @@ function createObjectStore() {
     async deleteBuildLog({ templateVersion }: { templateVersion: { id: string } }) {
       logs.delete(templateVersion.id);
     },
-    async putBuildArtifact({ build, artifact }: { build: { id: string }; artifact: string }) {
-      artifacts.set(build.id, artifact);
+    async putBuildArtifact(params: any) {
+      if (params?.build?.id) {
+        artifacts.set(params.build.id, String(params.artifact || ""));
+        return;
+      }
+      if (params?.artifactKey) {
+        const text =
+          params.body instanceof Uint8Array
+            ? decoder.decode(params.body)
+            : params.body instanceof ArrayBuffer
+              ? decoder.decode(new Uint8Array(params.body))
+              : String(params.body || "");
+        artifacts.set(String(params.artifactKey), text);
+      }
     },
     async getBuildArtifact({ build }: { build: { id: string } }) {
       const text = artifacts.get(build.id);
@@ -161,8 +173,11 @@ test("service supports instance CRUD with write-only secrets", async () => {
   assert.equal(created.instance.image, "node:20");
   assert.equal(created.instance.baseImage, "node:20");
   assert.equal(created.instance.bootstrapVersion, "v1");
-  assert.equal(created.instance.managedRuntimeImage, "burstflare/session-runtime:v1");
+  assert.match(created.instance.managedRuntimeImage, /^burstflare\/session-runtime:v1-bld_/);
   assert.match(created.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.match(created.instance.buildId, /^bld_/);
+  assert.equal(created.instance.buildStatus, "ready");
+  assert.match(created.instance.buildArtifactKey, new RegExp(`^instance-builds/${created.instance.id}/bld_`));
   assert.deepEqual(created.instance.persistedPaths, ["/workspace", "/home/flare/.cache"]);
   assert.equal(created.instance.sleepTtlSeconds, 60);
   assert.deepEqual(created.instance.envVars, {
@@ -193,6 +208,8 @@ test("service supports instance CRUD with write-only secrets", async () => {
   assert.equal(updated.instance.baseImage, "node:22");
   assert.match(updated.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
   assert.notEqual(updated.instance.managedImageDigest, created.instance.managedImageDigest);
+  assert.equal(updated.instance.buildStatus, "ready");
+  assert.notEqual(updated.instance.buildId, created.instance.buildId);
   assert.deepEqual(updated.instance.persistedPaths, ["/workspace", "/home/flare"]);
   assert.equal(updated.instance.sleepTtlSeconds, 120);
   assert.deepEqual(updated.instance.envVars, {
@@ -216,6 +233,71 @@ test("service supports instance CRUD with write-only secrets", async () => {
 
   const empty = await service.listInstances(owner.token);
   assert.deepEqual(empty.instances, []);
+});
+
+test("service can queue and complete a managed instance build on the server", async () => {
+  let tick = Date.parse("2026-03-03T00:00:00.000Z");
+  const queuedBuilds: Array<{ instanceId: string; buildId: string; reason: string }> = [];
+  const objects = createObjectStore();
+  const service = createBurstFlareService({
+    store: createMemoryStore(),
+    objects,
+    jobs: {
+      async enqueueInstanceBuild(instanceId: string, buildId: string, reason: string) {
+        queuedBuilds.push({ instanceId, buildId, reason });
+      }
+    },
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "queued-builds@example.com",
+    name: "Queued Builder"
+  });
+
+  const created = await service.createInstance(owner.token, {
+    name: "Queued Runtime",
+    baseImage: "python:3.12",
+    dockerfilePath: "./Dockerfile",
+    dockerContext: "."
+  });
+
+  assert.equal(created.instance.buildStatus, "queued");
+  assert.equal(created.instance.managedImageDigest, null);
+  assert.equal(queuedBuilds.length, 1);
+  assert.equal(queuedBuilds[0].instanceId, created.instance.id);
+  assert.equal(queuedBuilds[0].reason, "created");
+  assert.match(queuedBuilds[0].buildId, /^bld_/);
+
+  const completed = await service.processSystemInstanceBuild(created.instance.id, queuedBuilds[0].buildId, {
+    reason: "queue"
+  });
+  assert.equal(completed.instance.buildStatus, "ready");
+  assert.equal(completed.build.status, "ready");
+  assert.equal(completed.build.id, queuedBuilds[0].buildId);
+  assert.match(completed.instance.managedRuntimeImage, new RegExp(`-${completed.build.id}$`));
+  assert.match(completed.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(
+    objects.readBuildArtifactText(completed.instance.buildArtifactKey),
+    JSON.stringify(
+      {
+        format: "burstflare.instance-build.v1",
+        instanceId: created.instance.id,
+        buildId: completed.build.id,
+        baseImage: "python:3.12",
+        dockerfilePath: "./Dockerfile",
+        dockerContext: ".",
+        bootstrapVersion: "v1",
+        builtAt: completed.instance.buildCompletedAt,
+        managedRuntimeImage: completed.instance.managedRuntimeImage
+      },
+      null,
+      2
+    )
+  );
 });
 
 test("service issues and verifies email auth codes", async () => {

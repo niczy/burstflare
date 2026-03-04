@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createMemoryStore } from "@burstflare/shared";
 import { createApp, createWorkerService, handleQueueBatch, handleScheduled, runReconcile } from "../apps/edge/src/app.js";
 
 function toBytes(value: Uint8Array | ArrayBuffer | string | unknown): Uint8Array {
@@ -559,6 +558,12 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   });
   assert.equal(instance.response.status, 200);
   const instanceId = instance.data.instance.id;
+  assert.equal(
+    queuedBuilds.some((entry: any) => entry && entry.type === "instance-build" && entry.instanceId === instanceId),
+    true
+  );
+  assert.equal(instance.data.instance.buildStatus, "queued");
+  assert.equal(instance.data.instance.managedImageDigest, null);
 
   const instanceList = await requestJson(app, "/api/instances", {
     headers: ownerHeaders
@@ -989,9 +994,9 @@ test("worker scheduled handler enqueues reconcile jobs", async () => {
 
 test("worker queue consumer ignores legacy build jobs and still runs reconcile", async () => {
   let tick = Date.parse("2026-03-03T00:00:00.000Z");
-  const store = createMemoryStore();
+  const buildBucket = createBucket();
   const service = createWorkerService({
-    store,
+    BUILD_BUCKET: buildBucket,
     clock: () => {
       tick += 1000;
       return tick;
@@ -1025,6 +1030,13 @@ test("worker queue consumer ignores legacy build jobs and still runs reconcile",
         },
         {
           body: {
+            type: "instance-build",
+            instanceId: instance.instance.id,
+            reason: "queue"
+          }
+        },
+        {
+          body: {
             type: "reconcile"
           }
         }
@@ -1035,6 +1047,10 @@ test("worker queue consumer ignores legacy build jobs and still runs reconcile",
 
   const detail = await service.getSession(owner.token, session.session.id);
   assert.equal(detail.session.state, "sleeping");
+  const rebuilt = await service.getInstance(owner.token, instance.instance.id);
+  assert.equal(rebuilt.instance.buildStatus, "ready");
+  assert.ok(rebuilt.instance.buildArtifactKey);
+  assert.ok(await buildBucket.get(rebuilt.instance.buildArtifactKey));
 });
 
 test("worker exposes targeted operator reconcile endpoints", async () => {
