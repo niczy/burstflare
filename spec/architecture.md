@@ -97,10 +97,9 @@ Primary tables:
 - `workspaces`
 - `workspace_memberships`
 - `api_tokens`
-- `templates`
-- `template_versions`
-- `template_builds`
+- `instances`
 - `sessions`
+- `session_events`
 - `session_snapshots`
 - `usage_events`
 - `usage_rollups`
@@ -121,36 +120,36 @@ KV holds fast-changing, non-authoritative data:
 
 KV is treated as a cache or coordination aid; any durable business state still lands in D1.
 
-### 5. Template Storage And Build System
+### 5. Instance Storage And Build System
 
-BurstFlare stores template source and metadata separately from runtime sessions.
+BurstFlare uses user-owned instances as the definition of a runtime environment. An instance holds the base image reference, optional Dockerfile customization, environment variables, secrets, and persisted path configuration.
 
 R2 stores:
 
-- Uploaded template source bundles (`tar.gz` or structured object layout)
-- Normalized template manifests
-- Build logs and build artifacts that need to be retained
+- Build artifacts and managed runtime image metadata
+- Workspace snapshots per session
+- Instance common state (shared `/home/flare` baseline across sessions)
 
 D1 stores:
 
-- Template ownership, visibility, and lifecycle status
-- Version metadata
-- Promotion state
-- Mapping from a template version to a currently active container binding
+- Instance ownership and configuration (base image, dockerfile path, env vars, secret names)
+- Build state (build ID, status, requested/completed timestamps, artifact key, errors)
+- Mapping from instance to its managed runtime image digest
 
 Build execution:
 
-- Template builds run inside a dedicated builder container class managed by the platform.
-- The builder image contains a rootless build toolchain such as BuildKit or Kaniko plus policy checks for allowed base images and commands.
-- Successful builds publish versioned images to the Cloudflare container registry before promotion updates the active binding catalog.
+- On instance create or update, the platform queues a managed image build.
+- The builder service receives the instance spec, injects the BurstFlare bootstrap layer into the Dockerfile, and builds a managed runtime image.
+- The resulting image reference and digest are stored back on the instance record.
+- Sessions started from the instance use the managed image at the digest captured at last build time.
 
-Queues and Workflows handle the asynchronous pipeline:
+Build pipeline:
 
-1. User or admin uploads a template bundle through a signed R2 upload URL.
-2. The Worker validates manifest metadata and writes a `template_builds` record.
-3. A Queue message starts a Workflow for build and promotion.
-4. The Workflow runs the server-side build/promotion pipeline, tracks retries, persists logs, and advances state.
-5. On success, the template version is marked promotable and the generated runtime binding config is updated for the next deploy.
+1. User creates or updates an instance via the API or CLI.
+2. The Worker writes the instance record and enqueues a build job.
+3. The builder service builds the managed runtime image from the base image and optional Dockerfile.
+4. On success, the instance record is updated with `managedRuntimeImage` and `managedImageDigest`.
+5. New sessions started from the instance use the updated image.
 
 ### 6. Container Runtime Plane
 
@@ -158,7 +157,7 @@ Each active dev session is coordinated by a session-specific Durable Object and 
 
 Container image contents:
 
-- Base runtime and developer tooling for the template
+- Base runtime and developer tooling from the instance's managed image
 - `sshd`
 - `wstunnel` (or equivalent) to expose SSH over WebSocket
 - Optional `code-server` or `ttyd` for browser access
@@ -191,7 +190,7 @@ Container disk is treated as ephemeral.
 
 Persistence strategy:
 
-- A template defines which paths are persistent, such as `/workspace`, `.cache/pip`, or project metadata.
+- An instance's `persistedPaths` configuration defines which paths are persistent, such as `/workspace`, `.cache/pip`, or project metadata.
 - On session start, the container bootstrap script downloads the latest workspace snapshot from R2 into the ephemeral filesystem.
 - During runtime, the session DO schedules periodic snapshot jobs or explicit save events.
 - On sleep/stop, the container flushes persistent paths back to R2 and writes a snapshot record to D1.
@@ -251,24 +250,23 @@ Operational visibility should also include:
 3. The Worker validates the token and forwards the WebSocket stream to the container.
 4. The container's tunnel forwards traffic to local `sshd`.
 
-### E. Template Upload And Promotion
+### E. Instance Create And Build
 
-1. A privileged user uploads a template bundle to R2.
-2. The Worker creates a template version and build record in D1.
-3. A Workflow runs validation, build, promotion, and config generation.
-4. The platform updates the generated container binding manifest and triggers a deploy so the new image is routable.
+1. User calls `flare instance create` or `POST /api/instances`.
+2. The Worker validates the request, writes the instance record to D1, and queues a managed image build.
+3. The builder service builds the runtime image from the base image and optional Dockerfile.
+4. The Worker updates the instance record with the resulting managed image reference and digest.
+5. Sessions created from the instance use the managed image at the stored digest.
 
-## Template Binding Constraint
+## Container Binding Constraint
 
-Cloudflare Containers currently require container bindings to be declared in Worker configuration. That means a newly promoted template version cannot become runnable until the Worker is deployed with an updated binding map.
+Cloudflare Containers currently require container bindings to be declared in Worker configuration. That means a newly built managed image cannot be used by sessions until the Worker is deployed with an updated binding that references it.
 
 BurstFlare treats this as a first-class architectural constraint:
 
-- Template promotion is asynchronous and ends with config generation plus deploy.
-- The control plane stores template source and metadata immediately, but runtime activation happens only after promotion completes.
-- The platform maintains a bounded catalog of active template bindings per environment.
-
-This keeps the system honest about how the underlying platform works while still supporting centralized template management.
+- Instance builds are asynchronous and end with an updated `managedRuntimeImage` and `managedImageDigest` on the instance record.
+- The control plane stores instance configuration immediately, but runtime activation for a new image happens only after the Worker is redeployed with the updated binding.
+- The platform maintains a bounded catalog of active container bindings per environment.
 
 ## Deployment Topology
 
