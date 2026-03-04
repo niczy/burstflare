@@ -103,23 +103,28 @@ async function isDockerAvailable(): Promise<boolean> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function waitForHttpJson(url: string, timeoutMs = 20000): Promise<any> {
+async function waitForHttpResponse(url: string, init: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown = null;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, init);
       if (!response.ok) {
         throw new Error(`Request failed (${response.status})`);
       }
-      return await response.json();
+      return response;
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
   }
   throw lastError || new Error(`Timed out waiting for ${url}`);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function waitForHttpJson(url: string, timeoutMs = 20000): Promise<any> {
+  const response = await waitForHttpResponse(url, {}, timeoutMs);
+  return response.json();
 }
 
 function createSmokeSshServer() {
@@ -315,7 +320,7 @@ async function runContainerSshSmoke() {
     });
     const publicKey = (await readFile(`${keyPath}.pub`, "utf8")).trim();
 
-    const bootstrap = await fetch(`http://127.0.0.1:${runtimePort}/runtime/bootstrap`, {
+    await waitForHttpResponse(`http://127.0.0.1:${runtimePort}/runtime/bootstrap`, {
       method: "POST",
       headers: {
         "content-type": "application/json; charset=utf-8"
@@ -330,7 +335,6 @@ async function runContainerSshSmoke() {
         sshAuthorizedKeys: [publicKey]
       })
     });
-    assert(bootstrap.ok, `Runtime bootstrap failed (${bootstrap.status})`);
 
     tunnel = await createSshTunnel(`ws://127.0.0.1:${runtimePort}/ssh`);
     const sshResult = await runCommand(
@@ -383,7 +387,7 @@ async function main(): Promise<void> {
   let tunnel: Awaited<ReturnType<typeof createSshTunnel>> | null = null;
 
   try {
-    const health = await fetch(`http://127.0.0.1:${runtimePort}/health`).then((response) => response.json());
+    const health = await waitForHttpJson(`http://127.0.0.1:${runtimePort}/health`);
     assert(health.ok === true, "WebSocket proxy health failed");
     assert(health.targetPort === sshPort, "Proxy health reported the wrong SSH port");
 

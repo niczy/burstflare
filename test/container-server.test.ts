@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  runtimeContentTypes,
+  runtimeSystemPaths
+} from "../containers/session/runtime-contract.mjs";
+import {
   applyCommonStateRestore,
   applySnapshotRestore,
   applyRuntimeBootstrap,
@@ -53,7 +57,7 @@ test("session container restores only files inside persisted paths and exports a
   assert.equal(runtimeState.files.has("/tmp/blocked.txt"), false);
 
   const exported = exportSnapshotPayload("ses_test", ["/workspace/project"]);
-  assert.equal(exported.contentType, "application/vnd.burstflare.snapshot+json; charset=utf-8");
+  assert.equal(exported.contentType, runtimeContentTypes.snapshot);
 
   const parsed = JSON.parse(exported.body.toString("utf8"));
   assert.equal(parsed.format, "burstflare.snapshot.v2");
@@ -106,7 +110,7 @@ test("session container restores and exports common state under /home/flare", as
   assert.equal(runtimeState.files.has("/tmp/blocked.txt"), false);
 
   const exported = exportCommonStatePayload("ins_common");
-  assert.equal(exported.contentType, "application/vnd.burstflare.common-state+json; charset=utf-8");
+  assert.equal(exported.contentType, runtimeContentTypes.commonState);
 
   const parsed = JSON.parse(exported.body.toString("utf8"));
   assert.equal(parsed.format, "burstflare.common-state.v1");
@@ -164,9 +168,9 @@ test("session container bootstrap and lifecycle hooks persist runtime metadata f
   assert.deepEqual(runtimeState.persistedPaths, ["/workspace/project"]);
   assert.deepEqual(runtimeState.secretNames, ["API_TOKEN"]);
   assert.equal(runtimeState.sshAuthorizedKeys.length, 1);
-  assert.match(runtimeState.files.get("/workspace/.burstflare/session.json"), /Runtime Template/);
-  assert.match(runtimeState.files.get("/run/burstflare/secrets.env"), /API_TOKEN=super-secret/);
-  assert.match(runtimeState.files.get("/home/flare/.ssh/authorized_keys"), /ssh-ed25519/);
+  assert.match(runtimeState.files.get(runtimeSystemPaths.sessionMetadata), /Runtime Template/);
+  assert.match(runtimeState.files.get(runtimeSystemPaths.secretsEnv), /API_TOKEN=super-secret/);
+  assert.match(runtimeState.files.get(runtimeSystemPaths.authorizedKeys), /ssh-ed25519/);
 
   const lifecycle = recordLifecycleHook({
     sessionId: "ses_bootstrap",
@@ -175,5 +179,5 @@ test("session container bootstrap and lifecycle hooks persist runtime metadata f
   });
   assert.equal(lifecycle.ok, true);
   assert.equal(lifecycle.lifecycle.phase, "sleep");
-  assert.match(runtimeState.files.get("/workspace/.burstflare/lifecycle.json"), /session_stop/);
+  assert.match(runtimeState.files.get(runtimeSystemPaths.lifecycleMetadata), /session_stop/);
 });

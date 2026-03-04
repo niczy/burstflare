@@ -9,6 +9,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  runtimeContentTypes,
+  runtimeControlPaths,
+  runtimeEnvelopeFormats,
+  runtimeSystemPaths
+} from "./runtime-contract.mjs";
 
 /**
  * @typedef {Error & {
@@ -103,7 +109,7 @@ function parseSnapshotEnvelope(raw, contentType, persistedPaths) {
     return null;
   }
 
-  if (!parsed || parsed.format !== "burstflare.snapshot.v2" || !Array.isArray(parsed.files)) {
+  if (!parsed || parsed.format !== runtimeEnvelopeFormats.snapshot || !Array.isArray(parsed.files)) {
     return null;
   }
 
@@ -136,7 +142,7 @@ function createSnapshotEnvelope(sessionId = "unknown", persistedPaths = []) {
     }));
 
   return {
-    format: "burstflare.snapshot.v2",
+    format: runtimeEnvelopeFormats.snapshot,
     sessionId,
     exportedAt: new Date().toISOString(),
     restoredSnapshotId: runtimeState.restoredSnapshotId,
@@ -161,7 +167,7 @@ function applySnapshotRestore(payload) {
   const contentType = String(payload.contentType || "application/octet-stream");
   const raw = fromBase64(payload.contentBase64);
   const snapshotPath = `/workspace/.burstflare/snapshots/${snapshotId}.snapshot`;
-  const aliasPath = "/workspace/.burstflare/last.snapshot";
+  const aliasPath = runtimeSystemPaths.lastSnapshotAlias;
   const persistedPaths = normalizePersistedPaths(payload.persistedPaths);
   const envelope = parseSnapshotEnvelope(raw, contentType, persistedPaths);
 
@@ -201,7 +207,7 @@ function exportSnapshotPayload(sessionId = "unknown", persistedPaths = []) {
   const fallback = JSON.stringify(envelope, null, 2);
   return {
     body: Buffer.from(fallback, "utf8"),
-    contentType: "application/vnd.burstflare.snapshot+json; charset=utf-8"
+    contentType: runtimeContentTypes.snapshot
   };
 }
 
@@ -233,7 +239,7 @@ function applyCommonStateRestore(payload) {
   const contentType = String(payload.contentType || "application/octet-stream");
   const raw = fromBase64(payload.contentBase64);
   const parsed = JSON.parse(raw.toString("utf8") || "{}");
-  if (!parsed || parsed.format !== "burstflare.common-state.v1" || !Array.isArray(parsed.files)) {
+  if (!parsed || parsed.format !== runtimeEnvelopeFormats.commonState || !Array.isArray(parsed.files)) {
     throw new Error("Invalid common state payload");
   }
 
@@ -259,13 +265,13 @@ function applyCommonStateRestore(payload) {
 
 function exportCommonStatePayload(instanceId = "unknown") {
   const envelope = {
-    format: "burstflare.common-state.v1",
+    format: runtimeEnvelopeFormats.commonState,
     instanceId: String(instanceId || "unknown"),
     files: listCommonStateFiles()
   };
   return {
     body: Buffer.from(JSON.stringify(envelope, null, 2), "utf8"),
-    contentType: "application/vnd.burstflare.common-state+json; charset=utf-8"
+    contentType: runtimeContentTypes.commonState
   };
 }
 
@@ -331,7 +337,7 @@ function applyAuthorizedKeys(values) {
   const keys = normalizeAuthorizedKeys(values);
   runtimeState.sshAuthorizedKeys = keys;
   const sshDir = "/home/flare/.ssh";
-  const authorizedKeysPath = `${sshDir}/authorized_keys`;
+  const authorizedKeysPath = runtimeSystemPaths.authorizedKeys;
   const body = keys.length > 0 ? `${keys.join("\n")}\n` : "";
   try {
     mkdirSync(sshDir, { recursive: true });
@@ -375,15 +381,15 @@ function applyRuntimeBootstrap(payload) {
   runtimeState.persistedPaths = persistedPaths;
   runtimeState.secretNames = runtimeSecretNames;
   runtimeState.bootstrap = bootstrap;
-  runtimeState.files.set("/workspace/.burstflare/session.json", JSON.stringify(bootstrap, null, 2));
+  runtimeState.files.set(runtimeSystemPaths.sessionMetadata, JSON.stringify(bootstrap, null, 2));
   if (runtimeSecretNames.length > 0) {
     try {
       mkdirSync("/run/burstflare", { recursive: true });
-      writeFileSync("/run/burstflare/secrets.env", `${secretsEnv}\n`, "utf8");
+      writeFileSync(runtimeSystemPaths.secretsEnv, `${secretsEnv}\n`, "utf8");
     } catch (_error) {}
-    runtimeState.files.set("/run/burstflare/secrets.env", `${secretsEnv}\n`);
+    runtimeState.files.set(runtimeSystemPaths.secretsEnv, `${secretsEnv}\n`);
   } else {
-    runtimeState.files.delete("/run/burstflare/secrets.env");
+    runtimeState.files.delete(runtimeSystemPaths.secretsEnv);
   }
   return {
     ok: true,
@@ -399,7 +405,7 @@ function recordLifecycleHook(payload) {
     recordedAt: new Date().toISOString()
   };
   runtimeState.lastLifecycle = lifecycle;
-  runtimeState.files.set("/workspace/.burstflare/lifecycle.json", JSON.stringify(lifecycle, null, 2));
+  runtimeState.files.set(runtimeSystemPaths.lifecycleMetadata, JSON.stringify(lifecycle, null, 2));
   return {
     ok: true,
     lifecycle
@@ -1103,7 +1109,7 @@ async function ensureSshd() {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
 
-  if (url.pathname === "/health") {
+  if (url.pathname === runtimeControlPaths.health) {
     res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
     res.end(
       JSON.stringify({
@@ -1116,7 +1122,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/meta") {
+  if (url.pathname === runtimeControlPaths.meta) {
     res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
     res.end(
       JSON.stringify({
@@ -1133,7 +1139,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/runtime/bootstrap" && req.method === "POST") {
+  if (url.pathname === runtimeControlPaths.bootstrap && req.method === "POST") {
     const body = await readRequestBody(req);
     const payload = JSON.parse(body.toString("utf8") || "{}");
     const bootstrapped = applyRuntimeBootstrap(payload);
@@ -1142,7 +1148,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/runtime/lifecycle" && req.method === "POST") {
+  if (url.pathname === runtimeControlPaths.lifecycle && req.method === "POST") {
     const body = await readRequestBody(req);
     const payload = JSON.parse(body.toString("utf8") || "{}");
     const recorded = recordLifecycleHook(payload);
@@ -1151,7 +1157,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/snapshot/restore" && req.method === "POST") {
+  if (url.pathname === runtimeControlPaths.snapshotRestore && req.method === "POST") {
     const body = await readRequestBody(req);
     const payload = JSON.parse(body.toString("utf8") || "{}");
     const restored = applySnapshotRestore(payload);
@@ -1160,7 +1166,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/snapshot/export" && req.method === "POST") {
+  if (url.pathname === runtimeControlPaths.snapshotExport && req.method === "POST") {
     const body = await readRequestBody(req);
     const payload = JSON.parse(body.toString("utf8") || "{}");
     const exported = exportSnapshotPayload(
@@ -1172,14 +1178,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/snapshot/export" && req.method === "GET") {
+  if (url.pathname === runtimeControlPaths.snapshotExport && req.method === "GET") {
     const exported = exportSnapshotPayload(url.searchParams.get("sessionId") || "unknown", []);
     res.writeHead(200, { "content-type": exported.contentType });
     res.end(exported.body);
     return;
   }
 
-  if (url.pathname === "/common-state/restore" && req.method === "POST") {
+  if (url.pathname === runtimeControlPaths.commonStateRestore && req.method === "POST") {
     const body = await readRequestBody(req);
     const payload = JSON.parse(body.toString("utf8") || "{}");
     const restored = applyCommonStateRestore(payload);
@@ -1188,7 +1194,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/common-state/export" && req.method === "POST") {
+  if (url.pathname === runtimeControlPaths.commonStateExport && req.method === "POST") {
     const body = await readRequestBody(req);
     const payload = JSON.parse(body.toString("utf8") || "{}");
     const exported = exportCommonStatePayload(payload.instanceId || url.searchParams.get("instanceId") || "unknown");
@@ -1197,14 +1203,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/common-state/export" && req.method === "GET") {
+  if (url.pathname === runtimeControlPaths.commonStateExport && req.method === "GET") {
     const exported = exportCommonStatePayload(url.searchParams.get("instanceId") || "unknown");
     res.writeHead(200, { "content-type": exported.contentType });
     res.end(exported.body);
     return;
   }
 
-  if (url.pathname === "/editor" && (req.method === "GET" || req.method === "POST")) {
+  if (url.pathname === runtimeControlPaths.editor && (req.method === "GET" || req.method === "POST")) {
     const sessionId = url.searchParams.get("sessionId") || "unknown";
     const requestedPaths = normalizePersistedPaths(url.searchParams.getAll("persistedPath"));
     const csrfToken = url.searchParams.get("csrf") || "";
@@ -1254,11 +1260,11 @@ server.on("upgrade", (req, socket) => {
     socket.destroy();
     return;
   }
-  if (url.pathname === "/shell") {
+  if (url.pathname === runtimeControlPaths.shell) {
     attachShell(req, socket);
     return;
   }
-  if (url.pathname === "/ssh") {
+  if (url.pathname === runtimeControlPaths.ssh) {
     attachTcpProxy(req, socket, sshPort);
     return;
   }

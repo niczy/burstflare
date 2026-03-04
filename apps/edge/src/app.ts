@@ -11,6 +11,11 @@ import {
   toJson,
   unauthorized
 } from "@burstflare/shared";
+import {
+  createRuntimeBootstrapPayload,
+  createRuntimeLifecyclePayload,
+  runtimeControlPaths
+} from "../../../containers/session/runtime-contract.mjs";
 
 const CSRF_COOKIE = "burstflare_csrf";
 const REQUEST_ID_HEADER = "x-burstflare-request-id";
@@ -1271,35 +1276,12 @@ async function applyRuntimeBootstrapToContainer(container: any, session: any, ru
   if (!container || !session) {
     return null;
   }
-
-  const secretPayload = runtimeSecrets || {
-    runtimeSecrets: {},
-    secretNames: []
-  };
-
-  const payload = {
-    sessionId: session.id,
-    workspaceId: session.workspaceId || null,
-    templateId: session.templateId || null,
-    instanceId: session.instanceId || null,
-    templateName: session.templateName || null,
-    state: session.state || null,
-    previewUrl: session.previewUrl || null,
-    lastRestoredSnapshotId: session.lastRestoredSnapshotId || null,
-    persistedPaths: Array.isArray(session.persistedPaths) ? session.persistedPaths : [],
-    runtimeSecretNames: Array.isArray(secretPayload.secretNames) ? secretPayload.secretNames : [],
-    runtimeSecrets:
-      secretPayload.runtimeSecrets && typeof secretPayload.runtimeSecrets === "object"
-        ? secretPayload.runtimeSecrets
-        : {},
-    runtimeVersion: Number.isInteger(session.runtimeVersion) ? session.runtimeVersion : 0,
-    sshAuthorizedKeys: Array.isArray(session.sshAuthorizedKeys) ? session.sshAuthorizedKeys : []
-  };
+  const payload = createRuntimeBootstrapPayload(session, runtimeSecrets);
 
   let result = null;
   if (typeof container.fetch === "function") {
     try {
-      const response = await container.fetch(createContainerControlRequest("/runtime/bootstrap", payload));
+      const response = await container.fetch(createContainerControlRequest(runtimeControlPaths.bootstrap, payload));
       if (response.ok) {
         result = await response.json().catch(() => null);
       }
@@ -1319,12 +1301,7 @@ async function emitRuntimeLifecycleHook(container: any, sessionId: string | null
   if (!container || !sessionId || !phase) {
     return null;
   }
-
-  const payload = {
-    sessionId,
-    phase,
-    reason: reason || phase
-  };
+  const payload = createRuntimeLifecyclePayload(sessionId, phase, reason);
 
   let result = null;
   if (typeof container.recordLifecycleHook === "function") {
@@ -1334,7 +1311,7 @@ async function emitRuntimeLifecycleHook(container: any, sessionId: string | null
   }
   if (writeRuntimeFile && typeof container.fetch === "function") {
     try {
-      const response = await container.fetch(createContainerControlRequest("/runtime/lifecycle", payload));
+      const response = await container.fetch(createContainerControlRequest(runtimeControlPaths.lifecycle, payload));
       if (response.ok) {
         result = await response.json().catch(() => null);
       }
@@ -1378,7 +1355,7 @@ export async function runReconcile(options: any = {}): Promise<any> {
       if (session.instanceId && typeof container.fetch === "function") {
         try {
           const response = await container.fetch(
-            new Request("http://runtime.internal/common-state/export", {
+            new Request(`http://runtime.internal${runtimeControlPaths.commonStateExport}`, {
               method: "POST",
               headers: {
                 "content-type": "application/json; charset=utf-8"
@@ -1662,7 +1639,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   function createSnapshotRestoreRequest(session: any, snapshotId: string, snapshot: any, content: any): Request {
-    const url = new URL("http://runtime.internal/snapshot/restore");
+    const url = new URL(`http://runtime.internal${runtimeControlPaths.snapshotRestore}`);
     url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
       method: "POST",
@@ -1682,7 +1659,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   function createSnapshotExportRequest(session: any): Request {
-    const url = new URL("http://runtime.internal/snapshot/export");
+    const url = new URL(`http://runtime.internal${runtimeControlPaths.snapshotExport}`);
     url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
       method: "POST",
@@ -1756,7 +1733,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   function createCommonStateRestoreRequest(session: any, content: any): Request {
-    const url = new URL("http://runtime.internal/common-state/restore");
+    const url = new URL(`http://runtime.internal${runtimeControlPaths.commonStateRestore}`);
     url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
       method: "POST",
@@ -1774,7 +1751,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   function createCommonStateExportRequest(session: any): Request {
-    const url = new URL("http://runtime.internal/common-state/export");
+    const url = new URL(`http://runtime.internal${runtimeControlPaths.commonStateExport}`);
     url.searchParams.set("sessionId", session.id);
     return new Request(url.toString(), {
       method: "POST",

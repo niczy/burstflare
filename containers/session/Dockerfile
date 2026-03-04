@@ -9,6 +9,7 @@ RUN apk add --no-cache openssh-server openssh-sftp-server \
 WORKDIR /app
 
 COPY server.mjs /app/server.mjs
+COPY runtime-contract.mjs /app/runtime-contract.mjs
 
 ENV PORT=8080
 
