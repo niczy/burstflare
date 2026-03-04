@@ -805,7 +805,8 @@ test("service creates usage-based billing sessions, invoices, and Stripe webhook
 });
 
 test("service rejects legacy template backend methods", async () => {
-  const service = createBurstFlareService();
+  const store = createMemoryStore();
+  const service = createBurstFlareService({ store });
   const owner = await service.registerUser({
     email: "legacy-removed@example.com",
     name: "Legacy Removed"
@@ -838,6 +839,30 @@ test("service rejects legacy template backend methods", async () => {
   await assert.rejects(() => service.rollbackTemplate(), /Legacy template backend removed/);
 
   await assert.rejects(() => service.retryDeadLetteredBuilds(), /Legacy template backend removed/);
+
+  await store.transact((state: any) => {
+    state.uploadGrants.push({
+      id: "upg_legacy_template_bundle",
+      kind: "template_bundle",
+      workspaceId: owner.workspace.id,
+      actorUserId: owner.user.id,
+      contentType: "application/octet-stream",
+      expectedBytes: 5,
+      templateId: "tpl_legacy",
+      templateVersionId: "tplv_legacy",
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      usedAt: null
+    });
+  });
+  await assert.rejects(
+    () => service.consumeUploadGrant("upg_legacy_template_bundle", { body: "hello" }),
+    /Legacy template backend removed/
+  );
+  const legacyGrant = await store.transact((state: any) =>
+    state.uploadGrants.find((entry: any) => entry.id === "upg_legacy_template_bundle") || null
+  );
+  assert.equal(legacyGrant.usedAt, null);
 
   await assert.rejects(
     () =>
