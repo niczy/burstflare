@@ -164,7 +164,8 @@ test("worker sends email auth codes through Resend for non-managed addresses", a
     method: "POST",
     body: JSON.stringify({
       email: "alice@example.com",
-      name: "Alice"
+      name: "Alice",
+      kind: "api"
     })
   });
   assert.equal(requested.response.status, 200);
@@ -186,7 +187,8 @@ test("worker sends email auth codes through Resend for non-managed addresses", a
     method: "POST",
     body: JSON.stringify({
       email: "bob@example.com",
-      name: "Bob"
+      name: "Bob",
+      kind: "api"
     })
   });
   assert.equal(failed.response.status, 424);
@@ -296,11 +298,21 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   });
   assert.equal(strictAllowed.response.status, 200);
 
-  const emailCode = await requestJson(turnstileApp, "/api/auth/email-code/request", {
+  const emailCodeBlocked = await requestJson(turnstileApp, "/api/auth/email-code/request", {
     method: "POST",
     body: JSON.stringify({
       email: "smoke_test@burstflare.dev",
       name: "Smoke Test"
+    })
+  });
+  assert.equal(emailCodeBlocked.response.status, 400);
+
+  const emailCode = await requestJson(turnstileApp, "/api/auth/email-code/request", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "smoke_test@burstflare.dev",
+      name: "Smoke Test",
+      turnstileToken: "valid-turnstile"
     })
   });
   assert.equal(emailCode.response.status, 200);
@@ -316,6 +328,15 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
   });
   assert.equal(emailVerified.response.status, 200);
   assert.ok(emailVerified.data.token);
+
+  const strictDeviceStart = await requestJson(turnstileApp, "/api/cli/device/start", {
+    method: "POST",
+    body: JSON.stringify({
+      email: "strict-ok@example.com"
+    })
+  });
+  assert.equal(strictDeviceStart.response.status, 200);
+  assert.match(strictDeviceStart.data.deviceCode, /^device_/);
 
   const invalidJson = await requestJson(app, "/api/auth/register", {
     method: "POST",

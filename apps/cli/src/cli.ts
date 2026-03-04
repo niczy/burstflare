@@ -1,5 +1,6 @@
 
 import { spawn } from "node:child_process";
+import http from "node:http";
 import net from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -17,6 +18,17 @@ interface WritableOutput {
   write(chunk: string | Uint8Array): void;
   isTTY?: boolean;
 }
+
+interface ReadableInput {
+  isTTY?: boolean;
+  setEncoding?(encoding: BufferEncoding): void;
+  resume?(): void;
+  pause?(): void;
+  on?(event: "data", handler: (chunk: string | Uint8Array) => void): unknown;
+  removeListener?(event: "data", handler: (chunk: string | Uint8Array) => void): unknown;
+}
+
+type OpenUrlImpl = (url: string) => Promise<void> | void;
 
 type SpawnImpl = (
   command: string,
@@ -332,6 +344,124 @@ function print(stream: WritableOutput, value: string): void {
   stream.write(`${value}\n`);
 }
 
+async function createLocalLoginApprovalReceiver(): Promise<{
+  callbackUrl: string;
+  codePromise: Promise<string>;
+  close(): Promise<void>;
+}> {
+  return await new Promise((resolve, reject) => {
+    let resolvedCode: ((value: string) => void) | null = null;
+    const codePromise = new Promise<string>((resolveCode) => {
+      resolvedCode = resolveCode;
+    });
+    const server = http.createServer((request, response) => {
+      const url = new URL(request.url || "/", "http://127.0.0.1");
+      const deviceCode = String(url.searchParams.get("device_code") || "").trim();
+      response.statusCode = 200;
+      response.setHeader("content-type", "text/plain; charset=utf-8");
+      response.end("BurstFlare CLI login approved. You can close this tab.");
+      if (deviceCode && resolvedCode) {
+        resolvedCode(deviceCode);
+      }
+    });
+
+    server.on("error", (error) => {
+      reject(error);
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      resolve({
+        callbackUrl: `http://127.0.0.1:${port}/auth/complete`,
+        codePromise,
+        async close() {
+          if (!server.listening) {
+            return;
+          }
+          await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+        }
+      });
+    });
+  });
+}
+
+function waitForPastedDeviceCode(stdin: ReadableInput | undefined): {
+  promise: Promise<string>;
+  cancel(): void;
+} | null {
+  if (!stdin || typeof stdin.on !== "function") {
+    return null;
+  }
+  let buffer = "";
+  let settled = false;
+  let resolveLine: ((value: string) => void) | null = null;
+  const onData = (chunk: string | Uint8Array) => {
+    if (settled) {
+      return;
+    }
+    buffer += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    while (buffer.includes("\n")) {
+      const newlineIndex = buffer.indexOf("\n");
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (!line) {
+        continue;
+      }
+      settled = true;
+      stdin.removeListener?.("data", onData);
+      stdin.pause?.();
+      if (resolveLine) {
+        resolveLine(line);
+      }
+      return;
+    }
+  };
+  const promise = new Promise<string>((resolve) => {
+    resolveLine = resolve;
+  });
+  stdin.setEncoding?.("utf8");
+  stdin.resume?.();
+  stdin.on("data", onData);
+  return {
+    promise,
+    cancel() {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      stdin.removeListener?.("data", onData);
+      stdin.pause?.();
+    }
+  };
+}
+
+async function waitForCliLoginCode(
+  receiver: { codePromise: Promise<string>; close(): Promise<void> } | null,
+  stdin: ReadableInput | undefined,
+  timeoutMs: number = 300_000
+): Promise<string> {
+  const pasted = waitForPastedDeviceCode(stdin);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeout = new Promise<string>((_resolve, reject) => {
+      timer = setTimeout(() => reject(createCliError("Timed out waiting for browser sign-in approval", 408)), timeoutMs);
+    });
+    const code = await Promise.race(
+      [timeout]
+        .concat(receiver ? [receiver.codePromise] : [])
+        .concat(pasted ? [pasted.promise] : [])
+    );
+    return String(code || "").trim();
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+    pasted?.cancel();
+    await receiver?.close();
+  }
+}
+
 function shouldUseColor(stream: WritableOutput, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.NO_COLOR !== undefined) {
     return false;
@@ -392,7 +522,7 @@ const HELP_CATALOG: HelpSection[] = [
         summary: "Register, log in, and manage local auth state.",
         commands: [
           { name: "register", usageTail: "--email <email> [--name <name>]", summary: "Create a user and save auth tokens locally." },
-          { name: "login", usageTail: "--email <email>", summary: "Log in with an email-based API flow." },
+          { name: "login", usageTail: "--email <email>", summary: "Log in with a browser-assisted email code flow." },
           { name: "recover", usageTail: "--email <email> --code <code>", summary: "Recover access with a recovery code." },
           { name: "refresh", usageTail: "", summary: "Rotate the current access and refresh tokens." },
           { name: "logout", usageTail: "", summary: "Revoke the current refresh token locally and remotely." },
@@ -878,6 +1008,8 @@ export async function runCli(
     createSshTunnelImpl?: typeof createSshTunnel;
     stdout?: WritableOutput;
     stderr?: WritableOutput;
+    stdin?: ReadableInput;
+    openUrlImpl?: OpenUrlImpl;
     env?: NodeJS.ProcessEnv;
     configPath?: string;
   } = {}
@@ -887,6 +1019,8 @@ export async function runCli(
   const createSshTunnelImpl = dependencies.createSshTunnelImpl || createSshTunnel;
   const stdout = dependencies.stdout || process.stdout;
   const stderr = dependencies.stderr || process.stderr;
+  const stdin = dependencies.stdin || process.stdin;
+  const openUrlImpl = dependencies.openUrlImpl || null;
   const env = dependencies.env || process.env;
   const configPath = dependencies.configPath || defaultConfigPath(env);
   const { positionals, options } = parseArgs(argv);
@@ -1379,12 +1513,46 @@ export async function runCli(
       }
 
       if (subcommand === "login") {
-        const data = await requestJson(
-          `${baseUrl}/api/auth/login`,
+        const started = await requestJson(
+          `${baseUrl}/api/cli/device/start`,
           {
             method: "POST",
             headers: headers(),
-            body: JSON.stringify({ email: options.email, kind: "api", turnstileToken: options["turnstile-token"] || "" })
+            body: JSON.stringify({
+              email: options.email,
+              workspaceId: options["workspace-id"] || null
+            })
+          },
+          fetchImpl
+        );
+        let receiver: Awaited<ReturnType<typeof createLocalLoginApprovalReceiver>> | null = null;
+        try {
+          receiver = await createLocalLoginApprovalReceiver();
+        } catch (_error) {
+          receiver = null;
+        }
+        const loginUrl = new URL("/login", baseUrl);
+        loginUrl.searchParams.set("email", String(options.email || ""));
+        loginUrl.searchParams.set("device_code", started.deviceCode);
+        if (receiver) {
+          loginUrl.searchParams.set("cli_redirect", receiver.callbackUrl);
+        }
+        print(stderr, "Finish sign-in in your browser:");
+        print(stderr, loginUrl.toString());
+        print(stderr, "If the CLI does not continue automatically, paste the device code shown on the page and press Enter:");
+        if (openUrlImpl) {
+          await openUrlImpl(loginUrl.toString());
+        }
+        const approvedCode = await waitForCliLoginCode(receiver, stdin);
+        if (approvedCode && approvedCode !== started.deviceCode) {
+          throw createCliError("The pasted login code did not match the pending CLI sign-in", 400);
+        }
+        const data = await requestJson(
+          `${baseUrl}/api/cli/device/exchange`,
+          {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ deviceCode: started.deviceCode })
           },
           fetchImpl
         );

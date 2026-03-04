@@ -3,6 +3,7 @@ export function getAppScript(turnstileKey = ""): string {
     const TURNSTILE_KEY = ${JSON.stringify(turnstileKey)};
     const TOKEN_KEY = "burstflare_token";
     const REFRESH_KEY = "burstflare_refresh_token";
+    const SEARCH = new URLSearchParams(window.location.search);
 
     function byId(id){ return document.getElementById(id); }
     function setText(id, value){ const node = byId(id); if (node) node.textContent = String(value || ""); }
@@ -10,6 +11,7 @@ export function getAppScript(turnstileKey = ""): string {
     function setValue(id, value){ const node = byId(id); if (node) node.value = String(value || ""); }
     function getValue(id){ const node = byId(id); return node && typeof node.value === "string" ? node.value.trim() : ""; }
     function setError(message){ setText("errors", message || ""); }
+    function setEmailCodeStatus(message){ setText("emailCodeStatus", message || ""); }
     function token(){ return localStorage.getItem(TOKEN_KEY) || ""; }
     function refreshToken(){ return localStorage.getItem(REFRESH_KEY) || ""; }
     function storeSession(data){
@@ -63,6 +65,18 @@ export function getAppScript(turnstileKey = ""): string {
           if (input) input.value = nextToken;
         }
       });
+    }
+
+    function getCliLoginState(){
+      const deviceCode = SEARCH.get("device_code") || "";
+      const redirectUrl = SEARCH.get("cli_redirect") || "";
+      if (!deviceCode) {
+        return null;
+      }
+      return {
+        deviceCode: deviceCode,
+        redirectUrl: redirectUrl
+      };
     }
 
     function renderInstances(instances){
@@ -209,6 +223,96 @@ export function getAppScript(turnstileKey = ""): string {
       }
     }
 
+    async function sendSignInCode(){
+      const email = getValue("email");
+      const name = getValue("name");
+      const turnstileToken = getValue("turnstileToken");
+      const requested = await api("/api/auth/email-code/request", {
+        method: "POST",
+        body: JSON.stringify({
+          email: email,
+          name: name,
+          kind: "browser",
+          turnstileToken: turnstileToken
+        })
+      });
+      setValue("emailCode", requested.code || "");
+      setEmailCodeStatus(
+        requested.code
+          ? "Verification code created. Managed smoke mailboxes expose it inline here."
+          : "Verification code sent. Check your email and paste the six-digit code here."
+      );
+      return requested;
+    }
+
+    async function attemptCliRedirect(redirectUrl, deviceCode){
+      if (!redirectUrl || !deviceCode) {
+        return false;
+      }
+      let target;
+      try {
+        target = new URL(redirectUrl);
+      } catch (_error) {
+        return false;
+      }
+      if (target.hostname !== "127.0.0.1" && target.hostname !== "localhost") {
+        return false;
+      }
+      target.searchParams.set("device_code", deviceCode);
+      try {
+        await Promise.race([
+          fetch(target.toString(), {
+            method: "GET",
+            mode: "no-cors",
+            cache: "no-store"
+          }),
+          new Promise(function(_resolve, reject){
+            setTimeout(function(){ reject(new Error("timeout")); }, 1500);
+          })
+        ]);
+        window.location.replace(target.toString());
+        return true;
+      } catch (_error) {
+        return false;
+      }
+    }
+
+    async function completeCliDeviceApproval(){
+      const state = getCliLoginState();
+      if (!state || !token()) {
+        return false;
+      }
+      await api("/api/cli/device/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceCode: state.deviceCode
+        })
+      });
+      const redirected = await attemptCliRedirect(state.redirectUrl, state.deviceCode);
+      setEmailCodeStatus(
+        redirected
+          ? "Browser sign-in complete. Your local CLI should finish automatically."
+          : "Browser sign-in complete. If the CLI is waiting on another machine, paste this code there: " + state.deviceCode
+      );
+      return true;
+    }
+
+    async function verifyEmailCode(){
+      const email = getValue("email");
+      const code = getValue("emailCode");
+      const login = await api("/api/auth/email-code/verify", {
+        method: "POST",
+        body: JSON.stringify({
+          email: email,
+          code: code
+        })
+      });
+      storeSession(login);
+      await completeCliDeviceApproval();
+      await refreshAll();
+      return login;
+    }
+
     async function handleAuth(action){
       const email = getValue("email");
       const name = getValue("name");
@@ -220,10 +324,11 @@ export function getAppScript(turnstileKey = ""): string {
           body: JSON.stringify({ email: email, name: name, turnstileToken: turnstileToken })
         }));
       } else if (action === "login") {
-        storeSession(await api("/api/auth/login", {
-          method: "POST",
-          body: JSON.stringify({ email: email, kind: "browser", turnstileToken: turnstileToken })
-        }));
+        await sendSignInCode();
+        return;
+      } else if (action === "verify-email-code") {
+        await verifyEmailCode();
+        return;
       } else if (action === "recover") {
         storeSession(await api("/api/auth/recover", {
           method: "POST",
@@ -285,6 +390,7 @@ export function getAppScript(turnstileKey = ""): string {
       try {
         if (target.id === "registerButton") return await handleAuth("register");
         if (target.id === "loginButton") return await handleAuth("login");
+        if (target.id === "verifyEmailCodeButton") return await handleAuth("verify-email-code");
         if (target.id === "recoverButton") return await handleAuth("recover");
         if (target.id === "logoutButton") return await handleAuth("logout");
         if (target.id === "refreshButton" || target.id === "refreshProfileButton") return await refreshAll();
@@ -320,10 +426,22 @@ export function getAppScript(turnstileKey = ""): string {
 
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", function(){
+        if (!getValue("email") && SEARCH.get("email")) {
+          setValue("email", SEARCH.get("email") || "");
+        }
+        if (getCliLoginState()) {
+          setEmailCodeStatus("Complete browser sign-in, then this page will finish the pending CLI login.");
+        }
         renderTurnstile();
         refreshAll();
       });
     } else {
+      if (!getValue("email") && SEARCH.get("email")) {
+        setValue("email", SEARCH.get("email") || "");
+      }
+      if (getCliLoginState()) {
+        setEmailCodeStatus("Complete browser sign-in, then this page will finish the pending CLI login.");
+      }
       renderTurnstile();
       refreshAll();
     }
