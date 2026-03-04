@@ -23,6 +23,7 @@
     "cf:validate-schema:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/cloudflare-validate-schema.ts",
     "cf:verify": "tsx scripts/cloudflare-verify.ts",
     "cf:verify:staging": "CLOUDFLARE_ENVIRONMENT=staging tsx scripts/cloudflare-verify.ts",
+    "dev:builder": "npm run dev --workspace @burstflare/builder",
     "dev:edge": "npm run build --workspace @burstflare/shared && tsx apps/edge/src/dev-server.ts",
     "dev:web": "npm run dev --workspace @burstflare/web",
     "deploy": "tsx scripts/deploy.ts",
