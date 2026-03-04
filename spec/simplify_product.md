@@ -576,11 +576,11 @@ The service has no live users, so we can make breaking product decisions directl
 
 - Rename the SSH user from `dev` to `flare` across the entire codebase:
   - `containers/session/Dockerfile` — `adduser -D flare`, `chpasswd`, `chown` references.
-  - `containers/session/server.mjs` — `id -u flare`, `id -g flare`, default username return.
+  - `apps/runtime-agent/agent/identity.go` and `apps/runtime-agent/agent/shell_ssh.go` — `id -u flare`, `id -g flare`, default username return.
   - `packages/shared/src/service.ts` — `sshUser: "flare"`, SSH command template `flare@127.0.0.1`.
   - `scripts/ssh-smoke.ts` — mock SSH server username, assertions for `whoami` output.
   - `scripts/live-ssh-smoke.ts` — SSH command username, assertions.
-  - `test/container-server.test.ts` — update any `dev` user references.
+  - `apps/runtime-agent/agent/agent_test.go` and `apps/runtime-agent/agent/shell_ssh_test.go` — update any `dev` user references.
 - Update any CLI help text, fixtures, or docs that still mention the old SSH username.
 
 **Exit criteria:** Container tests and SSH smoke tests pass with `whoami === "flare"`.
@@ -737,7 +737,7 @@ The service has no live users, so we can make breaking product decisions directl
 - On session stop/sleep, push `/home/flare` back to R2.
 - Add `flare instance push <id>` to upload the current session's `/home/flare` immediately.
 - Add `flare instance pull <id>` to fetch the latest `/home/flare` without restart.
-- Update container bootstrap (`server.mjs`) to hydrate and persist `/home/flare`.
+- Update the container runtime agent to hydrate and persist `/home/flare`.
 - No live sync — pull-on-start, auto-push on stop, explicit push/pull mid-session.
 
 **Exit criteria:** Two sessions of the same instance both see shared files in `/home/flare` after push + restart, while `/workspace` stays isolated.

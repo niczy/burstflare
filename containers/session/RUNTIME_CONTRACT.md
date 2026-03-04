@@ -1,6 +1,6 @@
 ## BurstFlare Session Runtime Contract
 
-This document is the compatibility contract that both the current Node runtime (`server.mjs`) and the planned Go runtime agent must implement.
+This document is the compatibility contract for the session container runtime. The Go runtime agent is the active implementation, and any future replacements should preserve this contract unless the Worker contract changes intentionally.
 
 ### Control Routes
 
@@ -44,4 +44,4 @@ The runtime writes these compatibility files:
 - `/home/flare/.ssh/authorized_keys`
 - `/workspace/.burstflare/last.snapshot`
 
-The Go runtime agent should preserve these payload shapes and side effects until the Worker contract changes intentionally.
+The active Go runtime agent preserves these payload shapes and side effects. Future replacements should do the same until the Worker contract changes intentionally.

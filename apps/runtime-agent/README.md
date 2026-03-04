@@ -1,6 +1,6 @@
 # BurstFlare Go Runtime Agent
 
-This workspace contains the staged Go replacement for the current session container runtime in `containers/session/server.mjs`.
+This workspace contains the active Go session container runtime.
 
 PR 2 only covers the HTTP control-plane routes:
 
