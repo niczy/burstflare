@@ -122,34 +122,33 @@ KV is treated as a cache or coordination aid; any durable business state still l
 
 ### 5. Instance Storage And Build System
 
-BurstFlare uses user-owned instances as the definition of a runtime environment. An instance holds the base image reference, optional Dockerfile customization, environment variables, secrets, and persisted path configuration.
+BurstFlare uses user-owned instances as the definition of a runtime environment. Every instance runs on a curated managed runtime base image (default plus selected popular images such as Ubuntu and Debian); users customize behavior through environment variables, secrets, and persisted path configuration (including shared instance home-state).
 
 R2 stores:
 
-- Build artifacts and managed runtime image metadata
+- Optional runtime build artifacts for managed image refreshes
 - Workspace snapshots per session
 - Instance common state (shared `/home/flare` baseline across sessions)
 
 D1 stores:
 
-- Instance ownership and configuration (base image, dockerfile path, env vars, secret names)
-- Build state (build ID, status, requested/completed timestamps, artifact key, errors)
+- Instance ownership and configuration (env vars, secret names, persisted paths, sleep policy)
+- Instance common-state metadata and snapshot linkage
 - Mapping from instance to its managed runtime image digest
 
-Build execution:
+Runtime strategy:
 
-- On instance create or update, the platform queues a managed image build.
-- The builder service receives the instance spec, injects the BurstFlare bootstrap layer into the Dockerfile, and builds a managed runtime image.
-- The resulting image reference and digest are stored back on the instance record.
-- Sessions started from the instance use the managed image at the digest captured at last build time.
+- Instance create/update does not accept arbitrary user images.
+- All instances use a curated set of managed runtime base images.
+- Users customize each instance by changing env vars, secrets, persisted paths, and shared `/home/flare` state.
+- Sessions started from an instance hydrate that instance's persisted state onto the fixed runtime image.
 
-Build pipeline:
+Instance provisioning pipeline:
 
 1. User creates or updates an instance via the API or CLI.
-2. The Worker writes the instance record and enqueues a build job.
-3. The builder service builds the managed runtime image from the base image and optional Dockerfile.
-4. On success, the instance record is updated with `managedRuntimeImage` and `managedImageDigest`.
-5. New sessions started from the instance use the updated image.
+2. The Worker stores instance metadata immediately (env vars, secrets, persisted paths, common-state key).
+3. Sessions start from the selected curated managed runtime image and hydrate instance state from R2.
+4. Optional system-triggered runtime rebuilds can refresh the global managed image digest.
 
 ### 6. Container Runtime Plane
 
@@ -253,10 +252,10 @@ Operational visibility should also include:
 ### E. Instance Create And Build
 
 1. User calls `flare instance create` or `POST /api/instances`.
-2. The Worker validates the request, writes the instance record to D1, and queues a managed image build.
-3. The builder service builds the runtime image from the base image and optional Dockerfile.
-4. The Worker updates the instance record with the resulting managed image reference and digest.
-5. Sessions created from the instance use the managed image at the stored digest.
+2. The Worker validates the request and writes instance metadata to D1.
+3. Sessions created from the instance run on the selected curated managed runtime image.
+4. Runtime bootstrap hydrates instance persisted state (for example `/home/flare`) from R2.
+5. Users iterate by changing instance config and persisted state, not by selecting arbitrary images.
 
 ## Container Binding Constraint
 

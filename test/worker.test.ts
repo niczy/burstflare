@@ -517,7 +517,7 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
     headers: {
       cookie: ownerCookieHeader
     },
-    body: JSON.stringify({ name: "blocked-cookie", image: "node:20" })
+    body: JSON.stringify({ name: "blocked-cookie", image: "ubuntu:24.04" })
   });
   assert.equal(csrfBlocked.response.status, 403);
 
@@ -527,7 +527,7 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
       cookie: ownerCookieHeader,
       "x-burstflare-csrf": owner.data.csrfToken
     },
-    body: JSON.stringify({ name: "cookie-instance", image: "node:20" })
+    body: JSON.stringify({ name: "cookie-instance", image: "ubuntu:24.04" })
   });
   assert.equal(csrfAllowed.response.status, 200);
 
@@ -553,17 +553,17 @@ test("worker serves removed sharing flow, bundle upload, build logs, session eve
     body: JSON.stringify({
       name: "python-dev",
       description: "Python toolchain",
-      image: "registry.cloudflare.com/test/python-dev:2.0.0"
+      image: "debian:12"
     })
   });
   assert.equal(instance.response.status, 200);
   const instanceId = instance.data.instance.id;
   assert.equal(
     queuedBuilds.some((entry: any) => entry && entry.type === "instance-build" && entry.instanceId === instanceId),
-    true
+    false
   );
-  assert.equal(instance.data.instance.buildStatus, "queued");
-  assert.equal(instance.data.instance.managedImageDigest, null);
+  assert.equal(instance.data.instance.buildStatus, "ready");
+  assert.match(instance.data.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
 
   const instanceList = await requestJson(app, "/api/instances", {
     headers: ownerHeaders
@@ -994,30 +994,7 @@ test("worker scheduled handler enqueues reconcile jobs", async () => {
 
 test("worker queue consumer ignores legacy build jobs and still runs reconcile", async () => {
   let tick = Date.parse("2026-03-03T00:00:00.000Z");
-  const buildBucket = createBucket();
   const service = createWorkerService({
-    BUILD_BUCKET: buildBucket,
-    REMOTE_BUILD_URL: "https://builder.example.test/build",
-    REMOTE_BUILD_TOKEN: "builder-token",
-    fetchImpl: async (url: string, init?: RequestInit) => {
-      if (url === "https://builder.example.test/build") {
-        assert.equal(init?.method, "POST");
-        assert.equal((init?.headers as Record<string, string>)?.authorization, "Bearer builder-token");
-        const body = JSON.parse(String(init?.body || "{}"));
-        return new Response(
-          JSON.stringify({
-            managedRuntimeImage: `registry.cloudflare.com/burstflare/${body.instanceId}:${body.buildId}`,
-            managedImageDigest: "sha256:cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
-          }),
-          {
-            headers: {
-              "content-type": "application/json; charset=utf-8"
-            }
-          }
-        );
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    },
     clock: () => {
       tick += 1000;
       return tick;
@@ -1051,13 +1028,6 @@ test("worker queue consumer ignores legacy build jobs and still runs reconcile",
         },
         {
           body: {
-            type: "instance-build",
-            instanceId: instance.instance.id,
-            reason: "queue"
-          }
-        },
-        {
-          body: {
             type: "reconcile"
           }
         }
@@ -1068,14 +1038,9 @@ test("worker queue consumer ignores legacy build jobs and still runs reconcile",
 
   const detail = await service.getSession(owner.token, session.session.id);
   assert.equal(detail.session.state, "sleeping");
-  const rebuilt = await service.getInstance(owner.token, instance.instance.id);
-  assert.equal(rebuilt.instance.buildStatus, "ready");
-  assert.equal(
-    rebuilt.instance.managedImageDigest,
-    "sha256:cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"
-  );
-  assert.ok(rebuilt.instance.buildArtifactKey);
-  assert.ok(await buildBucket.get(rebuilt.instance.buildArtifactKey));
+  const refreshedInstance = await service.getInstance(owner.token, instance.instance.id);
+  assert.equal(refreshedInstance.instance.buildStatus, "ready");
+  assert.equal(refreshedInstance.instance.buildArtifactKey, null);
 });
 
 test("worker exposes targeted operator reconcile endpoints", async () => {
@@ -2016,16 +1981,10 @@ test("worker coordinates session lifecycle through the session container durable
   ]);
 });
 
-test("worker health reports build dispatch removed", async () => {
+test("worker health reports legacy build dispatch fields removed", async () => {
   const healthApp = createApp({
     BUILD_QUEUE: {
       async send() {
-        return null;
-      }
-    },
-    BUILD_WORKFLOW_NAME: "burstflare-builds",
-    BUILD_WORKFLOW: {
-      async create() {
         return null;
       }
     }
@@ -2033,14 +1992,7 @@ test("worker health reports build dispatch removed", async () => {
   const health = await requestJson(healthApp, "/api/health");
   assert.equal(health.response.status, 200);
   assert.equal(health.data.runtime.workflowEnabled, false);
-  assert.equal(health.data.runtime.buildDispatchMode, "manifest");
-
-  const remoteHealthApp = createApp({
-    REMOTE_BUILD_URL: "https://builder.example.test/build"
-  });
-  const remoteHealth = await requestJson(remoteHealthApp, "/api/health");
-  assert.equal(remoteHealth.response.status, 200);
-  assert.equal(remoteHealth.data.runtime.buildDispatchMode, "remote-http");
+  assert.equal(Object.prototype.hasOwnProperty.call(health.data.runtime, "buildDispatchMode"), false);
 });
 
 test("worker restores and syncs instance common state", async () => {

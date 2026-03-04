@@ -157,7 +157,7 @@ test("service supports instance CRUD with write-only secrets", async () => {
   const created = await service.createInstance(owner.token, {
     name: "Base Node",
     description: "Node 20 runtime",
-    baseImage: "node:20",
+    baseImage: "ubuntu:24.04",
     dockerfilePath: "./Dockerfile",
     dockerContext: ".",
     persistedPaths: ["/workspace", "/home/flare/.cache"],
@@ -170,14 +170,14 @@ test("service supports instance CRUD with write-only secrets", async () => {
     }
   });
   assert.equal(created.instance.name, "Base Node");
-  assert.equal(created.instance.image, "node:20");
-  assert.equal(created.instance.baseImage, "node:20");
+  assert.equal(created.instance.image, "ubuntu:24.04");
+  assert.equal(created.instance.baseImage, "ubuntu:24.04");
   assert.equal(created.instance.bootstrapVersion, "v1");
-  assert.match(created.instance.managedRuntimeImage, /^burstflare\/session-runtime:v1-bld_/);
+  assert.equal(created.instance.managedRuntimeImage, "burstflare/session-runtime:v1");
   assert.match(created.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
-  assert.match(created.instance.buildId, /^bld_/);
+  assert.equal(created.instance.buildId, null);
   assert.equal(created.instance.buildStatus, "ready");
-  assert.match(created.instance.buildArtifactKey, new RegExp(`^instance-builds/${created.instance.id}/bld_`));
+  assert.equal(created.instance.buildArtifactKey, null);
   assert.deepEqual(created.instance.persistedPaths, ["/workspace", "/home/flare/.cache"]);
   assert.equal(created.instance.sleepTtlSeconds, 60);
   assert.deepEqual(created.instance.envVars, {
@@ -192,7 +192,7 @@ test("service supports instance CRUD with write-only secrets", async () => {
   assert.equal(listed.instances[0].id, created.instance.id);
 
   const updated = await service.updateInstance(owner.token, created.instance.id, {
-    image: "node:22",
+    image: "debian:12",
     persistedPaths: ["/workspace", "/home/flare"],
     sleepTtlSeconds: 120,
     envVars: {
@@ -204,12 +204,11 @@ test("service supports instance CRUD with write-only secrets", async () => {
       extra_token: "secret-3"
     }
   });
-  assert.equal(updated.instance.image, "node:22");
-  assert.equal(updated.instance.baseImage, "node:22");
-  assert.match(updated.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(updated.instance.image, "debian:12");
+  assert.equal(updated.instance.baseImage, "debian:12");
   assert.notEqual(updated.instance.managedImageDigest, created.instance.managedImageDigest);
   assert.equal(updated.instance.buildStatus, "ready");
-  assert.notEqual(updated.instance.buildId, created.instance.buildId);
+  assert.equal(updated.instance.buildId, created.instance.buildId);
   assert.deepEqual(updated.instance.persistedPaths, ["/workspace", "/home/flare"]);
   assert.equal(updated.instance.sleepTtlSeconds, 120);
   assert.deepEqual(updated.instance.envVars, {
@@ -221,8 +220,8 @@ test("service supports instance CRUD with write-only secrets", async () => {
 
   const fetched = await service.getInstance(owner.token, created.instance.id);
   assert.equal(fetched.instance.id, created.instance.id);
-  assert.equal(fetched.instance.image, "node:22");
-  assert.equal(fetched.instance.baseImage, "node:22");
+  assert.equal(fetched.instance.image, "debian:12");
+  assert.equal(fetched.instance.baseImage, "debian:12");
   assert.deepEqual(fetched.instance.persistedPaths, ["/workspace", "/home/flare"]);
   assert.equal(fetched.instance.sleepTtlSeconds, 120);
   assert.equal("secrets" in fetched.instance, false);
@@ -235,7 +234,24 @@ test("service supports instance CRUD with write-only secrets", async () => {
   assert.deepEqual(empty.instances, []);
 });
 
-test("service can queue and complete a managed instance build on the server", async () => {
+
+
+test("service rejects unsupported instance base images", async () => {
+  const service = createBurstFlareService({ store: createMemoryStore() });
+  const owner = await service.registerUser({
+    email: "unsupported-base-image@example.com",
+    name: "Unsupported Image"
+  });
+
+  await assert.rejects(
+    service.createInstance(owner.token, {
+      name: "Unsupported",
+      baseImage: "alpine:3.20"
+    }),
+    /Instance base image must be one of/
+  );
+});
+test("service can run a managed instance build on demand", async () => {
   let tick = Date.parse("2026-03-03T00:00:00.000Z");
   const queuedBuilds: Array<{ instanceId: string; buildId: string; reason: string }> = [];
   const objects = createObjectStore();
@@ -260,24 +276,20 @@ test("service can queue and complete a managed instance build on the server", as
 
   const created = await service.createInstance(owner.token, {
     name: "Queued Runtime",
-    baseImage: "python:3.12",
+    baseImage: "ubuntu:24.04",
     dockerfilePath: "./Dockerfile",
     dockerContext: "."
   });
 
-  assert.equal(created.instance.buildStatus, "queued");
-  assert.equal(created.instance.managedImageDigest, null);
-  assert.equal(queuedBuilds.length, 1);
-  assert.equal(queuedBuilds[0].instanceId, created.instance.id);
-  assert.equal(queuedBuilds[0].reason, "created");
-  assert.match(queuedBuilds[0].buildId, /^bld_/);
+  assert.equal(created.instance.buildStatus, "ready");
+  assert.equal(queuedBuilds.length, 0);
 
-  const completed = await service.processSystemInstanceBuild(created.instance.id, queuedBuilds[0].buildId, {
-    reason: "queue"
+  const completed = await service.processSystemInstanceBuild(created.instance.id, null, {
+    reason: "manual"
   });
   assert.equal(completed.instance.buildStatus, "ready");
   assert.equal(completed.build.status, "ready");
-  assert.equal(completed.build.id, queuedBuilds[0].buildId);
+  assert.match(completed.build.id || "", /^bld_/);
   assert.match(completed.instance.managedRuntimeImage, new RegExp(`-${completed.build.id}$`));
   assert.match(completed.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
   assert.equal(
@@ -287,7 +299,7 @@ test("service can queue and complete a managed instance build on the server", as
         format: "burstflare.instance-build.v2",
         instanceId: created.instance.id,
         buildId: completed.build.id,
-        baseImage: "python:3.12",
+        baseImage: "ubuntu:24.04",
         dockerfilePath: "./Dockerfile",
         dockerContext: ".",
         bootstrapVersion: "v1",
@@ -301,7 +313,7 @@ test("service can queue and complete a managed instance build on the server", as
   );
 });
 
-test("service can use a configured remote managed runtime builder", async () => {
+test("service can use a configured remote managed runtime builder for manual rebuilds", async () => {
   let tick = Date.parse("2026-03-03T00:00:00.000Z");
   const service = createBurstFlareService({
     store: createMemoryStore(),
@@ -325,14 +337,14 @@ test("service can use a configured remote managed runtime builder", async () => 
   });
 
   const created = await service.createInstance(owner.token, {
-    name: "Remote Built",
-    baseImage: "node:20"
+    name: "Remote Built"
   });
 
   assert.equal(created.instance.buildStatus, "ready");
-  assert.match(created.instance.managedRuntimeImage, new RegExp(`^registry\\.cloudflare\\.com/burstflare/${created.instance.id}:bld_`));
+  const rebuilt = await service.processSystemInstanceBuild(created.instance.id, null, { reason: "manual-remote" });
+  assert.match(rebuilt.instance.managedRuntimeImage, new RegExp(`^registry\.cloudflare\.com/burstflare/${created.instance.id}:bld_`));
   assert.equal(
-    created.instance.managedImageDigest,
+    rebuilt.instance.managedImageDigest,
     "sha256:feedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface"
   );
 });
@@ -434,7 +446,7 @@ test("service can create and operate on sessions owned by an instance", async ()
   });
   const instance = await service.createInstance(owner.token, {
     name: "Session Base",
-    image: "node:20",
+    image: "ubuntu:24.04",
     persistedPaths: ["/workspace", "/home/flare"],
     sleepTtlSeconds: 30
   });

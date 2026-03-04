@@ -5,7 +5,7 @@
 It gives you direct access to the BurstFlare control plane for:
 - authentication
 - workspace settings and billing
-- instance CRUD, rebuilds, and common-state sync
+- instance CRUD and common-state sync
 - session lifecycle and runtime access
 - snapshots, reports, exports, and reconcile operations
 
