@@ -307,7 +307,7 @@ async function runContainerSshSmoke() {
   let tunnel: Awaited<ReturnType<typeof createSshTunnel>> | null = null;
 
   try {
-    await runCommand("docker", ["build", "-t", imageName, "containers/session"], {
+    await runCommand("docker", ["build", "-f", "containers/session/Dockerfile", "-t", imageName, "."], {
       cwd: process.cwd()
     });
     await runCommand("docker", ["run", "-d", "--rm", "--name", containerName, "-p", `127.0.0.1:${runtimePort}:8080`, imageName]);

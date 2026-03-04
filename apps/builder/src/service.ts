@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,7 @@ export type BuildPlan = {
 };
 
 type BuildDeps = {
+  copyDir(sourcePath: string, destinationPath: string): Promise<void>;
   mkdtemp(prefix: string): Promise<string>;
   writeFile(filePath: string, content: string, encoding: "utf8"): Promise<void>;
   readFile(filePath: string, encoding: "utf8"): Promise<string>;
@@ -73,8 +74,8 @@ function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 }
 
-function runtimeServerPath(): string {
-  return path.join(repoRoot(), "containers", "session", "server.mjs");
+function runtimeAgentWorkspacePath(): string {
+  return path.join(repoRoot(), "apps", "runtime-agent");
 }
 
 function sanitizeTagSegment(value: string): string {
@@ -132,16 +133,27 @@ export function parseBuildRequest(body: unknown): BuildRequest {
 }
 
 function buildDockerfile(baseImage: string): string {
-  return `FROM ${baseImage}
+  return `FROM golang:1.24-alpine AS burstflare-runtime-build
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+WORKDIR /src
+
+COPY runtime-agent/ /src/
+
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/burstflare-runtime .
+
+FROM ${baseImage}
 
 SHELL ["/bin/sh", "-lc"]
 WORKDIR /app
 
-COPY server.mjs /app/server.mjs
+COPY --from=burstflare-runtime-build /out/burstflare-runtime /usr/local/bin/burstflare-runtime
 COPY bootstrap.sh /usr/local/bin/burstflare-bootstrap
 
 RUN chmod 755 /usr/local/bin/burstflare-bootstrap \\
-  && if ! command -v node >/dev/null 2>&1; then echo "Base image must already include Node.js" >&2; exit 1; fi \\
+  && chmod 755 /usr/local/bin/burstflare-runtime \\
   && if command -v apk >/dev/null 2>&1; then \\
        apk add --no-cache openssh-server openssh-sftp-server shadow; \\
      elif command -v apt-get >/dev/null 2>&1; then \\
@@ -169,7 +181,7 @@ ENV PORT=8080
 EXPOSE 8080
 
 ENTRYPOINT ["/usr/local/bin/burstflare-bootstrap"]
-CMD ["node", "/app/server.mjs"]
+CMD ["/usr/local/bin/burstflare-runtime"]
 `;
 }
 
@@ -193,7 +205,7 @@ export function createBuildPlan(request: BuildRequest, config: BuilderConfig): B
       runtimeContract: {
         entrypoint: "/usr/local/bin/burstflare-bootstrap",
         startupHookEnv: "BURSTFLARE_STARTUP_HOOK",
-        runtimeServer: "/app/server.mjs"
+        runtimeAgent: "/usr/local/bin/burstflare-runtime"
       }
     },
     null,
@@ -243,6 +255,7 @@ function defaultRunCommand(command: string, args: string[], cwd: string): Promis
 
 function defaultDeps(): BuildDeps {
   return {
+    copyDir: (sourcePath, destinationPath) => cp(sourcePath, destinationPath, { recursive: true }),
     mkdtemp,
     writeFile: (filePath, content, encoding) => writeFile(filePath, content, encoding),
     readFile: (filePath, encoding) => readFile(filePath, encoding),
@@ -266,11 +279,7 @@ export async function buildManagedRuntime(
   try {
     await mergedDeps.writeFile(path.join(workDir, "Dockerfile"), plan.dockerfile, "utf8");
     await mergedDeps.writeFile(path.join(workDir, "bootstrap.sh"), plan.bootstrapScript, "utf8");
-    await mergedDeps.writeFile(
-      path.join(workDir, "server.mjs"),
-      await mergedDeps.readFile(runtimeServerPath(), "utf8"),
-      "utf8"
-    );
+    await mergedDeps.copyDir(runtimeAgentWorkspacePath(), path.join(workDir, "runtime-agent"));
     const args = [
       "buildx",
       "build",
