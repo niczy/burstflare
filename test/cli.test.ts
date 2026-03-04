@@ -718,8 +718,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
       configPath
     });
     assert.equal(code, 0);
-    const loginOutput = JSON.parse(stdout.data.trim());
-    assert.ok(loginOutput.authSessionId);
+    assert.match(stdout.data.trim(), /^Signed in as .+\. You're all set!$/);
 
     stdout.data = "";
 
