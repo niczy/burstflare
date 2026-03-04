@@ -29,3 +29,23 @@ Local run:
 ```bash
 npm run dev --workspace @burstflare/builder
 ```
+
+Production deploy bundle:
+
+- `deploy/Dockerfile`
+- `deploy/builder.env.example`
+- `deploy/burstflare-builder.service`
+- `deploy/builder.burstflare.dev.nginx.conf`
+
+Suggested host rollout for `builder.burstflare.dev`:
+
+1. Build the service image from repo root:
+   `docker build -f apps/builder/deploy/Dockerfile -t burstflare-builder:latest .`
+2. Copy `apps/builder/deploy/builder.env.example` to `/etc/burstflare-builder.env` and fill in the real values.
+3. Put registry auth in `/etc/burstflare-builder/docker/config.json` so the containerized builder can push images.
+4. Install `apps/builder/deploy/burstflare-builder.service` to `/etc/systemd/system/burstflare-builder.service`, then run:
+   `sudo systemctl daemon-reload && sudo systemctl enable --now burstflare-builder`
+5. Install `apps/builder/deploy/builder.burstflare.dev.nginx.conf` as an nginx site, point TLS at the real certificate paths, and reload nginx.
+6. In the main BurstFlare app, set:
+   `REMOTE_BUILD_URL=https://builder.burstflare.dev/build`
+   `REMOTE_BUILD_TOKEN=<same value as BUILDER_AUTH_TOKEN>`

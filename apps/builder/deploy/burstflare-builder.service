@@ -1,0 +1,24 @@
+[Unit]
+Description=BurstFlare Remote Builder
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+EnvironmentFile=/etc/burstflare-builder.env
+ExecStartPre=-/usr/bin/docker rm -f burstflare-builder
+ExecStart=/usr/bin/docker run --rm --name burstflare-builder \
+  --pull always \
+  -p 127.0.0.1:8788:8788 \
+  --env-file /etc/burstflare-builder.env \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /etc/burstflare-builder/docker:/root/.docker:ro \
+  burstflare-builder:latest
+ExecStop=/usr/bin/docker stop burstflare-builder
+
+[Install]
+WantedBy=multi-user.target
