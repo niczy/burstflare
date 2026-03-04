@@ -48,13 +48,11 @@ import { createId } from "./utils.js";
 const DEVICE_CODE_TTL_MS = 1000 * 60 * 10;
 const EMAIL_AUTH_CODE_TTL_MS = 1000 * 60 * 10;
 const UPLOAD_GRANT_TTL_MS = 1000 * 60 * 10;
-const MAX_BUILD_ATTEMPTS = 3;
 const MAX_TEMPLATE_BUNDLE_BYTES = 256 * 1024;
 const MAX_SNAPSHOT_BYTES = 512 * 1024;
 const MAX_COMMON_STATE_BYTES = 512 * 1024;
 const MAX_RUNTIME_SECRETS = 32;
 const MAX_RUNTIME_SECRET_VALUE_BYTES = 4096;
-const ALLOWED_TEMPLATE_FEATURES = new Set(["ssh", "browser", "snapshots"]);
 
 const PLANS = {
   free: {
@@ -369,32 +367,6 @@ function canWrite(role) {
   return role === "owner" || role === "admin" || role === "member";
 }
 
-function validateTemplateManifest(manifest) {
-  ensure(manifest && typeof manifest === "object" && !Array.isArray(manifest), "Manifest must be an object");
-  ensure(typeof manifest.image === "string" && manifest.image.trim(), "Manifest image is required");
-
-  if (manifest.features !== undefined) {
-    ensure(Array.isArray(manifest.features), "Manifest features must be an array");
-    for (const feature of manifest.features) {
-      ensure(ALLOWED_TEMPLATE_FEATURES.has(feature), `Unsupported manifest feature: ${feature}`);
-    }
-  }
-
-  if (manifest.persistedPaths !== undefined) {
-    ensure(Array.isArray(manifest.persistedPaths), "Manifest persistedPaths must be an array");
-    ensure(manifest.persistedPaths.length <= 8, "Manifest persistedPaths exceeds limit");
-    for (const entry of manifest.persistedPaths) {
-      ensure(typeof entry === "string" && entry.startsWith("/"), "Persisted paths must be absolute");
-    }
-  }
-
-  if (manifest.sleepTtlSeconds !== undefined) {
-    ensure(Number.isInteger(manifest.sleepTtlSeconds), "Manifest sleepTtlSeconds must be an integer");
-    ensure(manifest.sleepTtlSeconds >= 1, "Manifest sleepTtlSeconds must be at least 1");
-    ensure(manifest.sleepTtlSeconds <= 60 * 60 * 24 * 7, "Manifest sleepTtlSeconds exceeds limit");
-  }
-}
-
 function formatUser(user) {
   if (!user) {
     return null;
@@ -439,50 +411,6 @@ function writeSessionEvent(state, clock, sessionId, stateName, details = {}) {
     details,
     createdAt: nowIso(clock)
   });
-}
-
-function createBindingManifest(template, templateVersion, build) {
-  return {
-    image: templateVersion?.manifest?.image || null,
-    imageReference: build?.artifactImageReference || null,
-    imageDigest: build?.artifactImageDigest || null,
-    configDigest: build?.artifactConfigDigest || null,
-    layerCount: build?.artifactLayerCount || 0,
-    features: templateVersion?.manifest?.features || [],
-    persistedPaths: templateVersion?.manifest?.persistedPaths || [],
-    bundleUploaded: Boolean(templateVersion?.bundleUploadedAt),
-    artifactKey: build?.artifactKey || null,
-    artifactSource: build?.artifactSource || null,
-    artifactDigest: build?.artifactDigest || null,
-    artifactBuiltAt: build?.artifactBuiltAt || null,
-    templateName: template?.name || "unknown"
-  };
-}
-
-function writeBindingRelease(state, clock, workspaceId, templateId, templateVersionId, binding = null, extra = {}) {
-  const release = {
-    id: createId("rel"),
-    workspaceId,
-    templateId,
-    templateVersionId,
-    binding,
-    ...extra,
-    createdAt: nowIso(clock)
-  };
-  state.bindingReleases.push(release);
-  return release;
-}
-
-function formatBindingRelease(state, release) {
-  const version = state.templateVersions.find((candidate) => candidate.id === release.templateVersionId);
-  const template = state.templates.find((candidate) => candidate.id === release.templateId);
-  const build = version ? state.templateBuilds.find((candidate) => candidate.templateVersionId === version.id) : null;
-  return {
-    ...release,
-    binding: release.binding || createBindingManifest(template, version, build),
-    templateName: template?.name || "unknown",
-    version: version?.version || "unknown"
-  };
 }
 
 function getUploadGrants(state) {
@@ -814,14 +742,6 @@ function ensureStorageWithinLimit(state, workspace, nextTotalBytes) {
   ensure(nextTotalBytes <= limits.maxStorageBytes, "Workspace storage limit reached", 403);
 }
 
-function getActiveVersion(state, templateId) {
-  const template = state.templates.find((entry) => entry.id === templateId);
-  if (!template || template.archivedAt || !template.activeVersionId) {
-    return null;
-  }
-  return state.templateVersions.find((entry) => entry.id === template.activeVersionId) || null;
-}
-
 function getRunningSessionCount(state, workspaceId) {
   return state.sessions.filter((entry) => entry.workspaceId === workspaceId && entry.state === "running").length;
 }
@@ -839,88 +759,6 @@ function formatWorkspace(state, workspace, role) {
     quotaOverrides: getWorkspaceQuotaOverrides(workspace),
     role,
     memberCount
-  };
-}
-
-function getTemplateReleases(state, templateId) {
-  return state.bindingReleases
-    .filter((entry) => entry.templateId === templateId)
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-}
-
-function summarizeTemplateBuilds(versions) {
-  const summary = {
-    queued: 0,
-    building: 0,
-    succeeded: 0,
-    failed: 0,
-    deadLettered: 0,
-    other: 0
-  };
-  for (const version of versions) {
-    const status = version.build?.status || null;
-    if (!status) {
-      continue;
-    }
-    if (status === "dead_lettered") {
-      summary.deadLettered += 1;
-      continue;
-    }
-    if (Object.prototype.hasOwnProperty.call(summary, status)) {
-      summary[status] += 1;
-      continue;
-    }
-    summary.other += 1;
-  }
-  return summary;
-}
-
-function summarizeTemplateArtifacts(versions) {
-  return versions.reduce(
-    (summary, version) => {
-      summary.bundleBytes += version.bundleBytes || 0;
-      summary.buildArtifactBytes += version.build?.artifactBytes || 0;
-      if (version.bundleUploadedAt) {
-        summary.versionBundles += 1;
-      }
-      if (version.build?.artifactBuiltAt) {
-        summary.buildArtifacts += 1;
-      }
-      return summary;
-    },
-    {
-      bundleBytes: 0,
-      buildArtifactBytes: 0,
-      versionBundles: 0,
-      buildArtifacts: 0
-    }
-  );
-}
-
-function formatTemplate(state, template) {
-  const versions = state.templateVersions
-    .filter((entry) => entry.templateId === template.id)
-    .map((version) => {
-      const build = state.templateBuilds.find((entry) => entry.templateVersionId === version.id) || null;
-      return { ...version, build };
-    });
-  const releases = getTemplateReleases(state, template.id);
-  const activeVersion = versions.find((entry) => entry.id === template.activeVersionId) || null;
-  return {
-    ...template,
-    activeVersion,
-    versions,
-    releaseCount: releases.length,
-    latestRelease: releases.length ? releases[releases.length - 1] : null,
-    buildSummary: summarizeTemplateBuilds(versions),
-    storageSummary: summarizeTemplateArtifacts(versions)
-  };
-}
-
-function formatTemplateDetail(state, template) {
-  return {
-    ...formatTemplate(state, template),
-    releases: getTemplateReleases(state, template.id)
   };
 }
 
@@ -963,447 +801,6 @@ function applySessionTransition({ state, clock, auth, action, runtime = null }) 
     writeAudit,
     formatSession
   });
-}
-
-function buildTemplateBuildLog(build, template, templateVersion) {
-  const lines = [
-    `build_id=${build.id}`,
-    `template_id=${template.id}`,
-    `template_name=${template.name}`,
-    `template_version_id=${templateVersion.id}`,
-    `template_version=${templateVersion.version}`,
-    `bundle_uploaded=${templateVersion.bundleUploadedAt ? "true" : "false"}`,
-    `bundle_key=${templateVersion.bundleKey || ""}`,
-    `build_status=${build.status}`,
-    `dispatch_mode=${build.dispatchMode || ""}`,
-    `execution_source=${build.executionSource || ""}`,
-    `attempts=${build.attempts}`,
-    `last_error=${build.lastError || ""}`,
-    `last_failure_at=${build.lastFailureAt || ""}`,
-    `dead_lettered_at=${build.deadLetteredAt || ""}`,
-    `workflow_name=${build.workflowName || ""}`,
-    `workflow_instance_id=${build.workflowInstanceId || ""}`,
-    `workflow_status=${build.workflowStatus || ""}`,
-    `workflow_queued_at=${build.workflowQueuedAt || ""}`,
-    `workflow_started_at=${build.workflowStartedAt || ""}`,
-    `workflow_finished_at=${build.workflowFinishedAt || ""}`,
-    `artifact_key=${build.artifactKey || ""}`,
-    `artifact_source=${build.artifactSource || ""}`,
-    `artifact_digest=${build.artifactDigest || ""}`,
-    `artifact_image_reference=${build.artifactImageReference || ""}`,
-    `artifact_image_digest=${build.artifactImageDigest || ""}`,
-    `artifact_config_digest=${build.artifactConfigDigest || ""}`,
-    `artifact_layer_count=${build.artifactLayerCount || 0}`,
-    `artifact_bytes=${build.artifactBytes || 0}`,
-    `artifact_built_at=${build.artifactBuiltAt || ""}`,
-    `started_at=${build.startedAt || ""}`,
-    `finished_at=${build.finishedAt || ""}`
-  ];
-  return `${lines.join("\n")}\n`;
-}
-
-function getBuildFailureReason(templateVersion) {
-  if (templateVersion?.manifest?.simulateFailure) {
-    return "Simulated builder failure";
-  }
-  return null;
-}
-
-async function persistBuildLog({ objects, template, templateVersion, build, log }) {
-  if (!objects?.putBuildLog) {
-    return;
-  }
-  await objects.putBuildLog({
-    workspace: { id: template.workspaceId },
-    template,
-    templateVersion,
-    build,
-    log
-  });
-}
-
-async function sha256Hex(value) {
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(toUint8Array(value)));
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function tryDecodeText(value) {
-  try {
-    return new TextDecoder().decode(toUint8Array(value));
-  } catch (_error) {
-    return "";
-  }
-}
-
-async function loadBuildInput({ objects, template, templateVersion }) {
-  if (templateVersion.bundleUploadedAt && objects?.getTemplateVersionBundle) {
-    const bundle = await objects.getTemplateVersionBundle({
-      workspace: { id: template.workspaceId },
-      template,
-      templateVersion
-    });
-    if (bundle?.body) {
-      return {
-        source: "bundle",
-        body: bundle.body,
-        bytes: bundle.bytes ?? toUint8Array(bundle.body).byteLength,
-        contentType: bundle.contentType || templateVersion.bundleContentType || "application/octet-stream"
-      };
-    }
-  }
-
-  const fallback = JSON.stringify(
-    {
-      image: templateVersion.manifest?.image || null,
-      features: templateVersion.manifest?.features || [],
-      persistedPaths: templateVersion.manifest?.persistedPaths || []
-    },
-    null,
-    2
-  );
-  return {
-    source: "manifest",
-    body: fallback,
-    bytes: new TextEncoder().encode(fallback).byteLength,
-    contentType: "application/json; charset=utf-8"
-  };
-}
-
-function parseImageReference(image) {
-  const raw = String(image || "").trim();
-  if (!raw) {
-    return {
-      repository: null,
-      tag: null
-    };
-  }
-
-  const withoutDigest = raw.split("@")[0];
-  const lastSlash = withoutDigest.lastIndexOf("/");
-  const lastColon = withoutDigest.lastIndexOf(":");
-  if (lastColon > lastSlash) {
-    return {
-      repository: withoutDigest.slice(0, lastColon),
-      tag: withoutDigest.slice(lastColon + 1)
-    };
-  }
-  return {
-    repository: withoutDigest,
-    tag: "latest"
-  };
-}
-
-async function buildTemplateArtifact({ template, templateVersion, build, input, clock }) {
-  const text = tryDecodeText(input.body);
-  const lineCount = text ? text.split(/\r?\n/).length : 0;
-  const sourceSha256 = await sha256Hex(input.body);
-  const manifestJson = JSON.stringify(templateVersion.manifest || {}, null, 2);
-  const manifestSha256 = await sha256Hex(manifestJson);
-  const imageParts = parseImageReference(templateVersion.manifest?.image);
-  const imageRepository = imageParts.repository || `registry.cloudflare.com/burstflare/${template.id}`;
-  const imageTag = imageParts.tag || templateVersion.version || "latest";
-  const imageDigest = `sha256:${await sha256Hex(`${sourceSha256}:${manifestSha256}:image`)}`;
-  const configDigest = `sha256:${await sha256Hex(`${manifestSha256}:${templateVersion.id}:config`)}`;
-  const layerDigests = [
-    `sha256:${await sha256Hex(`${sourceSha256}:bundle-layer`)}`,
-    `sha256:${await sha256Hex(`${manifestSha256}:manifest-layer`)}`
-  ];
-  const buildReference = `${imageRepository}:${imageTag}`;
-  const artifact = {
-    buildId: build.id,
-    templateId: template.id,
-    templateName: template.name,
-    templateVersionId: templateVersion.id,
-    version: templateVersion.version,
-    image: templateVersion.manifest?.image || null,
-    imageRepository,
-    imageTag,
-    imageReference: `${imageRepository}@${imageDigest}`,
-    imageDigest,
-    configDigest,
-    layerDigests,
-    layerCount: layerDigests.length,
-    buildReference,
-    buildStrategy: "simulated-oci",
-    features: templateVersion.manifest?.features || [],
-    persistedPaths: templateVersion.manifest?.persistedPaths || [],
-    source: input.source,
-    sourceContentType: input.contentType,
-    sourceBytes: input.bytes,
-    sourceSha256,
-    manifestSha256,
-    lineCount,
-    labels: {
-      "org.opencontainers.image.title": template.name,
-      "org.opencontainers.image.version": templateVersion.version,
-      "org.opencontainers.image.revision": build.id,
-      "org.opencontainers.image.source": buildReference
-    },
-    builtAt: nowIso(clock)
-  };
-  return {
-    json: JSON.stringify(artifact, null, 2),
-    artifact
-  };
-}
-
-async function persistBuildArtifact({ objects, build, artifactJson }) {
-  if (!objects?.putBuildArtifact) {
-    return;
-  }
-  await objects.putBuildArtifact({
-    build,
-    artifact: artifactJson
-  });
-}
-
-async function clearBuildArtifact({ objects, build }) {
-  if (!objects?.deleteBuildArtifact || !build?.artifactKey) {
-    return;
-  }
-  await objects.deleteBuildArtifact({ build });
-}
-
-function isAsyncBuildSource(source) {
-  return source === "queue" || source === "workflow";
-}
-
-function applyBuildDispatch(build, dispatch, clock) {
-  if (!dispatch) {
-    return;
-  }
-  build.dispatchMode = dispatch.dispatch || build.dispatchMode || null;
-  build.lastQueuedAt = dispatch.dispatchedAt || nowIso(clock);
-
-  if (dispatch.workflow) {
-    build.workflowName = dispatch.workflow.name || build.workflowName || null;
-    build.workflowInstanceId = dispatch.workflow.instanceId || build.workflowInstanceId || null;
-    build.workflowStatus = "queued";
-    build.workflowQueuedAt = dispatch.workflow.dispatchedAt || dispatch.dispatchedAt || nowIso(clock);
-    build.workflowStartedAt = null;
-    build.workflowFinishedAt = null;
-  } else if (dispatch.dispatch === "queue") {
-    build.workflowStatus = null;
-    build.workflowQueuedAt = null;
-    build.workflowStartedAt = null;
-    build.workflowFinishedAt = null;
-  }
-}
-
-function markBuildWorkflowState(build, status, clock) {
-  if (!status) {
-    return;
-  }
-  build.workflowStatus = status;
-  if (status === "running") {
-    build.workflowStartedAt = build.startedAt || nowIso(clock);
-    build.workflowFinishedAt = null;
-    return;
-  }
-  if (["succeeded", "failed", "dead_lettered"].includes(status)) {
-    build.workflowFinishedAt = build.finishedAt || nowIso(clock);
-  }
-}
-
-async function enqueueBuildDispatch({ jobs, build, clock }) {
-  if (!jobs?.enqueueBuild) {
-    return null;
-  }
-  const dispatch = await jobs.enqueueBuild(build.id);
-  applyBuildDispatch(build, dispatch, clock);
-  return dispatch;
-}
-
-async function processBuildRecord({
-  state,
-  clock,
-  objects,
-  jobs,
-  build,
-  template,
-  templateVersion,
-  source = "manual",
-  actorUserId = null
-}) {
-  if (!["queued", "retrying"].includes(build.status)) {
-    return null;
-  }
-
-  build.status = "building";
-  build.startedAt = nowIso(clock);
-  build.updatedAt = nowIso(clock);
-  build.attempts += 1;
-  build.executionSource = source;
-  templateVersion.status = "building";
-  if (source === "workflow") {
-    markBuildWorkflowState(build, "running", clock);
-  }
-
-  const failureReason = getBuildFailureReason(templateVersion);
-  if (failureReason) {
-    build.finishedAt = nowIso(clock);
-    build.updatedAt = nowIso(clock);
-    build.lastError = failureReason;
-    build.lastFailureAt = build.finishedAt;
-    build.artifactDigest = null;
-    build.artifactBytes = 0;
-    build.artifactBuiltAt = null;
-    build.artifactSource = null;
-    build.artifactImageReference = null;
-    build.artifactImageDigest = null;
-    build.artifactConfigDigest = null;
-    build.artifactLayerCount = 0;
-    templateVersion.status = "failed";
-    templateVersion.builtAt = null;
-    await clearBuildArtifact({ objects, build });
-
-    if (isAsyncBuildSource(source) && build.attempts < MAX_BUILD_ATTEMPTS) {
-      build.status = "retrying";
-      await enqueueBuildDispatch({ jobs, build, clock });
-      writeAudit(state, clock, {
-        action: "template.build_retry_scheduled",
-        actorUserId,
-        workspaceId: template.workspaceId,
-        targetType: "template_build",
-        targetId: build.id,
-        details: {
-          templateId: template.id,
-          templateVersionId: templateVersion.id,
-          source,
-          attempts: build.attempts,
-          maxAttempts: MAX_BUILD_ATTEMPTS,
-          error: failureReason
-        }
-      });
-    } else if (build.attempts >= MAX_BUILD_ATTEMPTS) {
-      build.status = "dead_lettered";
-      build.deadLetteredAt = build.finishedAt;
-      if (source === "workflow" || build.dispatchMode === "workflow") {
-        markBuildWorkflowState(build, "dead_lettered", clock);
-      }
-      writeAudit(state, clock, {
-        action: "template.build_dead_lettered",
-        actorUserId,
-        workspaceId: template.workspaceId,
-        targetType: "template_build",
-        targetId: build.id,
-        details: {
-          templateId: template.id,
-          templateVersionId: templateVersion.id,
-          source,
-          attempts: build.attempts,
-          maxAttempts: MAX_BUILD_ATTEMPTS,
-          error: failureReason
-        }
-      });
-    } else {
-      build.status = "failed";
-      build.deadLetteredAt = null;
-      if (source === "workflow" || build.dispatchMode === "workflow") {
-        markBuildWorkflowState(build, "failed", clock);
-      }
-      writeAudit(state, clock, {
-        action: "template.build_failed",
-        actorUserId,
-        workspaceId: template.workspaceId,
-        targetType: "template_build",
-        targetId: build.id,
-        details: {
-          templateId: template.id,
-          templateVersionId: templateVersion.id,
-          source,
-          attempts: build.attempts,
-          maxAttempts: MAX_BUILD_ATTEMPTS,
-          error: failureReason
-        }
-      });
-    }
-
-    const failedBuildLog = buildTemplateBuildLog(build, template, templateVersion);
-    await persistBuildLog({
-      objects,
-      template,
-      templateVersion,
-      build,
-      log: failedBuildLog
-    });
-
-    return {
-      ...build,
-      templateId: template.id,
-      templateVersionId: templateVersion.id
-    };
-  }
-
-  build.status = "succeeded";
-  build.finishedAt = nowIso(clock);
-  build.updatedAt = nowIso(clock);
-  build.lastError = null;
-  build.lastFailureAt = null;
-  build.deadLetteredAt = null;
-  templateVersion.status = "ready";
-  templateVersion.builtAt = nowIso(clock);
-  if (source === "workflow" || build.dispatchMode === "workflow") {
-    markBuildWorkflowState(build, "succeeded", clock);
-  }
-
-  const buildInput = await loadBuildInput({
-    objects,
-    template,
-    templateVersion
-  });
-  const builtArtifact = await buildTemplateArtifact({
-    template,
-    templateVersion,
-    build,
-    input: buildInput,
-    clock
-  });
-  build.artifactSource = builtArtifact.artifact.source;
-  build.artifactDigest = builtArtifact.artifact.sourceSha256;
-  build.artifactBytes = new TextEncoder().encode(builtArtifact.json).byteLength;
-  build.artifactBuiltAt = builtArtifact.artifact.builtAt;
-  build.artifactImageReference = builtArtifact.artifact.imageReference;
-  build.artifactImageDigest = builtArtifact.artifact.imageDigest;
-  build.artifactConfigDigest = builtArtifact.artifact.configDigest;
-  build.artifactLayerCount = builtArtifact.artifact.layerCount;
-  await persistBuildArtifact({
-    objects,
-    build,
-    artifactJson: builtArtifact.json
-  });
-
-  const buildLog = buildTemplateBuildLog(build, template, templateVersion);
-  await persistBuildLog({
-    objects,
-    template,
-    templateVersion,
-    build,
-    log: buildLog
-  });
-
-  writeUsage(state, clock, {
-    workspaceId: template.workspaceId,
-    kind: "template_build",
-    value: 1,
-    details: { templateId: template.id, templateVersionId: templateVersion.id, source }
-  });
-  writeAudit(state, clock, {
-    action: "template.build_succeeded",
-    actorUserId,
-    workspaceId: template.workspaceId,
-    targetType: "template_build",
-    targetId: build.id,
-    details: { templateId: template.id, templateVersionId: templateVersion.id, source }
-  });
-
-  return {
-    ...build,
-    templateId: template.id,
-    templateVersionId: templateVersion.id
-  };
 }
 
 export function createBurstFlareService(options: any = {}) {
@@ -1500,12 +897,6 @@ export function createBurstFlareService(options: any = {}) {
         return false;
       }) || null
     );
-  }
-
-function getWorkspaceBuildRecords(state, workspaceId = null) {
-    void state;
-    void workspaceId;
-    return [];
   }
 
   function getReconcileCandidates(state, workspaceId = null, checkedAtMs = nowMs(clock)) {
@@ -4005,7 +3396,6 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
           targetId: auth.workspace.id
         });
         const reportAt = nowMs(clock);
-        const workspaceBuilds = getWorkspaceBuildRecords(state, auth.workspace.id);
         const reconcileCandidates = getReconcileCandidates(state, auth.workspace.id, reportAt);
         const report = {
           workspace: formatWorkspace(state, auth.workspace, auth.membership.role),
@@ -4013,11 +3403,11 @@ function getWorkspaceBuildRecords(state, workspaceId = null) {
           instances: state.instances.filter((entry) => entry.userId === auth.workspace.ownerUserId).length,
           templates: 0,
           templatesArchived: 0,
-          buildsQueued: workspaceBuilds.filter((entry) => ["queued", "retrying"].includes(entry.build.status)).length,
-          buildsBuilding: workspaceBuilds.filter((entry) => entry.build.status === "building").length,
-          buildsStuck: reconcileCandidates.stuckBuilds.length,
-          buildsFailed: workspaceBuilds.filter((entry) => entry.build.status === "failed").length,
-          buildsDeadLettered: workspaceBuilds.filter((entry) => entry.build.status === "dead_lettered").length,
+          buildsQueued: 0,
+          buildsBuilding: 0,
+          buildsStuck: 0,
+          buildsFailed: 0,
+          buildsDeadLettered: 0,
           sessionsRunning: getRunningSessionCount(state, auth.workspace.id),
           sessionsSleeping: state.sessions.filter(
             (entry) => entry.workspaceId === auth.workspace.id && entry.state === "sleeping"
