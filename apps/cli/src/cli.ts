@@ -864,14 +864,6 @@ function parseKeyValueMapOption(value: unknown): Record<string, string> | undefi
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
-function slugifyInstanceName(value: string): string {
-  const slug = String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "instance";
-}
-
 function parseIntegerOption(value: unknown): number | undefined {
   if (value === undefined) {
     return undefined;

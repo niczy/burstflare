@@ -350,7 +350,8 @@ function devicePage(code: string | null): string {
 function createObjectStore(options: any): any {
   const snapshotBucket = options.SNAPSHOT_BUCKET || null;
   const commonStateBucket = options.COMMON_STATE_BUCKET || options.SNAPSHOT_BUCKET || null;
-  if (!snapshotBucket && !commonStateBucket) {
+  const buildBucket = options.BUILD_BUCKET || null;
+  if (!snapshotBucket && !commonStateBucket && !buildBucket) {
     return null;
   }
 
@@ -419,6 +420,26 @@ function createObjectStore(options: any): any {
       }
       await snapshotBucket.delete(snapshot.objectKey);
       return { key: snapshot.objectKey };
+    },
+
+    async putBuildArtifact({
+      artifactKey,
+      body,
+      contentType
+    }: {
+      instance: any;
+      buildId: string;
+      artifactKey: string;
+      body: any;
+      contentType: string;
+    }) {
+      if (!buildBucket || !artifactKey) {
+        return null;
+      }
+      await buildBucket.put(artifactKey, body, {
+        httpMetadata: { contentType }
+      });
+      return { key: artifactKey };
     }
   };
 }
@@ -820,11 +841,24 @@ async function parseStripeWebhookEvent(request: Request, options: any): Promise<
 }
 
 function createJobQueue(options: any): any {
-  if (!options.RECONCILE_QUEUE) {
+  if (!options.RECONCILE_QUEUE && !options.BUILD_QUEUE) {
     return null;
   }
 
   return {
+    async enqueueInstanceBuild(instanceId: string, buildId: string, reason = "refresh") {
+      if (!options.BUILD_QUEUE) {
+        return null;
+      }
+      await options.BUILD_QUEUE.send({
+        type: "instance-build",
+        instanceId,
+        buildId,
+        reason
+      });
+      return { ok: true };
+    },
+
     async enqueueReconcile() {
       if (!options.RECONCILE_QUEUE) {
         return null;
@@ -1328,6 +1362,12 @@ export async function handleQueueBatch(batch: any, options: any = {}): Promise<v
   const service = createWorkerService(options);
   for (const message of batch.messages) {
     const body = message.body || {};
+    if (body.type === "instance-build" && body.instanceId) {
+      await service.processSystemInstanceBuild(String(body.instanceId), body.buildId ? String(body.buildId) : null, {
+        reason: body.reason || "queue"
+      });
+      continue;
+    }
     if (body.type === "reconcile") {
       await runReconcile({
         ...options,

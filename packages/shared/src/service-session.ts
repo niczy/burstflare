@@ -28,20 +28,36 @@ export function resolveInstanceRuntimeSpec(instance) {
   const dockerfilePath = instance?.dockerfilePath == null ? null : String(instance.dockerfilePath || "");
   const dockerContext = instance?.dockerContext == null ? null : String(instance.dockerContext || "");
   const bootstrapVersion = String(instance?.bootstrapVersion || DEFAULT_BOOTSTRAP_VERSION);
-  const managedRuntimeImage = String(instance?.managedRuntimeImage || `burstflare/session-runtime:${bootstrapVersion}`);
+  const hasExplicitManagedArtifact =
+    instance &&
+    (Object.prototype.hasOwnProperty.call(instance, "managedRuntimeImage") ||
+      Object.prototype.hasOwnProperty.call(instance, "managedImageDigest") ||
+      Object.prototype.hasOwnProperty.call(instance, "buildStatus") ||
+      Object.prototype.hasOwnProperty.call(instance, "buildId"));
+  const managedRuntimeImage =
+    instance?.managedRuntimeImage != null
+      ? String(instance.managedRuntimeImage)
+      : hasExplicitManagedArtifact
+        ? null
+        : `burstflare/session-runtime:${bootstrapVersion}`;
   const digestSeed = [
     bootstrapVersion,
     baseImage,
     dockerfilePath || "",
     dockerContext || "",
-    managedRuntimeImage
+    managedRuntimeImage || ""
   ].join("\n");
   const digestChunk = hashHex(digestSeed);
   return {
     baseImage,
     bootstrapVersion,
     managedRuntimeImage,
-    managedImageDigest: String(instance?.managedImageDigest || `sha256:${digestChunk.repeat(8)}`)
+    managedImageDigest:
+      instance?.managedImageDigest != null
+        ? String(instance.managedImageDigest)
+        : hasExplicitManagedArtifact
+          ? null
+          : `sha256:${digestChunk.repeat(8)}`
   };
 }
 
