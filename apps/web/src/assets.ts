@@ -845,6 +845,109 @@ button.secondary {
     min-height: auto;
   }
 }
+
+/* Billing page */
+
+.billing-plan-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(180, 76, 35, 0.15);
+}
+
+.billing-plan-badge--pro {
+  background: linear-gradient(135deg, rgba(180, 76, 35, 0.12), rgba(180, 76, 35, 0.06));
+  border-color: var(--accent);
+}
+
+.billing-plan-badge--enterprise {
+  background: linear-gradient(135deg, rgba(22, 33, 40, 0.08), rgba(22, 33, 40, 0.03));
+  border-color: var(--ink);
+}
+
+.billing-plan-name {
+  font-size: 1.05rem;
+  font-weight: 780;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.billing-limits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.billing-limit-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.billing-limit-row:last-child {
+  border-bottom: none;
+}
+
+.billing-limit-row span:last-child {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.billing-meter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+
+.billing-meter-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.billing-meter-value {
+  font-size: 0.92rem;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.billing-cost-total {
+  font-size: 0.92rem;
+  color: var(--ink);
+  padding: 8px 0;
+}
+
+.billing-balance {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.billing-balance-amount {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.grid-1 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
 `;
 
 export const html: string = `<!doctype html>

@@ -269,12 +269,174 @@ export function getAppScript(turnstileKey = ""): string {
       pretty("billingSummary", await api("/api/workspaces/current/billing"));
     }
 
+    function formatUsd(amount){
+      return "$" + Number(amount || 0).toFixed(2);
+    }
+
+    function renderBillingPlan(data){
+      var workspace = data && data.workspace;
+      var plan = workspace ? (workspace.plan || "free") : "free";
+      var badge = byId("billingPlanBadge");
+      if (badge) {
+        badge.className = "billing-plan-badge billing-plan-badge--" + plan;
+      }
+      setText("billingPlanName", plan.charAt(0).toUpperCase() + plan.slice(1));
+      var planBtn = byId("planButton");
+      if (planBtn) {
+        if (plan === "pro" || plan === "enterprise") {
+          planBtn.textContent = plan === "enterprise" ? "Enterprise plan" : "Current plan: Pro";
+          planBtn.disabled = true;
+        } else {
+          planBtn.textContent = "Upgrade to Pro";
+          planBtn.disabled = false;
+        }
+      }
+      var limits = byId("billingLimits");
+      if (limits && workspace && workspace.quotas) {
+        var q = workspace.quotas;
+        limits.innerHTML =
+          '<div class="billing-limit-row"><span>Running sessions</span><span>' + (q.maxRunningSessions || "—") + '</span></div>' +
+          '<div class="billing-limit-row"><span>Runtime minutes</span><span>' + (q.maxRuntimeMinutes || "—").toLocaleString() + '</span></div>' +
+          '<div class="billing-limit-row"><span>Storage</span><span>' + (q.maxStorageBytes ? (q.maxStorageBytes / 1048576).toFixed(0) + " MB" : "—") + '</span></div>';
+      }
+    }
+
+    function renderBillingPaymentMethod(data){
+      var billing = data && data.billing;
+      var node = byId("billingPaymentMethod");
+      if (!node) return;
+      if (billing && billing.billingStatus === "active" && billing.defaultPaymentMethodId) {
+        node.innerHTML = '<span>Payment method on file</span><br />' +
+          '<span class="muted">Status: <strong>' + (billing.billingStatus || "unknown") + '</strong></span>';
+      } else if (billing && billing.billingStatus === "checkout_open") {
+        node.innerHTML = '<span class="muted">Checkout in progress. Complete setup in the Stripe window.</span>';
+      } else {
+        node.innerHTML = '<span class="muted">No payment method on file.</span>';
+      }
+      var manageBtn = byId("manageBillingButton");
+      if (manageBtn) {
+        manageBtn.style.display = billing && billing.customerId ? "" : "none";
+      }
+    }
+
+    function renderBillingUsage(data){
+      var usage = data && data.usage;
+      var pricing = data && data.pricing;
+      var meters = byId("billingUsageMeters");
+      if (meters && usage) {
+        meters.innerHTML =
+          '<div class="billing-meter"><span class="billing-meter-label">Runtime</span><span class="billing-meter-value">' +
+          Number(usage.runtimeMinutes || 0).toFixed(1) + ' min</span></div>' +
+          '<div class="billing-meter"><span class="billing-meter-label">Storage</span><span class="billing-meter-value">' +
+          Number(usage.storageGbDays || 0).toFixed(2) + ' GB-days</span></div>';
+      }
+      var cost = byId("billingUsageCost");
+      if (cost && pricing) {
+        cost.innerHTML =
+          '<div class="billing-cost-total">Estimated cost: <strong>' + formatUsd(pricing.totalUsd) + '</strong></div>' +
+          '<div class="muted" style="font-size:0.82rem;margin-top:4px">' +
+          (pricing.lineItems || []).map(function(item){
+            return item.metric + ": " + formatUsd(item.amountUsd);
+          }).join(" · ") + '</div>';
+      }
+    }
+
+    function renderBillingInvoice(data){
+      var billing = data && data.billing;
+      var pending = data && data.pendingInvoiceEstimate;
+      var node = byId("billingInvoiceInfo");
+      if (!node) return;
+      var parts = [];
+      if (billing && billing.lastInvoiceId) {
+        parts.push('<span>Last invoice: <strong>' + (billing.lastInvoiceStatus || "unknown") + '</strong></span>');
+        if (billing.lastInvoiceAmountUsd != null) {
+          parts.push('<span class="muted">' + formatUsd(billing.lastInvoiceAmountUsd) + '</span>');
+        }
+      }
+      if (pending && pending.totalUsd > 0) {
+        parts.push('<span class="muted">Unbilled usage: ' + formatUsd(pending.totalUsd) + '</span>');
+      }
+      if (parts.length === 0) {
+        node.innerHTML = '<span class="muted">No invoices yet.</span>';
+      } else {
+        node.innerHTML = parts.join('<br />');
+      }
+    }
+
+    function renderBillingBalance(data){
+      var node = byId("billingBalance");
+      if (!node) return;
+      var balance = data && typeof data.creditBalanceUsd === "number" ? data.creditBalanceUsd : 0;
+      node.innerHTML = '<span class="billing-balance-amount">' + formatUsd(balance) + '</span>';
+    }
+
+    async function loadBilling(){
+      if (!byId("billingPlanBadge") && !byId("billingUsageMeters")) return;
+      if (!authState) {
+        renderBillingPlan({});
+        renderBillingPaymentMethod({});
+        renderBillingUsage({});
+        renderBillingInvoice({});
+        renderBillingBalance({});
+        return;
+      }
+      var billingData = await api("/api/workspaces/current/billing");
+      renderBillingPlan(billingData);
+      renderBillingPaymentMethod(billingData);
+      renderBillingUsage(billingData);
+      renderBillingInvoice(billingData);
+      try {
+        var balanceData = await api("/api/workspaces/current/billing/balance");
+        renderBillingBalance(balanceData);
+      } catch (_e) {
+        renderBillingBalance({});
+      }
+    }
+
+    async function addPaymentMethod(){
+      var origin = window.location.origin;
+      var result = await api("/api/workspaces/current/billing/checkout", {
+        method: "POST",
+        body: JSON.stringify({
+          successUrl: origin + "/billing?checkout=success",
+          cancelUrl: origin + "/billing?checkout=cancel"
+        })
+      });
+      if (result && result.checkoutSession && result.checkoutSession.url) {
+        window.location.href = result.checkoutSession.url;
+      }
+    }
+
+    async function openBillingPortal(){
+      var origin = window.location.origin;
+      var result = await api("/api/workspaces/current/billing/portal", {
+        method: "POST",
+        body: JSON.stringify({
+          returnUrl: origin + "/billing"
+        })
+      });
+      if (result && result.portalSession && result.portalSession.url) {
+        window.location.href = result.portalSession.url;
+      }
+    }
+
+    async function generateInvoice(){
+      var result = await api("/api/workspaces/current/billing/invoice", {
+        method: "POST"
+      });
+      if (result && result.invoice && result.invoice.hostedInvoiceUrl) {
+        window.open(result.invoice.hostedInvoiceUrl, "_blank");
+      }
+      await loadBilling();
+    }
+
     async function refreshAll(){
       setError("");
       try {
         await refreshAuth();
         await loadDashboard();
         await loadProfile();
+        await loadBilling();
       } catch (error) {
         setError(error.message || String(error));
       }
@@ -439,6 +601,9 @@ export function getAppScript(turnstileKey = ""): string {
         if (target.id === "pullCommonStateButton") return await api("/api/instances/" + getValue("commonStateInstance") + "/pull", { method: "POST" }).then(refreshAll);
         if (target.id === "saveWorkspaceButton") return await saveWorkspace();
         if (target.id === "planButton") return await upgradePlan();
+        if (target.id === "addPaymentMethodButton") return await addPaymentMethod();
+        if (target.id === "manageBillingButton") return await openBillingPortal();
+        if (target.id === "generateInvoiceButton") return await generateInvoice();
         if (target.id === "authSessionsButton") return await loadProfile();
         if (target.id === "logoutAllButton") {
           await api("/api/auth/logout-all", { method: "POST" });

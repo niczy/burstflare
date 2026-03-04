@@ -1,4 +1,4 @@
-type Page = "home" | "login" | "dashboard" | "profile" | "docs";
+type Page = "home" | "login" | "dashboard" | "billing" | "profile" | "docs";
 
 export function SiteNav({ active }: { active?: Page }) {
   return (
@@ -14,6 +14,13 @@ export function SiteNav({ active }: { active?: Page }) {
           className={`site-nav-link${active === "dashboard" ? " site-nav-link--active" : ""}`}
         >
           Dashboard
+        </a>
+        <a
+          id="navBillingLink"
+          href="/billing"
+          className={`site-nav-link${active === "billing" ? " site-nav-link--active" : ""}`}
+        >
+          Billing
         </a>
         <a
           id="navProfileLink"
