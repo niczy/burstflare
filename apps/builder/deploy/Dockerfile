@@ -6,11 +6,12 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY apps/builder/package.json ./apps/builder/package.json
+COPY apps/runtime-agent/package.json ./apps/runtime-agent/package.json
 
 RUN npm ci
 
 COPY apps/builder ./apps/builder
-COPY containers/session/server.mjs ./containers/session/server.mjs
+COPY apps/runtime-agent ./apps/runtime-agent
 
 EXPOSE 8788
 

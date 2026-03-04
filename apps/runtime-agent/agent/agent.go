@@ -459,12 +459,19 @@ func normalizeAuthorizedKeys(values []string) []string {
 func (s *RuntimeState) applyAuthorizedKeys(values []string) []string {
 	keys := normalizeAuthorizedKeys(values)
 	s.SSHAuthorizedKeys = keys
+	sshDir := "/home/flare/.ssh"
 	body := ""
 	if len(keys) > 0 {
 		body = strings.Join(keys, "\n") + "\n"
 	}
-	_ = os.MkdirAll("/home/flare/.ssh", 0o700)
+	_ = os.MkdirAll(sshDir, 0o700)
+	_ = os.Chmod(sshDir, 0o700)
 	_ = os.WriteFile(AuthorizedKeysPath, []byte(body), 0o600)
+	_ = os.Chmod(AuthorizedKeysPath, 0o600)
+	if uid, gid, ok := runtimeUserIdentity(); ok {
+		_ = os.Chown(sshDir, uid, gid)
+		_ = os.Chown(AuthorizedKeysPath, uid, gid)
+	}
 	s.Files[AuthorizedKeysPath] = body
 	return keys
 }

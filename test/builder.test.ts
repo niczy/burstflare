@@ -27,12 +27,15 @@ test("builder parses config and creates a managed runtime build plan", () => {
     push: true
   });
   assert.equal(plan.imageRef, "registry.example.com/burstflare/runtime:ins_demo-bld_demo");
+  assert.match(plan.dockerfile, /FROM golang:1.24-alpine AS burstflare-runtime-build/);
   assert.match(plan.dockerfile, /FROM node:20/);
   assert.match(plan.dockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/burstflare-bootstrap"\]/);
+  assert.match(plan.dockerfile, /CMD \["\/usr\/local\/bin\/burstflare-runtime"\]/);
   assert.match(plan.bootstrapScript, /BURSTFLARE_STARTUP_HOOK/);
   const artifact = JSON.parse(plan.artifactBody);
   assert.equal(artifact.format, "burstflare.remote-builder.v1");
   assert.equal(artifact.managedRuntimeImage, plan.imageRef);
+  assert.equal(artifact.runtimeContract.runtimeAgent, "/usr/local/bin/burstflare-runtime");
 });
 
 test("builder produces a digest from docker build metadata", async () => {
@@ -43,6 +46,7 @@ test("builder produces a digest from docker build metadata", async () => {
     baseImage: "node:20"
   });
   let ranCommand = false;
+  let copiedRuntimeAgent = false;
   const writes = new Map<string, string>();
 
   const result = await buildManagedRuntime(
@@ -56,6 +60,11 @@ test("builder produces a digest from docker build metadata", async () => {
       keepTemp: false
     },
     {
+      async copyDir(sourcePath, destinationPath) {
+        copiedRuntimeAgent = true;
+        assert.match(String(sourcePath), /apps\/runtime-agent$/);
+        assert.equal(destinationPath, "/tmp/builder-test/runtime-agent");
+      },
       async mkdtemp() {
         return "/tmp/builder-test";
       },
@@ -67,9 +76,6 @@ test("builder produces a digest from docker build metadata", async () => {
           return JSON.stringify({
             "containerimage.digest": "sha256:abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd"
           });
-        }
-        if (String(filePath).endsWith("server.mjs")) {
-          return "// runtime server";
         }
         throw new Error(`Unexpected read: ${filePath}`);
       },
@@ -85,6 +91,7 @@ test("builder produces a digest from docker build metadata", async () => {
   );
 
   assert.equal(ranCommand, true);
+  assert.equal(copiedRuntimeAgent, true);
   assert.equal(
     result.managedImageDigest,
     "sha256:abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd"
