@@ -2441,6 +2441,22 @@ test("worker removes template rollback and release routes", async () => {
     }
   });
   assert.equal(releases.response.status, 404);
+
+  const retryDeadLettered = await requestJson(app, "/api/admin/builds/retry-dead-lettered", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.token}`
+    }
+  });
+  assert.equal(retryDeadLettered.response.status, 404);
+
+  const recoverBuilds = await requestJson(app, "/api/admin/reconcile/recover-builds", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.token}`
+    }
+  });
+  assert.equal(recoverBuilds.response.status, 404);
 });
 
 test("worker exposes billing endpoints and validates Stripe webhooks", async () => {

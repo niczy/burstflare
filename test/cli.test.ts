@@ -1143,6 +1143,19 @@ test("cli exposes targeted operator reconcile commands", async () => {
     assert.equal(preview.preview.purgedDeletedSessions, 1);
     assert.deepEqual(preview.preview.sessionIds.running, [running.session.id]);
     stdout.data = "";
+    stderr.data = "";
+
+    code = await runCli(["reconcile", "recover-builds", "--url", "http://local"], {
+      fetchImpl,
+      stdout,
+      stderr,
+      configPath
+    });
+    assert.equal(code, 1);
+    assert.match(stderr.data, /reconcile recover-builds/);
+    assert.match(stderr.data, /no longer supported/);
+    stdout.data = "";
+    stderr.data = "";
 
     code = await runCli(["reconcile", "sleep-running", "--url", "http://local"], {
       fetchImpl,

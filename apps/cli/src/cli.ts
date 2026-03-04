@@ -514,7 +514,6 @@ const HELP_CATALOG: HelpSection[] = [
         commands: [
           { name: "preview", usageTail: "", summary: "Preview reconcile work without changing state." },
           { name: "sleep-running", usageTail: "", summary: "Sleep sessions that are still running." },
-          { name: "recover-builds", usageTail: "", summary: "Recover stalled builds." },
           { name: "purge-sleeping", usageTail: "", summary: "Purge sleeping sessions past retention." },
           { name: "purge-deleted", usageTail: "", summary: "Purge deleted sessions past retention." }
         ]
@@ -2233,15 +2232,7 @@ export async function runCli(
       }
 
       if (subcommand === "retry-dead-lettered") {
-        const data = await requestJsonAuthed(
-          `${baseUrl}/api/admin/builds/retry-dead-lettered`,
-          {
-            method: "POST",
-            headers: headers(undefined)
-          }
-        );
-        print(stdout, JSON.stringify(data, null, 2));
-        return 0;
+        throw createCliError("'build retry-dead-lettered' was removed. Legacy build recovery is no longer supported.", 410);
       }
     }
 
@@ -2551,7 +2542,7 @@ export async function runCli(
       } else if (subcommand === "sleep-running") {
         route = "/api/admin/reconcile/sleep-running";
       } else if (subcommand === "recover-builds") {
-        route = "/api/admin/reconcile/recover-builds";
+        throw createCliError("'reconcile recover-builds' was removed. Legacy build recovery is no longer supported.", 410);
       } else if (subcommand === "purge-sleeping") {
         route = "/api/admin/reconcile/purge-sleeping";
       } else if (subcommand === "purge-deleted") {
