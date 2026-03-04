@@ -63,6 +63,8 @@ export async function loadCloudflareConfig() {
     turnstileSecret: env.TURNSTILE_SECRET || "",
     resendApiKey: env.RESEND_API_KEY || "",
     resendFrom: env.RESEND_FROM || "",
+    remoteBuildUrl: env.REMOTE_BUILD_URL || "",
+    remoteBuildToken: env.REMOTE_BUILD_TOKEN || "",
     slug: slugifyDomain(getRequiredEnv(env, "CLOUDFLARE_DOMAIN", ["domain"])),
     environment,
     workerName: environment === "production" ? "burstflare" : `burstflare-${environment}`,
