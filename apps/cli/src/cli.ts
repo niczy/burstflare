@@ -577,15 +577,15 @@ const HELP_CATALOG: HelpSection[] = [
           { name: "inspect", usageTail: "<instanceId>", summary: "Inspect one instance." },
           {
             name: "create",
-            usageTail: "<name> (--image <image> | --dockerfile <path>) [--description <text>] [--env <KEY=value,...>] [--secret <KEY=value,...>]",
+            usageTail: "<name> --image <base-image> [--dockerfile <path>] [--context <path>] [--description <text>] [--env <KEY=value,...>] [--secret <KEY=value,...>]",
             summary: "Create a new instance."
           },
           {
             name: "edit",
-            usageTail: "<instanceId> [--name <name>] [--image <image>] [--dockerfile <path>] [--context <path>]",
+            usageTail: "<instanceId> [--name <name>] [--image <base-image>] [--dockerfile <path>] [--context <path>]",
             summary: "Update an existing instance."
           },
-          { name: "rebuild", usageTail: "<instanceId>", summary: "Rebuild and push the instance image from its saved Dockerfile." },
+          { name: "rebuild", usageTail: "<instanceId>", summary: "Refresh the server-managed runtime metadata from the saved source config." },
           { name: "push", usageTail: "<instanceId>", summary: "Capture /home/flare from a running session into the instance common state." },
           { name: "pull", usageTail: "<instanceId>", summary: "Apply the saved /home/flare common state into running sessions." },
           { name: "delete", usageTail: "<instanceId>", summary: "Delete an instance." }
@@ -1209,39 +1209,21 @@ export async function runCli(
     );
   }
 
-  async function runDockerBuildAndPush(image: string, dockerfilePath: string, dockerContext: string): Promise<void> {
-    ensureCommands(["docker"], {
-      env,
-      action: "flare instance rebuild"
-    });
-    await runForegroundCommand(spawnImpl, "docker", ["build", "-f", dockerfilePath, "-t", image, dockerContext], {
-      stdio: "inherit"
-    });
-    await runForegroundCommand(spawnImpl, "docker", ["push", image], {
-      stdio: "inherit"
-    });
-  }
-
   async function prepareInstanceImage(input: {
     name: string;
     image?: string | null;
     dockerfilePath?: string | null;
     dockerContext?: string | null;
   }): Promise<{ image: string; dockerfilePath: string | null; dockerContext: string | null }> {
-    const name = String(input.name || "").trim();
     const dockerfilePath = input.dockerfilePath ? String(input.dockerfilePath) : null;
     const dockerContext = dockerfilePath ? String(input.dockerContext || path.dirname(dockerfilePath) || ".") : null;
     let image = input.image ? String(input.image).trim() : "";
 
-    if (dockerfilePath) {
-      if (!image) {
-        image = `registry.cloudflare.com/local/${slugifyInstanceName(name)}:${Date.now()}`;
-      }
-      await runDockerBuildAndPush(image, dockerfilePath, dockerContext || ".");
+    if (!dockerfilePath && input.dockerContext) {
+      throw createCliError("--context requires --dockerfile", 400);
     }
-
     if (!image) {
-      throw createCliError("Provide --image <image> or --dockerfile <path>", 400);
+      throw createCliError("Provide --image <base-image>. Local Docker builds are no longer supported.", 400);
     }
 
     return {
@@ -2027,7 +2009,7 @@ export async function runCli(
           body: JSON.stringify({
             name,
             description: options.description || "",
-            image: imageInput.image,
+            baseImage: imageInput.image,
             dockerfilePath: imageInput.dockerfilePath,
             dockerContext: imageInput.dockerContext,
             envVars: parseKeyValueMapOption(options.env),
@@ -2057,11 +2039,11 @@ export async function runCli(
         if (options.image || options.dockerfile || options.context) {
           const imageInput = await prepareInstanceImage({
             name: String(updates.name || current.instance.name),
-            image: (options.image as string) || current.instance.image,
+            image: (options.image as string) || current.instance.baseImage || current.instance.image,
             dockerfilePath: (options.dockerfile as string) || current.instance.dockerfilePath,
             dockerContext: (options.context as string) || current.instance.dockerContext
           });
-          updates.image = imageInput.image;
+          updates.baseImage = imageInput.image;
           updates.dockerfilePath = imageInput.dockerfilePath;
           updates.dockerContext = imageInput.dockerContext;
         }
@@ -2095,12 +2077,9 @@ export async function runCli(
         const current = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
           headers: headers(undefined, false)
         });
-        if (!current.instance.dockerfilePath) {
-          throw createCliError("Instance does not have a saved Dockerfile to rebuild", 409);
-        }
         const imageInput = await prepareInstanceImage({
           name: current.instance.name,
-          image: current.instance.image,
+          image: current.instance.baseImage || current.instance.image,
           dockerfilePath: current.instance.dockerfilePath,
           dockerContext: current.instance.dockerContext
         });
@@ -2108,7 +2087,7 @@ export async function runCli(
           method: "PATCH",
           headers: headers(undefined),
           body: JSON.stringify({
-            image: imageInput.image,
+            baseImage: imageInput.image,
             dockerfilePath: imageInput.dockerfilePath,
             dockerContext: imageInput.dockerContext
           })
@@ -2119,7 +2098,8 @@ export async function runCli(
             {
               ...data,
               rebuild: {
-                image: imageInput.image,
+                baseImage: imageInput.image,
+                managedImageDigest: data?.instance?.managedImageDigest || null,
                 dockerfilePath: imageInput.dockerfilePath,
                 dockerContext: imageInput.dockerContext
               }

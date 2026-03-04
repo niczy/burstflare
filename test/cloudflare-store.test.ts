@@ -458,6 +458,10 @@ test("cloudflare store can persist scoped instance rows", async () => {
     name: "Base Node",
     description: "Node runtime",
     image: "node:20",
+    baseImage: "node:20",
+    managedRuntimeImage: "burstflare/session-runtime:v1",
+    managedImageDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    bootstrapVersion: "v1",
     dockerfilePath: "./Dockerfile",
     dockerContext: ".",
     persistedPaths: ["/workspace", "/home/flare"],
@@ -478,6 +482,8 @@ test("cloudflare store can persist scoped instance rows", async () => {
   assert.equal(reloaded.instances.length, 1);
   assert.equal(reloaded.instances[0].id, "ins_1");
   assert.equal(reloaded.instances[0].image, "node:20");
+  assert.equal(reloaded.instances[0].baseImage, "node:20");
+  assert.equal(reloaded.instances[0].managedRuntimeImage, "burstflare/session-runtime:v1");
   assert.deepEqual(reloaded.instances[0].persistedPaths, ["/workspace", "/home/flare"]);
   assert.equal(reloaded.instances[0].sleepTtlSeconds, 60);
   assert.equal(reloaded.instances[0].envVars.NODE_ENV, "development");

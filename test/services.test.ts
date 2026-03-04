@@ -145,7 +145,7 @@ test("service supports instance CRUD with write-only secrets", async () => {
   const created = await service.createInstance(owner.token, {
     name: "Base Node",
     description: "Node 20 runtime",
-    image: "node:20",
+    baseImage: "node:20",
     dockerfilePath: "./Dockerfile",
     dockerContext: ".",
     persistedPaths: ["/workspace", "/home/flare/.cache"],
@@ -159,6 +159,10 @@ test("service supports instance CRUD with write-only secrets", async () => {
   });
   assert.equal(created.instance.name, "Base Node");
   assert.equal(created.instance.image, "node:20");
+  assert.equal(created.instance.baseImage, "node:20");
+  assert.equal(created.instance.bootstrapVersion, "v1");
+  assert.equal(created.instance.managedRuntimeImage, "burstflare/session-runtime:v1");
+  assert.match(created.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
   assert.deepEqual(created.instance.persistedPaths, ["/workspace", "/home/flare/.cache"]);
   assert.equal(created.instance.sleepTtlSeconds, 60);
   assert.deepEqual(created.instance.envVars, {
@@ -186,6 +190,9 @@ test("service supports instance CRUD with write-only secrets", async () => {
     }
   });
   assert.equal(updated.instance.image, "node:22");
+  assert.equal(updated.instance.baseImage, "node:22");
+  assert.match(updated.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.notEqual(updated.instance.managedImageDigest, created.instance.managedImageDigest);
   assert.deepEqual(updated.instance.persistedPaths, ["/workspace", "/home/flare"]);
   assert.equal(updated.instance.sleepTtlSeconds, 120);
   assert.deepEqual(updated.instance.envVars, {
@@ -198,6 +205,7 @@ test("service supports instance CRUD with write-only secrets", async () => {
   const fetched = await service.getInstance(owner.token, created.instance.id);
   assert.equal(fetched.instance.id, created.instance.id);
   assert.equal(fetched.instance.image, "node:22");
+  assert.equal(fetched.instance.baseImage, "node:22");
   assert.deepEqual(fetched.instance.persistedPaths, ["/workspace", "/home/flare"]);
   assert.equal(fetched.instance.sleepTtlSeconds, 120);
   assert.equal("secrets" in fetched.instance, false);
