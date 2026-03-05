@@ -3037,6 +3037,10 @@ export function createBurstFlareService(options: any = {}) {
           "Session name already exists",
           409
         );
+        const sessionPersistedPaths =
+          Array.isArray(instance?.persistedPaths) && instance.persistedPaths.length > 0
+            ? [...instance.persistedPaths]
+            : ["/workspace"];
 
         const session = {
           id: createId("ses"),
@@ -3056,7 +3060,7 @@ export function createBurstFlareService(options: any = {}) {
           runtimeVersion: 0,
           runtimeOperationId: null,
           runtimeUpdatedAt: null,
-          persistedPaths: [...(instance.persistedPaths || [])],
+          persistedPaths: sessionPersistedPaths,
           sleepTtlSeconds: instance.sleepTtlSeconds || null,
           sshAuthorizedKeys: [],
           previewUrl: null

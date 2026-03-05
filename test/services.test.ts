@@ -478,6 +478,30 @@ test("service can create and operate on sessions owned by an instance", async ()
   assert.equal(stopped.session.instanceId, instance.instance.id);
 });
 
+test("service defaults session persisted paths to /workspace when instance paths are empty", async () => {
+  const service = createBurstFlareService({
+    store: createMemoryStore(),
+    clock: () => Date.parse("2026-03-03T00:20:00.000Z")
+  });
+
+  const owner = await service.registerUser({
+    email: "session-default-paths@example.com",
+    name: "Session Default Paths"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "Session Default Base",
+    image: "ubuntu:24.04",
+    persistedPaths: []
+  });
+
+  const created = await service.createSession(owner.token, {
+    name: "session-default-paths",
+    instanceId: instance.instance.id
+  });
+
+  assert.deepEqual(created.session.persistedPaths, ["/workspace"]);
+});
+
 test("service covers removed sharing, instance sessions, usage, and audit", async () => {
   let tick = Date.parse("2026-02-27T00:00:00.000Z");
   const objects = createObjectStore();
