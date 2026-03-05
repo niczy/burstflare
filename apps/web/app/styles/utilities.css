@@ -62,4 +62,44 @@
   .code-panel {
     @apply overflow-x-auto rounded-lg border border-border bg-foreground p-4 text-xs text-white md:text-sm;
   }
+
+  .panel-stack {
+    @apply mx-auto flex w-full max-w-3xl flex-col gap-4;
+  }
+
+  .section-title {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+
+  .section-copy {
+    @apply text-sm text-muted-foreground;
+  }
+
+  .field-stack {
+    @apply grid gap-2;
+  }
+
+  .field-stack label {
+    @apply text-sm font-medium;
+  }
+
+  .inline-actions {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .status-box {
+    @apply rounded-md border border-border bg-secondary/65 p-3 text-sm text-muted-foreground;
+  }
+
+  .error-box {
+    @apply rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700;
+  }
+
+  .profile-grid {
+    @apply grid gap-4 lg:grid-cols-2;
+  }
+
+  .meta-grid {
+    @apply grid gap-2 sm:grid-cols-2;
+  }
 }
