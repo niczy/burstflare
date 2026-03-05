@@ -150,24 +150,69 @@ type LifecycleState struct {
 	RecordedAt string `json:"recordedAt"`
 }
 
+type WebSocketState struct {
+	ActiveConnections  int    `json:"activeConnections"`
+	LastConnectedAt    string `json:"lastConnectedAt,omitempty"`
+	LastDisconnectedAt string `json:"lastDisconnectedAt,omitempty"`
+	LastActivityAt     string `json:"lastActivityAt,omitempty"`
+}
+
 type RuntimeState struct {
-	mu                  sync.Mutex
-	RestoredSnapshotID  string
-	RestoredAt          string
-	RestoredBytes       int
-	RestoredContentType string
-	PersistedPaths      []string
-	SecretNames         []string
-	SSHAuthorizedKeys   []string
-	Bootstrap           *BootstrapState
-	LastLifecycle       *LifecycleState
-	Files               map[string]string
+	mu                   sync.Mutex
+	RestoredSnapshotID   string
+	RestoredAt           string
+	RestoredBytes        int
+	RestoredContentType  string
+	PersistedPaths       []string
+	SecretNames          []string
+	SSHAuthorizedKeys    []string
+	Bootstrap            *BootstrapState
+	LastLifecycle        *LifecycleState
+	ActiveWebSockets     int
+	LastWSConnectedAt    string
+	LastWSDisconnectedAt string
+	LastWSActivityAt     string
+	Files                map[string]string
 }
 
 func NewState() *RuntimeState {
 	ensureRuntimeFilesystemLayout()
 	return &RuntimeState{
 		Files: map[string]string{},
+	}
+}
+
+func (s *RuntimeState) startWebSocketConnection() func() {
+	s.mu.Lock()
+	connectedAt := nowISO()
+	s.ActiveWebSockets += 1
+	s.LastWSConnectedAt = connectedAt
+	s.LastWSActivityAt = connectedAt
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		if s.ActiveWebSockets > 0 {
+			s.ActiveWebSockets -= 1
+		}
+		if s.ActiveWebSockets == 0 {
+			s.LastWSDisconnectedAt = nowISO()
+		}
+		s.mu.Unlock()
+	}
+}
+
+func (s *RuntimeState) markWebSocketActivity() {
+	s.mu.Lock()
+	s.LastWSActivityAt = nowISO()
+	s.mu.Unlock()
+}
+
+func (s *RuntimeState) websocketStateUnlocked() WebSocketState {
+	return WebSocketState{
+		ActiveConnections:  s.ActiveWebSockets,
+		LastConnectedAt:    s.LastWSConnectedAt,
+		LastDisconnectedAt: s.LastWSDisconnectedAt,
+		LastActivityAt:     s.LastWSActivityAt,
 	}
 }
 
@@ -757,6 +802,7 @@ func (s *RuntimeState) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"restoredAt":         s.RestoredAt,
 			"bootstrap":          s.Bootstrap,
 			"lastLifecycle":      s.LastLifecycle,
+			"websocket":          s.websocketStateUnlocked(),
 		}
 		s.mu.Unlock()
 		writeJSON(w, http.StatusOK, payload)
@@ -976,6 +1022,7 @@ func (s *RuntimeState) renderRuntimeHTML(r *http.Request) string {
 		"restoredAt":         s.RestoredAt,
 		"bootstrap":          s.Bootstrap,
 		"lastLifecycle":      s.LastLifecycle,
+		"websocket":          s.websocketStateUnlocked(),
 		"persistedPaths":     s.PersistedPaths,
 	}
 	restoredFiles := make([]string, 0, len(s.Files))

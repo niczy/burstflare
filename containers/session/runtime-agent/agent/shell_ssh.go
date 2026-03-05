@@ -148,6 +148,8 @@ func (s *RuntimeState) handleShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	finishWebSocket := s.startWebSocketConnection()
+	defer finishWebSocket()
 
 	sessionID := defaultString(r.URL.Query().Get("sessionId"), "unknown")
 	state := &shellSession{
@@ -164,6 +166,7 @@ func (s *RuntimeState) handleShell(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		s.markWebSocketActivity()
 		if messageType != websocket.TextMessage && messageType != websocket.BinaryMessage {
 			continue
 		}
@@ -173,6 +176,7 @@ func (s *RuntimeState) handleShell(w http.ResponseWriter, r *http.Request) {
 			if err := conn.WriteMessage(websocket.TextMessage, []byte(reply)); err != nil {
 				return
 			}
+			s.markWebSocketActivity()
 		}
 		if state.Closed {
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("Session closed by remote shell."))
@@ -181,6 +185,7 @@ func (s *RuntimeState) handleShell(w http.ResponseWriter, r *http.Request) {
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Session closed"),
 				noDeadline(),
 			)
+			s.markWebSocketActivity()
 			return
 		}
 	}
@@ -197,6 +202,8 @@ func (s *RuntimeState) handleSSH(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	finishWebSocket := s.startWebSocketConnection()
+	defer finishWebSocket()
 
 	upstream, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", sshPort()))
 	if err != nil {
@@ -233,6 +240,7 @@ func (s *RuntimeState) handleSSH(w http.ResponseWriter, r *http.Request) {
 				errCh <- err
 				return
 			}
+			s.markWebSocketActivity()
 		}
 	}()
 
@@ -246,6 +254,7 @@ func (s *RuntimeState) handleSSH(w http.ResponseWriter, r *http.Request) {
 					errCh <- writeErr
 					return
 				}
+				s.markWebSocketActivity()
 			}
 			if err != nil {
 				if err == io.EOF {
