@@ -3880,10 +3880,12 @@ export function createBurstFlareService(options: any = {}) {
         const auth = token ? requireManageWorkspace(state, token, clock) : null;
         const workspaceId = auth?.workspace.id || null;
 
-        const slept = await sleepRunningSessionsInState(state, {
-          workspaceId,
-          reason: "reconcile"
-        });
+        const slept = auth
+          ? await sleepRunningSessionsInState(state, {
+              workspaceId,
+              reason: "reconcile"
+            })
+          : { sleptSessions: 0, sessionIds: [] };
 
         const candidates = getReconcileCandidates(state, workspaceId);
         const stalePurged = await purgeSessionsInState(state, candidates.staleSleepingSessions, {
