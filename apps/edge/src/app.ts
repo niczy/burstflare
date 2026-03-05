@@ -1560,7 +1560,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   async function attachRuntimeToSession(session: any): Promise<any> {
-    const runtime = await getSessionRuntimeState(session.id);
+    const runtime = await getSessionRuntimeState(session.id, resolveSessionRuntimeSpec(session));
     return runtime ? { ...session, runtime } : session;
   }
 
@@ -3112,7 +3112,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
             return unauthorized();
           }
           const detail = await service.getSession(token, sessionId);
-          const container = await startSessionContainer(sessionId);
+          const container = await startSessionContainer(sessionId, resolveSessionRuntimeSpec(detail.session));
           if (!container) {
             return new Response("Session container runtime is not bound in this deployment.", {
               status: 503,
@@ -3144,7 +3144,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
             return unauthorized();
           }
           const detail = await service.getSession(auth.token, sessionId);
-          const container = await startSessionContainer(sessionId);
+          const container = await startSessionContainer(sessionId, resolveSessionRuntimeSpec(detail.session));
           if (!container) {
             return new Response("Session container runtime is not bound in this deployment.", {
               status: 503,
@@ -3176,7 +3176,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
             return unauthorized();
           }
           const detail = await service.getSession(auth.token, sessionId);
-          const container = await startSessionContainer(sessionId);
+          const container = await startSessionContainer(sessionId, resolveSessionRuntimeSpec(detail.session));
           if (!container) {
             return new Response("Session container runtime is not bound in this deployment.", {
               status: 503,
@@ -3215,7 +3215,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
               headers: { "content-type": "text/plain; charset=utf-8" }
             });
           }
-          const container = await startSessionContainer(sessionId);
+          const container = await startSessionContainer(sessionId, resolveSessionRuntimeSpec(runtimeAccess.session));
           if (container && typeof container.fetch === "function") {
             const runtimeSecrets = await service.getSystemRuntimeSecrets(runtimeAccess.session.id);
             await applyRuntimeBootstrapToContainer(container, runtimeAccess.session, runtimeSecrets);
@@ -3257,7 +3257,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
               headers: { "content-type": "text/plain; charset=utf-8" }
             });
           }
-          const container = await startSessionContainer(sessionId);
+          const container = await startSessionContainer(sessionId, resolveSessionRuntimeSpec(runtimeAccess.session));
           if (container && typeof container.fetch === "function") {
             const runtimeSecrets = await service.getSystemRuntimeSecrets(runtimeAccess.session.id);
             await applyRuntimeBootstrapToContainer(container, runtimeAccess.session, runtimeSecrets);
