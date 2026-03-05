@@ -3,6 +3,7 @@ import type {
   AdminReportResponse,
   ApiError,
   AuditResponse,
+  BillingSummaryResponse,
   DashboardSnapshot,
   HealthResponse,
   InstancesResponse,
@@ -112,17 +113,19 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
       usage: null,
       report: null,
       audit: [],
+      billing: null,
       lastRefreshedAt: null,
       warning: null
     };
   }
 
-  const [instancesResult, sessionsResult, usageResult, reportResult, auditResult] = await Promise.allSettled([
+  const [instancesResult, sessionsResult, usageResult, reportResult, auditResult, billingResult] = await Promise.allSettled([
     serverApiJson<InstancesResponse>("/api/instances", { requireAuth: true }),
     serverApiJson<SessionsResponse>("/api/sessions", { requireAuth: true }),
     serverApiJson<UsageResponse>("/api/usage", { requireAuth: true }),
     serverApiJson<AdminReportResponse>("/api/admin/report", { requireAuth: true }),
-    serverApiJson<AuditResponse>("/api/audit", { requireAuth: true })
+    serverApiJson<AuditResponse>("/api/audit", { requireAuth: true }),
+    serverApiJson<BillingSummaryResponse>("/api/workspaces/current/billing", { requireAuth: true })
   ]);
 
   const warnings: string[] = [];
@@ -166,6 +169,11 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     warnings.push("activity");
   }
 
+  const billing = billingResult.status === "fulfilled" ? billingResult.value : null;
+  if (billingResult.status === "rejected") {
+    warnings.push("billing");
+  }
+
   return {
     viewer,
     instances,
@@ -173,6 +181,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     usage,
     report,
     audit,
+    billing,
     lastRefreshedAt: new Date().toISOString(),
     warning:
       warnings.length > 0

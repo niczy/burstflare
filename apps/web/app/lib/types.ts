@@ -50,16 +50,48 @@ export type BillingSummaryResponse = {
   billing?: {
     provider?: string;
     billingStatus?: string;
+    customerId?: string | null;
     defaultPaymentMethodId?: string | null;
+    creditBalanceUsd?: number;
+  };
+  pendingInvoiceEstimate?: {
+    totalUsd?: number;
+    currency?: string;
   };
   estimate?: {
     totalUsd?: number;
     currency?: string;
   };
+  usage?: UsageTotals;
 };
 
 export type BillingCheckoutResponse = {
+  checkoutSession?: {
+    id?: string;
+    url?: string;
+  };
   url?: string;
+};
+
+export type BillingPortalResponse = {
+  portalSession?: {
+    id?: string;
+    url?: string;
+  };
+};
+
+export type BillingInvoiceResponse = {
+  invoice?: {
+    id?: string;
+    status?: string | null;
+    hostedInvoiceUrl?: string | null;
+    amountUsd?: number;
+    currency?: string;
+  } | null;
+  pendingInvoiceEstimate?: {
+    totalUsd?: number;
+    currency?: string;
+  };
 };
 
 export type InstanceRecord = {
@@ -156,6 +188,7 @@ export type DashboardSnapshot = {
   usage: UsageResponse | null;
   report: AdminReport | null;
   audit: AuditRecord[];
+  billing: BillingSummaryResponse | null;
   lastRefreshedAt: string | null;
   warning: string | null;
 };
