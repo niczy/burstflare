@@ -20,8 +20,9 @@ Rewrite the web app on top of `vinext` with:
   - `app/components/layout/*` (AppShell, TopNav, SectionHeader, EmptyState)
   - `app/components/domain/*` (instances, sessions, usage, billing, auth)
 - Styling
-  - `app/styles/tokens.css`, `app/styles/base.css`, `app/styles/utilities.css`
-  - feature-scoped CSS modules per component where useful
+  - Tailwind CSS as the primary styling system
+  - `app/styles/tokens.css` for design tokens mapped into Tailwind theme variables
+  - minimal global base styles + utility-first component styling
 - Data layer
   - `app/lib/server/api.ts` for SSR fetches to edge APIs
   - `app/lib/client/api.ts` for client mutations
@@ -29,6 +30,13 @@ Rewrite the web app on top of `vinext` with:
 - SSR strategy
   - Server Components for initial page data and auth gating
   - Client Components only for interactive controls and live updates
+
+## UI System Decision (Tailwind + shadcn)
+- Use Tailwind for layout, spacing, typography, color tokens, and responsive behavior.
+- Use shadcn/ui for accessible base primitives only (Button, Input, Dialog, Table, Tabs, etc.).
+- Keep BurstFlare-specific UX in custom domain components; do not ship a default “stock shadcn dashboard”.
+- Keep shadcn components local and versioned in-repo for full ownership and edits.
+- Avoid utility sprawl by composing shared UI wrappers in `app/components/primitives/*`.
 
 ## PR Plan
 
@@ -39,6 +47,7 @@ Scope:
 - Add lint guardrails:
   - forbid `dangerouslySetInnerHTML` in app pages/components (except explicit allowlist)
   - forbid new giant string-CSS blobs in TS files
+  - enforce use of shared primitive components instead of raw repeated utility bundles
 
 Acceptance:
 - CI stays green.
@@ -46,13 +55,16 @@ Acceptance:
 
 ## PR 2: SSR App Shell + Design Tokens
 Scope:
-- Create `app/styles/*` tokenized CSS and import from `app/layout.tsx`.
+- Install and configure Tailwind + PostCSS in `apps/web`.
+- Initialize shadcn/ui and add core primitives (`button`, `input`, `card`, `dialog`, `table`, `tabs`, `badge`).
+- Create `app/styles/*` tokenized CSS and wire tokens into Tailwind theme variables.
 - Implement modular shell components (`AppShell`, `TopNav`, shared page scaffolds).
 - Replace page-level inline `<style>` injection for one low-risk route (home) as proof.
 
 Acceptance:
 - Home route renders fully via SSR using modular components.
 - No dependency on `apps/web/src/assets.ts` for migrated route.
+- Tailwind build and shadcn primitives are integrated and used by migrated route.
 
 ## PR 3: API Client Split (Server vs Client)
 Scope:
