@@ -104,6 +104,7 @@ export type InstanceRecord = {
   commonStateUpdatedAt?: string | null;
   persistedPaths?: string[];
   sleepTtlSeconds?: number | null;
+  bootstrapScript?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };

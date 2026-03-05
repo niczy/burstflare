@@ -53,6 +53,12 @@ Create an instance:
 flare instance create node-dev --image node:20
 ```
 
+Create an instance with a startup bootstrap script:
+
+```bash
+flare instance create node-dev --image ubuntu:24.04 --bootstrap-file ./bootstrap.sh
+```
+
 Launch a session and attach:
 
 ```bash
@@ -72,6 +78,8 @@ flare doctor
 flare workspace
 flare instance list
 flare instance inspect <instanceId>
+flare instance edit <instanceId> --bootstrap-file ./bootstrap.sh
+flare instance edit <instanceId> --clear-bootstrap
 flare sessions
 flare snapshot list <sessionId>
 flare report

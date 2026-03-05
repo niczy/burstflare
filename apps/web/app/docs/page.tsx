@@ -30,7 +30,7 @@ export default function DocsPage() {
           <div className="grid grid-2">
             <div className="surface-note">
               <strong>Instances</strong>
-              <span>Reusable runtime definitions: image, env, secrets, persisted paths, and shared home-state metadata.</span>
+              <span>Reusable runtime definitions: image, env, secrets, startup bootstrap script, persisted paths, and shared home-state metadata.</span>
             </div>
             <div className="surface-note">
               <strong>Sessions</strong>
@@ -46,7 +46,7 @@ export default function DocsPage() {
             </div>
           </div>
 
-          <pre className="code-block">{`flare instance create node-dev --image node:20
+          <pre className="code-block">{`flare instance create node-dev --image node:20 --bootstrap-file ./bootstrap.sh
 flare session up sandbox --instance <instance-id>
 flare instance push <instance-id>
 flare instance pull <instance-id>`}</pre>

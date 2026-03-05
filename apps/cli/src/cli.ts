@@ -573,12 +573,14 @@ const HELP_CATALOG: HelpSection[] = [
           { name: "inspect", usageTail: "<instanceId>", summary: "Inspect one instance." },
           {
             name: "create",
-            usageTail: "<name> --image <base-image> [--dockerfile <path>] [--context <path>] [--description <text>] [--env <KEY=value,...>] [--secret <KEY=value,...>]",
+            usageTail:
+              "<name> --image <base-image> [--dockerfile <path>] [--context <path>] [--description <text>] [--env <KEY=value,...>] [--secret <KEY=value,...>] [--bootstrap <script>] [--bootstrap-file <path>]",
             summary: "Create a new instance."
           },
           {
             name: "edit",
-            usageTail: "<instanceId> [--name <name>] [--description <text>] [--image <base-image>] [--dockerfile <path>] [--context <path>] [--env <KEY=value,...>] [--secret <KEY=value,...>] [--clear-env] [--clear-secrets]",
+            usageTail:
+              "<instanceId> [--name <name>] [--description <text>] [--image <base-image>] [--dockerfile <path>] [--context <path>] [--env <KEY=value,...>] [--secret <KEY=value,...>] [--clear-env] [--clear-secrets] [--bootstrap <script>] [--bootstrap-file <path>] [--clear-bootstrap]",
             summary: "Update an existing instance."
           },
           { name: "push", usageTail: "<instanceId>", summary: "Capture /home/flare from a running session into the instance common state." },
@@ -868,6 +870,53 @@ function parseIntegerOption(value: unknown): number | undefined {
     throw createCliError("Expected an integer option value", 400);
   }
   return parsed;
+}
+
+async function parseBootstrapScriptOption(
+  options: Record<string, string | true>,
+  { allowClear = false }: { allowClear?: boolean } = {}
+): Promise<{ provided: boolean; value: string | null }> {
+  const hasInline = Object.prototype.hasOwnProperty.call(options, "bootstrap");
+  const hasFile = Object.prototype.hasOwnProperty.call(options, "bootstrap-file");
+  const hasClear = Object.prototype.hasOwnProperty.call(options, "clear-bootstrap");
+
+  if (hasInline && hasFile) {
+    throw createCliError("Use either --bootstrap or --bootstrap-file, not both", 400);
+  }
+  if (hasClear && !allowClear) {
+    throw createCliError("--clear-bootstrap is only supported by 'flare instance edit'", 400);
+  }
+  if (hasClear && (hasInline || hasFile)) {
+    throw createCliError("Use --clear-bootstrap by itself (without --bootstrap or --bootstrap-file)", 400);
+  }
+  if (hasClear) {
+    return { provided: true, value: null };
+  }
+  if (hasInline) {
+    if (typeof options.bootstrap !== "string") {
+      throw createCliError("--bootstrap <script> is required", 400);
+    }
+    return { provided: true, value: options.bootstrap };
+  }
+  if (hasFile) {
+    if (typeof options["bootstrap-file"] !== "string") {
+      throw createCliError("--bootstrap-file <path> is required", 400);
+    }
+    const scriptPath = String(options["bootstrap-file"]).trim();
+    if (!scriptPath) {
+      throw createCliError("--bootstrap-file <path> is required", 400);
+    }
+    try {
+      return {
+        provided: true,
+        value: await readFile(scriptPath, "utf8")
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      throw createCliError(`Failed to read bootstrap script from ${scriptPath}: ${message}`, 400);
+    }
+  }
+  return { provided: false, value: null };
 }
 
 function filterCollection(data: any, key: string, predicate: (entry: any) => boolean): any {
@@ -1922,6 +1971,7 @@ export async function runCli(
         if (!name) {
           throw createCliError("Instance name is required", 400);
         }
+        const bootstrapScriptOption = await parseBootstrapScriptOption(options);
         const imageInput = await prepareInstanceImage({
           name,
           image: (options.image as string) || null,
@@ -1938,7 +1988,8 @@ export async function runCli(
             dockerfilePath: imageInput.dockerfilePath,
             dockerContext: imageInput.dockerContext,
             envVars: parseKeyValueMapOption(options.env),
-            secrets: parseKeyValueMapOption(options.secret)
+            secrets: parseKeyValueMapOption(options.secret),
+            ...(bootstrapScriptOption.provided ? { bootstrapScript: bootstrapScriptOption.value } : {})
           })
         });
         print(stdout, JSON.stringify(data, null, 2));
@@ -1950,6 +2001,7 @@ export async function runCli(
         if (!instanceId) {
           throw createCliError("Instance id is required", 400);
         }
+        const bootstrapScriptOption = await parseBootstrapScriptOption(options, { allowClear: true });
         const current = await requestJsonAuthed(`${baseUrl}/api/instances/${instanceId}`, {
           headers: headers(undefined, false)
         });
@@ -1981,6 +2033,9 @@ export async function runCli(
           updates.secrets = {};
         } else if (Object.prototype.hasOwnProperty.call(options, "secret")) {
           updates.secrets = parseKeyValueMapOption(options.secret);
+        }
+        if (bootstrapScriptOption.provided) {
+          updates.bootstrapScript = bootstrapScriptOption.value;
         }
         if (Object.keys(updates).length === 0) {
           throw createCliError("No instance changes provided", 400);

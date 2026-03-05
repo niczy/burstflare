@@ -198,6 +198,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
   const [instanceName, setInstanceName] = useState("");
   const [instanceImageValue, setInstanceImageValue] = useState("ubuntu:24.04");
   const [instanceDescription, setInstanceDescription] = useState("");
+  const [instanceBootstrapScript, setInstanceBootstrapScript] = useState("");
   const [sessionName, setSessionName] = useState("sandbox");
   const [sessionInstanceId, setSessionInstanceId] = useState(initialSnapshot.instances[0]?.id || "");
   const [commonStateInstanceId, setCommonStateInstanceId] = useState(initialSnapshot.instances[0]?.id || "");
@@ -357,6 +358,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
   async function createInstance(): Promise<void> {
     const name = instanceName.trim();
     const image = instanceImageValue.trim() || "ubuntu:24.04";
+    const bootstrapScript = instanceBootstrapScript.trim();
     if (!name) {
       setError("Instance name is required.");
       return;
@@ -368,6 +370,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
       description: instanceDescription.trim(),
       image,
       baseImage: image,
+      bootstrapScript: bootstrapScript || null,
       commonStateBytes: 0,
       updatedAt: new Date().toISOString()
     };
@@ -382,7 +385,8 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
             name,
             description: instanceDescription.trim(),
             image,
-            baseImage: image
+            baseImage: image,
+            ...(bootstrapScript ? { bootstrapScript } : {})
           })
         });
       },
@@ -399,6 +403,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
         onSuccess: () => {
           setInstanceName("");
           setInstanceDescription("");
+          setInstanceBootstrapScript("");
         }
       }
     );
@@ -698,7 +703,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
             <CardHeader>
               <CardTitle>Instances</CardTitle>
               <CardDescription>
-                Reusable runtime definitions with shared <code>/home/flare</code> common state.
+                Reusable runtime definitions (image, startup bootstrap script, shared <code>/home/flare</code> common state).
               </CardDescription>
             </CardHeader>
             <CardContent className="panel-stack">
@@ -732,6 +737,17 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
                     value={instanceDescription}
                     disabled={pending || !isSignedIn}
                     onChange={(event) => setInstanceDescription(event.target.value)}
+                  />
+                </div>
+                <div className="dashboard-field">
+                  <label htmlFor="instanceBootstrapScript">Startup bootstrap (optional)</label>
+                  <textarea
+                    id="instanceBootstrapScript"
+                    className="dashboard-textarea"
+                    placeholder={"#!/bin/sh\napt-get update && apt-get install -y curl"}
+                    value={instanceBootstrapScript}
+                    disabled={pending || !isSignedIn}
+                    onChange={(event) => setInstanceBootstrapScript(event.target.value)}
                   />
                 </div>
                 <div className="inline-actions">
@@ -785,6 +801,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
                       <TableRow>
                         <TableHead>Name</TableHead>
                         <TableHead>Image</TableHead>
+                        <TableHead>Bootstrap</TableHead>
                         <TableHead>Common state</TableHead>
                         <TableHead>Updated</TableHead>
                         <TableHead>Actions</TableHead>
@@ -795,6 +812,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
                         <TableRow key={instance.id}>
                           <TableCell>{instance.name}</TableCell>
                           <TableCell>{instanceImage(instance)}</TableCell>
+                          <TableCell>{instance.bootstrapScript ? "Configured" : "Default"}</TableCell>
                           <TableCell>{formatBytes(instance.commonStateBytes)}</TableCell>
                           <TableCell>{formatDate(instance.updatedAt)}</TableCell>
                           <TableCell>

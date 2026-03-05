@@ -47,7 +47,7 @@ export default async function HomePage() {
               <div className="info-block">
                 <strong>1. Create</strong>
                 Start from a proven base image like <code>ubuntu:24.04</code> or
-                <code> debian:12</code>.
+                <code> debian:12</code>, then attach an optional bootstrap script.
               </div>
               <div className="info-block">
                 <strong>2. Launch</strong>
@@ -81,7 +81,7 @@ export default async function HomePage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <pre className="code-panel">{`flare instance create node-dev --image ubuntu:24.04
+            <pre className="code-panel">{`flare instance create node-dev --image ubuntu:24.04 --bootstrap-file ./bootstrap.sh
 flare session up sandbox --instance <instanceId>
 flare ssh <sessionId>`}</pre>
             <Table>

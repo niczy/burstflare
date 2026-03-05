@@ -164,6 +164,8 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
   const exportPath = path.join(os.tmpdir(), `flare-export-${Date.now()}.json`);
   const toolDir = path.join(os.tmpdir(), `flare-tools-${Date.now()}`);
   const cliEmail = "smoke_test+cli@burstflare.dev";
+  const bootstrapScriptV1 = "#!/bin/sh\necho bootstrap-v1";
+  const bootstrapScriptV2 = "#!/bin/sh\necho bootstrap-v2";
 
   try {
     await writeFile(bundlePath, "cli bundle payload");
@@ -324,6 +326,8 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
         "MODE=dev",
         "--secret",
         "API_KEY=abc",
+        "--bootstrap",
+        bootstrapScriptV1,
         "--url",
         "http://local"
       ],
@@ -339,6 +343,7 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
     const instanceId = instanceOutput.instance.id;
     assert.equal(instanceOutput.instance.image, "ubuntu:24.04");
     assert.deepEqual(instanceOutput.instance.secretNames, ["API_KEY"]);
+    assert.equal(instanceOutput.instance.bootstrapScript, bootstrapScriptV1);
 
     stdout.data = "";
 
@@ -354,16 +359,32 @@ test("cli can run device flow, instance lifecycle, and reporting", async () => {
 
     stdout.data = "";
 
-    code = await runCli(["instance", "edit", instanceId, "--description", "Go runtime updated", "--image", "node:22", "--url", "http://local"], {
+    code = await runCli(
+      ["instance", "edit", instanceId, "--description", "Go runtime updated", "--image", "node:22", "--bootstrap", bootstrapScriptV2, "--url", "http://local"],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath
+      }
+    );
+    assert.equal(code, 0);
+    const editedInstance = JSON.parse(stdout.data.trim());
+    assert.equal(editedInstance.instance.description, "Go runtime updated");
+    assert.equal(editedInstance.instance.image, "node:22");
+    assert.equal(editedInstance.instance.bootstrapScript, bootstrapScriptV2);
+
+    stdout.data = "";
+
+    code = await runCli(["instance", "edit", instanceId, "--clear-bootstrap", "--url", "http://local"], {
       fetchImpl,
       stdout,
       stderr,
       configPath
     });
     assert.equal(code, 0);
-    const editedInstance = JSON.parse(stdout.data.trim());
-    assert.equal(editedInstance.instance.description, "Go runtime updated");
-    assert.equal(editedInstance.instance.image, "node:22");
+    const clearedBootstrap = JSON.parse(stdout.data.trim());
+    assert.equal(clearedBootstrap.instance.bootstrapScript, null);
 
     stdout.data = "";
 
@@ -1298,9 +1319,11 @@ test("cli stores docker source metadata without local docker builds", async () =
   const stdout = capture();
   const stderr = capture();
   const configPath = path.join(os.tmpdir(), `flare-cli-docker-${Date.now()}.json`);
+  const bootstrapPath = path.join(os.tmpdir(), `flare-bootstrap-${Date.now()}.sh`);
   const spawned: Array<{ command: string; args: string[]; options: any }> = [];
 
   try {
+    await writeFile(bootstrapPath, "#!/bin/sh\necho cli-bootstrap\n");
     const spawnImpl = (command: string, args: string[], options: any) => {
       spawned.push({ command, args, options });
       return {
@@ -1322,24 +1345,29 @@ test("cli stores docker source metadata without local docker builds", async () =
     assert.equal(code, 0);
     stdout.data = "";
 
-    code = await runCli(["instance", "create", "docker-cli", "--image", "ubuntu:24.04", "--dockerfile", "./Dockerfile", "--context", ".", "--url", "http://local"], {
-      fetchImpl,
-      stdout,
-      stderr,
-      configPath,
-      spawnImpl
-    });
+    code = await runCli(
+      ["instance", "create", "docker-cli", "--image", "ubuntu:24.04", "--dockerfile", "./Dockerfile", "--context", ".", "--bootstrap-file", bootstrapPath, "--url", "http://local"],
+      {
+        fetchImpl,
+        stdout,
+        stderr,
+        configPath,
+        spawnImpl
+      }
+    );
     assert.equal(code, 0);
     const created = JSON.parse(stdout.data.trim());
     assert.equal(created.instance.dockerfilePath, "./Dockerfile");
     assert.equal(created.instance.dockerContext, ".");
     assert.equal(created.instance.image, "ubuntu:24.04");
     assert.equal(created.instance.baseImage, "ubuntu:24.04");
+    assert.equal(created.instance.bootstrapScript, "#!/bin/sh\necho cli-bootstrap\n");
     assert.match(created.instance.managedImageDigest, /^sha256:[a-f0-9]{64}$/);
     assert.equal(spawned.length, 0);
     stdout.data = "";
 
   } finally {
     await rm(configPath, { force: true });
+    await rm(bootstrapPath, { force: true });
   }
 });
