@@ -72,7 +72,8 @@ test("runtime bootstrap payload builder normalizes the worker-to-container body 
     },
     runtimeVersion: 7,
     sshAuthorizedKeys: ["ssh-ed25519 AAAA user@test"],
-    bootstrapScript: null
+    bootstrapScript: null,
+    runBootstrapScript: false
   });
 });
 
@@ -88,6 +89,21 @@ test("runtime bootstrap payload includes bootstrapScript from session", () => {
 test("runtime bootstrap payload defaults bootstrapScript to null", () => {
   const payload = createRuntimeBootstrapPayload({ id: "ses_789", sshAuthorizedKeys: [] });
   assert.equal(payload.bootstrapScript, null);
+  assert.equal(payload.runBootstrapScript, false);
+});
+
+test("runtime bootstrap payload can request start-time script execution", () => {
+  const payload = createRuntimeBootstrapPayload(
+    {
+      id: "ses_987",
+      sshAuthorizedKeys: []
+    },
+    null,
+    {
+      runBootstrapScript: true
+    }
+  );
+  assert.equal(payload.runBootstrapScript, true);
 });
 
 test("runtime lifecycle payload builder fills the default reason from the phase", () => {

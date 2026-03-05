@@ -2129,6 +2129,7 @@ test("worker bootstraps runtime containers on start and records lifecycle hooks 
   assert.equal(forwarded.bootstrap.sessionId, session.session.id);
   assert.equal(forwarded.bootstrap.state, "running");
   assert.deepEqual(forwarded.bootstrap.persistedPaths, ["/workspace/project"]);
+  assert.equal(forwarded.bootstrap.runBootstrapScript, true);
 
   const stopped = await requestJson(app, `/api/sessions/${session.session.id}/stop`, {
     method: "POST",
@@ -2928,6 +2929,7 @@ test("preview route rehydrates the latest snapshot before proxying", async () =>
   assert.equal(forwarded.length, 3);
   assert.equal(forwarded[0].path, "/runtime/bootstrap");
   assert.equal(forwarded[0].payload.sessionId, created.session.id);
+  assert.equal(forwarded[0].payload.runBootstrapScript, false);
   assert.equal(forwarded[1].path, "/snapshot/restore");
   assert.equal(forwarded[1].payload.snapshotId, snapshot.snapshot.id);
   assert.equal(Buffer.from(forwarded[1].payload.contentBase64, "base64").toString("utf8"), "preview restore payload");

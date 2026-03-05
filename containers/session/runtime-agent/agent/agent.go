@@ -47,7 +47,6 @@ const (
 	SessionMetadata        = "/workspace/.burstflare/session.json"
 	BootstrapScriptPath    = "/run/burstflare/bootstrap-user.sh"
 	BootstrapScriptHashDir = "/run/burstflare"
-	BootstrapScriptDone    = "/run/burstflare/bootstrap-user.done"
 )
 
 var authorizedKeyPattern = regexp.MustCompile(`^ssh-(ed25519|rsa)\s+[A-Za-z0-9+/=]+(?:\s+.*)?$`)
@@ -126,6 +125,7 @@ type BootstrapPayload struct {
 	RuntimeVersion         int               `json:"runtimeVersion"`
 	SSHAuthorizedKeys      []string          `json:"sshAuthorizedKeys"`
 	BootstrapScript        string            `json:"bootstrapScript"`
+	RunBootstrapScript     bool              `json:"runBootstrapScript"`
 }
 
 type BootstrapState struct {
@@ -649,33 +649,49 @@ func scriptHash(script string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func runBootstrapScript(script string) (string, error) {
-	hash := scriptHash(script)
-
-	// Check if this exact script already ran (cached by hash).
-	doneData, err := os.ReadFile(BootstrapScriptDone)
-	if err == nil && strings.TrimSpace(string(doneData)) == hash {
-		return "cached", nil
+func writeBootstrapScript(script string) (string, error) {
+	candidates := []string{
+		BootstrapScriptPath,
+		path.Join(os.TempDir(), "burstflare", "bootstrap-user.sh"),
 	}
+	var lastErr error
+	for _, scriptPath := range candidates {
+		if err := os.MkdirAll(path.Dir(scriptPath), 0o755); err != nil {
+			lastErr = err
+			continue
+		}
+		if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+			lastErr = err
+			continue
+		}
+		return scriptPath, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("unable to resolve bootstrap script path")
+	}
+	return "", lastErr
+}
 
-	_ = os.MkdirAll(BootstrapScriptHashDir, 0o755)
-	if err := os.WriteFile(BootstrapScriptPath, []byte(script), 0o700); err != nil {
+func runBootstrapScript(script string) (string, error) {
+	scriptPath, err := writeBootstrapScript(script)
+	if err != nil {
 		return "write_error", fmt.Errorf("failed to write bootstrap script: %w", err)
 	}
 	if uid, gid, ok := runtimeUserIdentity(); ok {
-		_ = os.Chown(BootstrapScriptPath, uid, gid)
+		_ = os.Chown(scriptPath, uid, gid)
 	}
 
-	cmd := exec.Command("/bin/sh", BootstrapScriptPath)
-	cmd.Dir = "/workspace"
+	cmd := exec.Command("/bin/sh", scriptPath)
+	workDir := "/workspace"
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		workDir = os.TempDir()
+	}
+	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "failed", fmt.Errorf("bootstrap script exited with error: %w", err)
 	}
-
-	// Write marker so future bootstraps with the same script are skipped.
-	_ = os.WriteFile(BootstrapScriptDone, []byte(hash), 0o644)
 	return "executed", nil
 }
 
@@ -731,11 +747,15 @@ func (s *RuntimeState) ApplyRuntimeBootstrap(payload BootstrapPayload) Bootstrap
 	// Execute custom bootstrap script if provided.
 	if strings.TrimSpace(payload.BootstrapScript) != "" {
 		bootstrap.BootstrapScriptHash = scriptHash(payload.BootstrapScript)
-		// Unlock while running the script to avoid blocking other requests.
-		s.mu.Unlock()
-		status, _ := runBootstrapScript(payload.BootstrapScript)
-		s.mu.Lock()
-		bootstrap.BootstrapScriptStatus = status
+		if payload.RunBootstrapScript {
+			// Unlock while running the script to avoid blocking other requests.
+			s.mu.Unlock()
+			status, _ := runBootstrapScript(payload.BootstrapScript)
+			s.mu.Lock()
+			bootstrap.BootstrapScriptStatus = status
+		} else {
+			bootstrap.BootstrapScriptStatus = "skipped"
+		}
 		s.Bootstrap = &bootstrap
 		// Refresh session metadata with script status.
 		sessionBody, _ = json.MarshalIndent(bootstrap, "", "  ")

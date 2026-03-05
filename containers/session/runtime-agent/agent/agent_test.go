@@ -179,6 +179,38 @@ func TestEditorRouteStaysScoped(t *testing.T) {
 	}
 }
 
+func TestBootstrapScriptStatusDefaultsToSkipped(t *testing.T) {
+	state := NewState()
+
+	bootstrap := state.ApplyRuntimeBootstrap(BootstrapPayload{
+		SessionID:       "ses_script",
+		BootstrapScript: "#!/bin/sh\necho hello",
+	})
+
+	if bootstrap.BootstrapScriptStatus != "skipped" {
+		t.Fatalf("expected bootstrap script status to be skipped by default, got %s", bootstrap.BootstrapScriptStatus)
+	}
+}
+
+func TestBootstrapScriptRunsOnEveryStartRequest(t *testing.T) {
+	state := NewState()
+	payload := BootstrapPayload{
+		SessionID:          "ses_script_start",
+		BootstrapScript:    "#!/bin/sh\ntrue",
+		RunBootstrapScript: true,
+	}
+
+	first := state.ApplyRuntimeBootstrap(payload)
+	second := state.ApplyRuntimeBootstrap(payload)
+
+	if first.BootstrapScriptStatus != "executed" {
+		t.Fatalf("expected first bootstrap execution to run, got %s", first.BootstrapScriptStatus)
+	}
+	if second.BootstrapScriptStatus != "executed" {
+		t.Fatalf("expected second bootstrap execution to run, got %s", second.BootstrapScriptStatus)
+	}
+}
+
 func TestHandlerServesHealthAndMeta(t *testing.T) {
 	state := NewState()
 	handler := http.Handler(state)
