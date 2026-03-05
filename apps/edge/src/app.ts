@@ -20,6 +20,7 @@ import {
 const CSRF_COOKIE = "burstflare_csrf";
 const REQUEST_ID_HEADER = "x-burstflare-request-id";
 const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
+const DEFAULT_SESSION_IDLE_STOP_SECONDS = 15 * 60;
 const localWebAuthnChallenges = new Map();
 
 interface FrontendHandler {
@@ -1205,6 +1206,93 @@ async function readContainerRuntimeState(container: any): Promise<any> {
   return null;
 }
 
+async function readContainerRuntimeMeta(container: any): Promise<any> {
+  if (!container || typeof container.fetch !== "function") {
+    return null;
+  }
+  try {
+    const response = await container.fetch(new Request(`http://runtime.internal${runtimeControlPaths.meta}`));
+    if (!response.ok) {
+      return null;
+    }
+    return await response.json().catch(() => null);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function parseEpochMs(value: unknown): number | null {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveSessionIdleStopSeconds(options: any = {}): number {
+  const raw = options.sessionIdleStopSeconds ?? options.SESSION_IDLE_STOP_SECONDS;
+  if (raw == null || String(raw).trim() === "") {
+    return DEFAULT_SESSION_IDLE_STOP_SECONDS;
+  }
+  const parsed = Number.parseInt(String(raw), 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return DEFAULT_SESSION_IDLE_STOP_SECONDS;
+  }
+  return parsed;
+}
+
+function shouldStopSessionForIdleNoWs(session: any, runtimeMeta: any, checkedAtMs: number, idleStopSeconds: number): boolean {
+  if (!runtimeMeta || typeof runtimeMeta !== "object") {
+    return false;
+  }
+  const websocket = runtimeMeta.websocket;
+  if (!websocket || typeof websocket !== "object") {
+    return false;
+  }
+  const activeConnections = Number(websocket.activeConnections);
+  if (!Number.isFinite(activeConnections)) {
+    return false;
+  }
+  if (activeConnections > 0) {
+    return false;
+  }
+  const disconnectedAtMs = parseEpochMs(websocket.lastDisconnectedAt);
+  const fallbackMs =
+    parseEpochMs(session?.lastStartedAt) ?? parseEpochMs(session?.updatedAt) ?? parseEpochMs(session?.createdAt);
+  const referenceMs = disconnectedAtMs ?? fallbackMs;
+  if (!Number.isFinite(referenceMs)) {
+    return false;
+  }
+  return checkedAtMs - referenceMs >= idleStopSeconds * 1000;
+}
+
+async function exportInstanceCommonStateForReconcile(service: any, container: any, session: any): Promise<void> {
+  if (!service || !container || !session?.instanceId || typeof container.fetch !== "function") {
+    return;
+  }
+  try {
+    const response = await container.fetch(
+      new Request(`http://runtime.internal${runtimeControlPaths.commonStateExport}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json; charset=utf-8"
+        },
+        body: JSON.stringify({
+          sessionId: session.id,
+          instanceId: session.instanceId
+        })
+      })
+    );
+    if (!response.ok) {
+      return;
+    }
+    await service.saveSystemInstanceCommonState(session.id, {
+      body: await response.arrayBuffer(),
+      contentType: response.headers.get("content-type") || "application/octet-stream"
+    });
+  } catch (_error) {}
+}
+
 function createContainerControlRequest(pathname: string, payload: unknown): Request {
   return new Request(`http://runtime.internal${pathname}`, {
     method: "POST",
@@ -1284,9 +1372,15 @@ async function stopContainerRuntime(container: any, reason: string = "reconcile"
 export async function runReconcile(options: any = {}): Promise<any> {
   const service = createWorkerService(options);
   let runtimeSleptSessions = 0;
+  let runtimeIdleSleptSessions = 0;
   const sleepRunningSessions = options.sleepRunningSessions === true;
+  const idleStopSeconds = resolveSessionIdleStopSeconds(options);
+  const checkedAtMs =
+    typeof options.nowMs === "function"
+      ? Number(options.nowMs()) || Date.now()
+      : Date.now();
 
-  if (sleepRunningSessions && hasRuntimeBinding(options)) {
+  if (hasRuntimeBinding(options) && (sleepRunningSessions || idleStopSeconds > 0)) {
     const result = await service.listSessionsForRuntimeReconcile();
     for (const session of result.sessions) {
       if (session.state !== "running") {
@@ -1299,38 +1393,36 @@ export async function runReconcile(options: any = {}): Promise<any> {
       if (!container) {
         continue;
       }
-      if (session.instanceId && typeof container.fetch === "function") {
-        try {
-          const response = await container.fetch(
-            new Request(`http://runtime.internal${runtimeControlPaths.commonStateExport}`, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json; charset=utf-8"
-              },
-              body: JSON.stringify({
-                sessionId: session.id,
-                instanceId: session.instanceId
-              })
-            })
-          );
-          if (response.ok) {
-            await service.saveSystemInstanceCommonState(session.id, {
-              body: await response.arrayBuffer(),
-              contentType: response.headers.get("content-type") || "application/octet-stream"
-            });
-          }
-        } catch (_error) {}
+
+      let stopReason: string | null = null;
+      if (sleepRunningSessions) {
+        stopReason = "reconcile";
+      } else if (idleStopSeconds > 0) {
+        const runtimeMeta = await readContainerRuntimeMeta(container);
+        if (shouldStopSessionForIdleNoWs(session, runtimeMeta, checkedAtMs, idleStopSeconds)) {
+          stopReason = "idle_timeout_no_ws";
+        }
       }
-      const runtime = await stopContainerRuntime(container, "reconcile", session.id);
+      if (!stopReason) {
+        continue;
+      }
+
+      await exportInstanceCommonStateForReconcile(service, container, session);
+      const runtime = await stopContainerRuntime(container, stopReason, session.id);
       await service.applySystemSessionTransition(session.id, "stop", runtime);
-      runtimeSleptSessions += 1;
+      if (stopReason === "reconcile") {
+        runtimeSleptSessions += 1;
+      } else {
+        runtimeIdleSleptSessions += 1;
+      }
     }
   }
 
   const result = await service.reconcile();
   return {
     ...result,
-    runtimeSleptSessions
+    runtimeSleptSessions,
+    runtimeIdleSleptSessions
   };
 }
 

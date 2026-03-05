@@ -71,6 +71,18 @@ func TestShellWebsocket(t *testing.T) {
 	if string(reply) != "flare" {
 		t.Fatalf("unexpected shell reply: %s", string(reply))
 	}
+	_ = conn.Close()
+	time.Sleep(25 * time.Millisecond)
+	state.mu.Lock()
+	if state.ActiveWebSockets != 0 {
+		state.mu.Unlock()
+		t.Fatalf("expected no active websockets, got %d", state.ActiveWebSockets)
+	}
+	if state.LastWSConnectedAt == "" || state.LastWSDisconnectedAt == "" || state.LastWSActivityAt == "" {
+		state.mu.Unlock()
+		t.Fatalf("expected websocket lifecycle timestamps to be recorded")
+	}
+	state.mu.Unlock()
 }
 
 func TestSSHWebsocketProxy(t *testing.T) {
@@ -124,6 +136,18 @@ func TestSSHWebsocketProxy(t *testing.T) {
 	if string(reply) != "ping" {
 		t.Fatalf("unexpected reply: %s", string(reply))
 	}
+	_ = conn.Close()
+	time.Sleep(25 * time.Millisecond)
+	state.mu.Lock()
+	if state.ActiveWebSockets != 0 {
+		state.mu.Unlock()
+		t.Fatalf("expected no active websockets, got %d", state.ActiveWebSockets)
+	}
+	if state.LastWSConnectedAt == "" || state.LastWSDisconnectedAt == "" || state.LastWSActivityAt == "" {
+		state.mu.Unlock()
+		t.Fatalf("expected websocket lifecycle timestamps to be recorded")
+	}
+	state.mu.Unlock()
 }
 
 func TestSSHPortDefaults(t *testing.T) {

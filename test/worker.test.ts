@@ -1441,6 +1441,167 @@ test("runtime-aware reconcile stops running sessions and persists runtime state"
   assert.equal(detail.session.runtimeState, "stopped");
 });
 
+test("reconcile auto-stops idle sessions when websocket connections are absent", async () => {
+  let tick = Date.parse("2026-03-05T00:00:00.000Z");
+  const service = createWorkerService({
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+  const owner = await service.registerUser({
+    email: "runtime-idle-stop@example.com",
+    name: "Runtime Idle Stop"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "runtime-idle-stop",
+    description: "Runtime idle websocket stop coverage",
+    image: "registry.cloudflare.com/example/runtime-idle-stop:1.0.0"
+  });
+  const created = await service.createSession(owner.token, {
+    name: "runtime-idle-stop-session",
+    instanceId: instance.instance.id
+  });
+  await service.startSession(owner.token, created.session.id);
+  const checkedAtMs = tick + 1000 * 60 * 20;
+  const disconnectedAt = new Date(checkedAtMs - 1000 * 60 * 16).toISOString();
+
+  const stopped: Array<{ sessionId: string; reason: string }> = [];
+  const reconciled = await runReconcile({
+    service,
+    containersEnabled: true,
+    SESSION_IDLE_STOP_SECONDS: "900",
+    nowMs: () => checkedAtMs,
+    getSessionContainer(sessionId: string) {
+      return {
+        async fetch(request: Request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/meta") {
+            return new Response(
+              JSON.stringify({
+                websocket: {
+                  activeConnections: 0,
+                  lastDisconnectedAt: disconnectedAt
+                }
+              }),
+              {
+                headers: {
+                  "content-type": "application/json; charset=utf-8"
+                }
+              }
+            );
+          }
+          return new Response("{}", {
+            headers: {
+              "content-type": "application/json; charset=utf-8"
+            }
+          });
+        },
+        async stopRuntime(reason: string) {
+          stopped.push({
+            sessionId,
+            reason
+          });
+          return {
+            sessionId,
+            desiredState: "sleeping",
+            status: "sleeping",
+            runtimeState: "stopped"
+          };
+        }
+      };
+    }
+  });
+
+  assert.equal(reconciled.runtimeSleptSessions, 0);
+  assert.equal(reconciled.runtimeIdleSleptSessions, 1);
+  assert.equal(stopped.length, 1);
+  assert.equal(stopped[0].sessionId, created.session.id);
+  assert.equal(stopped[0].reason, "idle_timeout_no_ws");
+
+  const detail = await service.getSession(owner.token, created.session.id);
+  assert.equal(detail.session.state, "sleeping");
+  assert.equal(detail.session.runtimeStatus, "sleeping");
+});
+
+test("reconcile keeps running sessions alive while websocket clients are active", async () => {
+  let tick = Date.parse("2026-03-05T01:00:00.000Z");
+  const service = createWorkerService({
+    clock: () => {
+      tick += 1000;
+      return tick;
+    }
+  });
+  const owner = await service.registerUser({
+    email: "runtime-active-ws@example.com",
+    name: "Runtime Active WS"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "runtime-active-ws",
+    description: "Runtime websocket guard coverage",
+    image: "registry.cloudflare.com/example/runtime-active-ws:1.0.0"
+  });
+  const created = await service.createSession(owner.token, {
+    name: "runtime-active-ws-session",
+    instanceId: instance.instance.id
+  });
+  await service.startSession(owner.token, created.session.id);
+  const checkedAtMs = tick + 1000 * 60 * 30;
+
+  const stopped: Array<{ sessionId: string; reason: string }> = [];
+  const reconciled = await runReconcile({
+    service,
+    containersEnabled: true,
+    SESSION_IDLE_STOP_SECONDS: "900",
+    nowMs: () => checkedAtMs,
+    getSessionContainer(sessionId: string) {
+      return {
+        async fetch(request: Request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/meta") {
+            return new Response(
+              JSON.stringify({
+                websocket: {
+                  activeConnections: 1
+                }
+              }),
+              {
+                headers: {
+                  "content-type": "application/json; charset=utf-8"
+                }
+              }
+            );
+          }
+          return new Response("{}", {
+            headers: {
+              "content-type": "application/json; charset=utf-8"
+            }
+          });
+        },
+        async stopRuntime(reason: string) {
+          stopped.push({
+            sessionId,
+            reason
+          });
+          return {
+            sessionId,
+            desiredState: "sleeping",
+            status: "sleeping",
+            runtimeState: "stopped"
+          };
+        }
+      };
+    }
+  });
+
+  assert.equal(reconciled.runtimeSleptSessions, 0);
+  assert.equal(reconciled.runtimeIdleSleptSessions, 0);
+  assert.equal(stopped.length, 0);
+
+  const detail = await service.getSession(owner.token, created.session.id);
+  assert.equal(detail.session.state, "running");
+});
+
 test("worker proxies runtime SSH websocket upgrades into the session container", async () => {
   const forwarded: {
     started: number;
