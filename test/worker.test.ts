@@ -2467,6 +2467,162 @@ test("worker auto-captures snapshot content from a running container", async () 
   assert.equal(parsed.files[0].path, "/workspace/project/notes.txt");
 });
 
+test("worker auto-persists /workspace across stop/start without manual snapshot actions", async () => {
+  const exportRequests: any[] = [];
+  const appliedRestores: any[] = [];
+  let runtime: {
+    desiredState: string;
+    status: string;
+    runtimeState: string;
+    bootCount: number;
+    sessionId?: string;
+  } = {
+    desiredState: "stopped",
+    status: "idle",
+    runtimeState: "stopped",
+    bootCount: 0
+  };
+
+  const autosavePayload = JSON.stringify(
+    {
+      format: "burstflare.snapshot.v2",
+      persistedPaths: ["/workspace"],
+      files: [
+        {
+          path: "/workspace/notes.txt",
+          content: "automatic stop capture"
+        }
+      ]
+    },
+    null,
+    2
+  );
+
+  const commonStateBucket = createBucket();
+  const service = createWorkerService({
+    COMMON_STATE_BUCKET: commonStateBucket
+  });
+  const app = createApp({
+    service,
+    COMMON_STATE_BUCKET: commonStateBucket,
+    containersEnabled: true,
+    getSessionContainer() {
+      return {
+        async startRuntime({ sessionId }: { sessionId: string }) {
+          runtime = {
+            ...runtime,
+            sessionId,
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy",
+            bootCount: runtime.bootCount + 1
+          };
+          return runtime;
+        },
+        async stopRuntime() {
+          runtime = {
+            ...runtime,
+            desiredState: "sleeping",
+            status: "sleeping",
+            runtimeState: "stopped"
+          };
+          return runtime;
+        },
+        async getRuntimeState() {
+          return runtime;
+        },
+        async fetch(request: Request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/snapshot/export") {
+            exportRequests.push(JSON.parse(await request.text()));
+            return new Response(autosavePayload, {
+              headers: {
+                "content-type": "application/vnd.burstflare.snapshot+json; charset=utf-8"
+              }
+            });
+          }
+          if (url.pathname === "/snapshot/restore") {
+            appliedRestores.push(JSON.parse(await request.text()));
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8"
+              }
+            });
+          }
+          if (url.pathname === "/common-state/export") {
+            const payload = JSON.parse(await request.text());
+            return new Response(
+              JSON.stringify({
+                format: "burstflare.common-state.v1",
+                instanceId: payload.instanceId || "unknown",
+                files: []
+              }),
+              {
+                headers: {
+                  "content-type": "application/vnd.burstflare.common-state+json; charset=utf-8"
+                }
+              }
+            );
+          }
+          if (url.pathname === "/common-state/restore" || url.pathname === "/runtime/bootstrap" || url.pathname === "/runtime/lifecycle") {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8"
+              }
+            });
+          }
+          return new Response("ok");
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "workspace-autopersist@example.com",
+    name: "Workspace Autopersist"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "workspace-autopersist",
+    description: "No explicit persisted paths should default to /workspace",
+    image: "registry.cloudflare.com/example/workspace-autopersist:1.0.0",
+    persistedPaths: []
+  });
+  const created = await service.createSession(owner.token, {
+    name: "workspace-autopersist-session",
+    instanceId: instance.instance.id
+  });
+
+  const authHeaders = {
+    authorization: `Bearer ${owner.token}`
+  };
+
+  const started = await requestJson(app, `/api/sessions/${created.session.id}/start`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(started.response.status, 200);
+  assert.equal(started.data.session.state, "running");
+
+  const stopped = await requestJson(app, `/api/sessions/${created.session.id}/stop`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(stopped.response.status, 200);
+  assert.equal(stopped.data.session.state, "sleeping");
+  assert.equal(exportRequests.length, 1);
+  assert.deepEqual(exportRequests[0].persistedPaths, ["/workspace"]);
+
+  const resumed = await requestJson(app, `/api/sessions/${created.session.id}/start`, {
+    method: "POST",
+    headers: authHeaders
+  });
+  assert.equal(resumed.response.status, 200);
+  assert.equal(resumed.data.session.state, "running");
+  assert.ok(resumed.data.session.lastRestoredSnapshotId);
+  assert.equal(appliedRestores.length, 1);
+  assert.deepEqual(appliedRestores[0].persistedPaths, ["/workspace"]);
+});
+
 test("preview route rehydrates the latest snapshot before proxying", async () => {
   const forwarded: Array<{ path: string; payload?: any }> = [];
   const service = createWorkerService();

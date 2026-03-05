@@ -356,23 +356,29 @@ function createObjectStore(options: any): any {
   const snapshotBucket = options.SNAPSHOT_BUCKET || null;
   const commonStateBucket = options.COMMON_STATE_BUCKET || options.SNAPSHOT_BUCKET || null;
   const buildBucket = options.BUILD_BUCKET || null;
-  if (!snapshotBucket && !commonStateBucket && !buildBucket) {
-    return null;
-  }
+  const objectStore: Record<string, any> = {};
 
-  return {
-    async putCommonState({ instance, body, contentType }: { instance: any; body: any; contentType: string }) {
-      if (!commonStateBucket || !instance.commonStateKey) {
+  if (commonStateBucket) {
+    objectStore.putCommonState = async ({
+      instance,
+      body,
+      contentType
+    }: {
+      instance: any;
+      body: any;
+      contentType: string;
+    }) => {
+      if (!instance.commonStateKey) {
         return null;
       }
       await commonStateBucket.put(instance.commonStateKey, body, {
         httpMetadata: { contentType }
       });
       return { key: instance.commonStateKey };
-    },
+    };
 
-    async getCommonState({ instance }: { instance: any }) {
-      if (!commonStateBucket || !instance.commonStateKey) {
+    objectStore.getCommonState = async ({ instance }: { instance: any }) => {
+      if (!instance.commonStateKey) {
         return null;
       }
       const object = await commonStateBucket.get(instance.commonStateKey);
@@ -384,28 +390,38 @@ function createObjectStore(options: any): any {
         contentType: object.httpMetadata?.contentType || "application/octet-stream",
         bytes: object.size ?? instance.commonStateBytes ?? 0
       };
-    },
+    };
 
-    async deleteCommonState({ instance }: { instance: any }) {
-      if (!commonStateBucket || !instance.commonStateKey) {
+    objectStore.deleteCommonState = async ({ instance }: { instance: any }) => {
+      if (!instance.commonStateKey) {
         return null;
       }
       await commonStateBucket.delete(instance.commonStateKey);
       return { key: instance.commonStateKey };
-    },
+    };
+  }
 
-    async putSnapshot({ snapshot, body, contentType }: { snapshot: any; body: any; contentType: string }) {
-      if (!snapshotBucket || !snapshot.objectKey) {
+  if (snapshotBucket) {
+    objectStore.putSnapshot = async ({
+      snapshot,
+      body,
+      contentType
+    }: {
+      snapshot: any;
+      body: any;
+      contentType: string;
+    }) => {
+      if (!snapshot.objectKey) {
         return null;
       }
       await snapshotBucket.put(snapshot.objectKey, body, {
         httpMetadata: { contentType }
       });
       return { key: snapshot.objectKey };
-    },
+    };
 
-    async getSnapshot({ snapshot }: { snapshot: any }) {
-      if (!snapshotBucket || !snapshot.objectKey) {
+    objectStore.getSnapshot = async ({ snapshot }: { snapshot: any }) => {
+      if (!snapshot.objectKey) {
         return null;
       }
       const object = await snapshotBucket.get(snapshot.objectKey);
@@ -417,17 +433,19 @@ function createObjectStore(options: any): any {
         contentType: object.httpMetadata?.contentType || snapshot.contentType || "application/octet-stream",
         bytes: object.size ?? snapshot.bytes
       };
-    },
+    };
 
-    async deleteSnapshot({ snapshot }: { snapshot: any }) {
-      if (!snapshotBucket || !snapshot.objectKey) {
+    objectStore.deleteSnapshot = async ({ snapshot }: { snapshot: any }) => {
+      if (!snapshot.objectKey) {
         return null;
       }
       await snapshotBucket.delete(snapshot.objectKey);
       return { key: snapshot.objectKey };
-    },
+    };
+  }
 
-    async putBuildArtifact({
+  if (buildBucket) {
+    objectStore.putBuildArtifact = async ({
       artifactKey,
       body,
       contentType
@@ -437,16 +455,18 @@ function createObjectStore(options: any): any {
       artifactKey: string;
       body: any;
       contentType: string;
-    }) {
-      if (!buildBucket || !artifactKey) {
+    }) => {
+      if (!artifactKey) {
         return null;
       }
       await buildBucket.put(artifactKey, body, {
         httpMetadata: { contentType }
       });
       return { key: artifactKey };
-    }
-  };
+    };
+  }
+
+  return Object.keys(objectStore).length > 0 ? objectStore : null;
 }
 
 function createTurnstileVerifier(options: any): { enabled: boolean; verify(token: unknown, remoteIp: unknown): Promise<void> } {
@@ -1491,6 +1511,22 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     }
 
     const result = await service.transitionSessionWithRuntime(token, sessionId, action, async (session: any) => {
+      if (["stop", "restart"].includes(action) && session.state === "running") {
+        const runtimeSnapshot = await captureSnapshotFromRuntime(session);
+        if (runtimeSnapshot) {
+          const detail = await service.getSession(token, session.id);
+          const latestSnapshot =
+            detail && Array.isArray(detail.snapshots) && detail.snapshots.length > 0 ? detail.snapshots[0] : null;
+          if (latestSnapshot && latestSnapshot.id) {
+            await service.uploadSnapshotContent(token, session.id, latestSnapshot.id, runtimeSnapshot);
+          } else {
+            const createdSnapshot = await service.createSnapshot(token, session.id, {
+              label: action === "restart" ? "auto-restart" : "auto-stop"
+            });
+            await service.uploadSnapshotContent(token, session.id, createdSnapshot.snapshot.id, runtimeSnapshot);
+          }
+        }
+      }
       if (["stop", "restart", "delete"].includes(action) && session.state === "running" && session.instanceId) {
         const runtimeCommonState = await captureCommonStateFromRuntime(session);
         if (runtimeCommonState) {
@@ -1552,16 +1588,21 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     return new Request(url.toString(), request);
   }
 
+  function resolveSessionPersistedPaths(session: any): string[] {
+    const paths = Array.isArray(session?.persistedPaths)
+      ? session.persistedPaths.filter((entry: any) => typeof entry === "string" && entry.startsWith("/"))
+      : [];
+    return paths.length > 0 ? paths : ["/workspace"];
+  }
+
   function createRuntimeEditorRequest(request: Request, session: any, bodyText: string | null = null): Request {
     const source = new URL(request.url);
     const url = new URL(request.url);
     url.pathname = "/editor";
     url.search = "";
     url.searchParams.set("sessionId", session.id);
-    if (Array.isArray(session?.persistedPaths)) {
-      for (const persistedPath of session.persistedPaths) {
-        url.searchParams.append("persistedPath", persistedPath);
-      }
+    for (const persistedPath of resolveSessionPersistedPaths(session)) {
+      url.searchParams.append("persistedPath", persistedPath);
     }
     const requestedPath = source.searchParams.get("path");
     if (requestedPath) {
@@ -1593,7 +1634,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
         sessionId: session.id,
         snapshotId,
         label: snapshot?.label || snapshotId,
-        persistedPaths: Array.isArray(session?.persistedPaths) ? session.persistedPaths : [],
+        persistedPaths: resolveSessionPersistedPaths(session),
         contentType: content.contentType,
         bytes: content.bytes,
         contentBase64: toBase64(content.body)
@@ -1611,7 +1652,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
       },
       body: JSON.stringify({
         sessionId: session.id,
-        persistedPaths: Array.isArray(session?.persistedPaths) ? session.persistedPaths : []
+        persistedPaths: resolveSessionPersistedPaths(session)
       })
     });
   }
@@ -1663,6 +1704,9 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
       return null;
     }
     const response = await container.fetch(createSnapshotExportRequest(session));
+    if (response.status === 404) {
+      return null;
+    }
     if (!response.ok) {
       const message = await response.text().catch(() => "Snapshot export failed");
       throw createHttpError(message || "Snapshot export failed", 502);
