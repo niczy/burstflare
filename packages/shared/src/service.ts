@@ -54,6 +54,7 @@ const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_COMMON_STATE_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_RUNTIME_SECRETS = 32;
 const MAX_RUNTIME_SECRET_VALUE_BYTES = 4096;
+const MAX_BOOTSTRAP_SCRIPT_BYTES = 65536;
 
 const DEFAULT_INSTANCE_BASE_IMAGE = "burstflare/session-runtime:v1";
 const FIXED_INSTANCE_BOOTSTRAP_VERSION = "v1";
@@ -242,6 +243,19 @@ function normalizeSleepTtlSeconds(value) {
   ensure(Number.isInteger(value), "sleepTtlSeconds must be an integer");
   ensure(value >= 1, "sleepTtlSeconds must be at least 1");
   ensure(value <= 60 * 60 * 24 * 7, "sleepTtlSeconds exceeds limit");
+  return value;
+}
+
+function normalizeBootstrapScript(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value == null || value === "") {
+    return null;
+  }
+  ensure(typeof value === "string", "bootstrapScript must be a string");
+  const bytes = new TextEncoder().encode(value).byteLength;
+  ensure(bytes <= MAX_BOOTSTRAP_SCRIPT_BYTES, "bootstrapScript exceeds size limit (64 KB)", 413);
   return value;
 }
 
@@ -2686,7 +2700,8 @@ export function createBurstFlareService(options: any = {}) {
         envVars = {},
         secrets = {},
         persistedPaths = [],
-        sleepTtlSeconds = null
+        sleepTtlSeconds = null,
+        bootstrapScript = null
       }
     ) {
       const created = await transact(INSTANCE_SCOPE, (state) => {
@@ -2731,6 +2746,7 @@ export function createBurstFlareService(options: any = {}) {
           secrets: normalizeInstanceSecrets(secrets),
           persistedPaths: normalizePersistedPaths(persistedPaths) || [],
           sleepTtlSeconds: normalizeSleepTtlSeconds(sleepTtlSeconds),
+          bootstrapScript: normalizeBootstrapScript(bootstrapScript),
           commonStateKey: null,
           commonStateBytes: 0,
           commonStateUpdatedAt: null,
@@ -2872,6 +2888,9 @@ export function createBurstFlareService(options: any = {}) {
         }
         if (Object.prototype.hasOwnProperty.call(updates, "sleepTtlSeconds")) {
           auth.instance.sleepTtlSeconds = normalizeSleepTtlSeconds(updates.sleepTtlSeconds);
+        }
+        if (Object.prototype.hasOwnProperty.call(updates, "bootstrapScript")) {
+          auth.instance.bootstrapScript = normalizeBootstrapScript(updates.bootstrapScript);
         }
         auth.instance.updatedAt = nowIso(clock);
         writeAudit(state, clock, {

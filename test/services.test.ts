@@ -236,6 +236,48 @@ test("service supports instance CRUD with write-only secrets", async () => {
 
 
 
+test("service stores and returns bootstrapScript on instances", async () => {
+  const service = createBurstFlareService({ store: createMemoryStore() });
+  const owner = await service.registerUser({
+    email: "bootstrap-script@example.com",
+    name: "Bootstrap Script"
+  });
+
+  const created = await service.createInstance(owner.token, {
+    name: "Scripted Instance",
+    baseImage: "ubuntu:24.04",
+    bootstrapScript: "#!/bin/sh\napt-get update && apt-get install -y curl"
+  });
+  assert.equal(created.instance.bootstrapScript, "#!/bin/sh\napt-get update && apt-get install -y curl");
+
+  const updated = await service.updateInstance(owner.token, created.instance.id, {
+    bootstrapScript: "#!/bin/sh\npip install numpy"
+  });
+  assert.equal(updated.instance.bootstrapScript, "#!/bin/sh\npip install numpy");
+
+  const cleared = await service.updateInstance(owner.token, created.instance.id, {
+    bootstrapScript: null
+  });
+  assert.equal(cleared.instance.bootstrapScript, null);
+});
+
+test("service rejects oversized bootstrapScript", async () => {
+  const service = createBurstFlareService({ store: createMemoryStore() });
+  const owner = await service.registerUser({
+    email: "bootstrap-oversize@example.com",
+    name: "Bootstrap Oversize"
+  });
+
+  await assert.rejects(
+    service.createInstance(owner.token, {
+      name: "Oversized Script",
+      baseImage: "ubuntu:24.04",
+      bootstrapScript: "x".repeat(70000)
+    }),
+    /bootstrapScript exceeds size limit/
+  );
+});
+
 test("service rejects unsupported instance base images", async () => {
   const service = createBurstFlareService({ store: createMemoryStore() });
   const owner = await service.registerUser({

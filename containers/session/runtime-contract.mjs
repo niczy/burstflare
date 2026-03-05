@@ -84,7 +84,8 @@ export function createRuntimeBootstrapPayload(session = {}, runtimeSecrets = nul
     runtimeSecretNames: secretPayload.secretNames,
     runtimeSecrets: secretPayload.runtimeSecrets,
     runtimeVersion: Number.isInteger(session?.runtimeVersion) ? session.runtimeVersion : 0,
-    sshAuthorizedKeys: Array.isArray(session?.sshAuthorizedKeys) ? session.sshAuthorizedKeys : []
+    sshAuthorizedKeys: Array.isArray(session?.sshAuthorizedKeys) ? session.sshAuthorizedKeys : [],
+    bootstrapScript: session?.instanceBootstrapScript || session?.bootstrapScript || null
   };
 }
 
