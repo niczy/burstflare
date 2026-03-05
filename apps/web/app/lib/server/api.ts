@@ -1,6 +1,15 @@
 import { headers } from "next/headers";
-import type { ApiError, HealthResponse } from "../types.js";
-import type { Viewer } from "../types.js";
+import type {
+  AdminReportResponse,
+  ApiError,
+  AuditResponse,
+  DashboardSnapshot,
+  HealthResponse,
+  InstancesResponse,
+  SessionsResponse,
+  UsageResponse,
+  Viewer
+} from "../types.js";
 
 type ServerApiRequestOptions = RequestInit & {
   requireAuth?: boolean;
@@ -91,4 +100,83 @@ export async function getViewer(): Promise<Viewer | null> {
   } catch (_error) {
     return null;
   }
+}
+
+export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
+  const viewer = await getViewer();
+  if (!viewer) {
+    return {
+      viewer: null,
+      instances: [],
+      sessions: [],
+      usage: null,
+      report: null,
+      audit: [],
+      lastRefreshedAt: null,
+      warning: null
+    };
+  }
+
+  const [instancesResult, sessionsResult, usageResult, reportResult, auditResult] = await Promise.allSettled([
+    serverApiJson<InstancesResponse>("/api/instances", { requireAuth: true }),
+    serverApiJson<SessionsResponse>("/api/sessions", { requireAuth: true }),
+    serverApiJson<UsageResponse>("/api/usage", { requireAuth: true }),
+    serverApiJson<AdminReportResponse>("/api/admin/report", { requireAuth: true }),
+    serverApiJson<AuditResponse>("/api/audit", { requireAuth: true })
+  ]);
+
+  const warnings: string[] = [];
+  const instances =
+    instancesResult.status === "fulfilled"
+      ? Array.isArray(instancesResult.value.instances)
+        ? instancesResult.value.instances
+        : []
+      : [];
+  if (instancesResult.status === "rejected") {
+    warnings.push("instances");
+  }
+
+  const sessions =
+    sessionsResult.status === "fulfilled"
+      ? Array.isArray(sessionsResult.value.sessions)
+        ? sessionsResult.value.sessions
+        : []
+      : [];
+  if (sessionsResult.status === "rejected") {
+    warnings.push("sessions");
+  }
+
+  const usage = usageResult.status === "fulfilled" ? usageResult.value : null;
+  if (usageResult.status === "rejected") {
+    warnings.push("usage");
+  }
+
+  const report = reportResult.status === "fulfilled" ? reportResult.value.report : null;
+  if (reportResult.status === "rejected") {
+    warnings.push("report");
+  }
+
+  const audit =
+    auditResult.status === "fulfilled"
+      ? Array.isArray(auditResult.value.audit)
+        ? auditResult.value.audit
+        : []
+      : [];
+  if (auditResult.status === "rejected") {
+    warnings.push("activity");
+  }
+
+  return {
+    viewer,
+    instances,
+    sessions,
+    usage,
+    report,
+    audit,
+    lastRefreshedAt: new Date().toISOString(),
+    warning:
+      warnings.length > 0
+        ? `Some sections could not be loaded: ${warnings.join(", ")}.`
+        : null
+  };
 }

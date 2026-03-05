@@ -102,4 +102,88 @@
   .meta-grid {
     @apply grid gap-2 sm:grid-cols-2;
   }
+
+  .dashboard-stack {
+    @apply mx-auto flex w-full max-w-6xl flex-col gap-4;
+  }
+
+  .dashboard-grid {
+    @apply grid gap-4 xl:grid-cols-2;
+  }
+
+  .dashboard-copy {
+    @apply text-sm text-muted-foreground;
+  }
+
+  .dashboard-toolbar {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .dashboard-form {
+    @apply grid gap-3;
+  }
+
+  .dashboard-row {
+    @apply grid gap-3 md:grid-cols-2;
+  }
+
+  .dashboard-field {
+    @apply grid gap-2;
+  }
+
+  .dashboard-field label {
+    @apply text-sm font-medium;
+  }
+
+  .dashboard-select {
+    @apply flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+
+  .dashboard-textarea {
+    @apply min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+
+  .dashboard-table-wrap {
+    @apply overflow-x-auto rounded-md border border-border;
+  }
+
+  .metric-grid {
+    @apply grid gap-2 md:grid-cols-2;
+  }
+
+  .metric-card {
+    @apply rounded-md border border-border bg-secondary/65 p-3;
+  }
+
+  .metric-label {
+    @apply text-xs font-medium uppercase tracking-wide text-muted-foreground;
+  }
+
+  .metric-value {
+    @apply mt-1 text-lg font-semibold;
+  }
+
+  .metric-help {
+    @apply mt-1 text-xs text-muted-foreground;
+  }
+
+  .progress-track {
+    @apply mt-2 h-2 rounded-full bg-secondary;
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full bg-primary;
+  }
+
+  .dashboard-empty {
+    @apply rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground;
+  }
+
+  .dashboard-link {
+    @apply text-sm font-medium text-primary underline-offset-4 hover:underline;
+  }
+
+  .audit-list {
+    @apply grid gap-2;
+  }
 }
