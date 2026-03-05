@@ -84,38 +84,40 @@ export default async function HomePage() {
             <pre className="code-panel">{`flare instance create node-dev --image ubuntu:24.04 --bootstrap-file ./bootstrap.sh
 flare session up sandbox --instance <instanceId>
 flare ssh <sessionId>`}</pre>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Path</TableHead>
-                  <TableHead>Persistence model</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow>
-                  <TableCell>
-                    <code>/home/flare</code>
-                  </TableCell>
-                  <TableCell>Shared at instance level</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>Runtime availability</TableCell>
-                  <TableCell>
-                    {health?.runtime?.containersEnabled ? "Containers enabled" : "Runtime unavailable"}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>SSR health check</TableCell>
-                  <TableCell>{health?.ok ? "Healthy" : "Unavailable"}</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell>
-                    <code>/workspace</code>
-                  </TableCell>
-                  <TableCell>Session-isolated, auto-restored</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+            <div className="table-scroll">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Path</TableHead>
+                    <TableHead>Persistence model</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>
+                      <code>/home/flare</code>
+                    </TableCell>
+                    <TableCell>Shared at instance level</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Runtime availability</TableCell>
+                    <TableCell>
+                      {health?.runtime?.containersEnabled ? "Containers enabled" : "Runtime unavailable"}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>SSR health check</TableCell>
+                    <TableCell>{health?.ok ? "Healthy" : "Unavailable"}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>
+                      <code>/workspace</code>
+                    </TableCell>
+                    <TableCell>Session-isolated, auto-restored</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       </section>
