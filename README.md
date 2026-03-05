@@ -6,7 +6,7 @@ BurstFlare is a hosted workspace product for creating reusable dev environments,
 
 - account and workspace management
 - browser sessions, recovery flows, and workspace settings
-- instance creation, editing, and shared home-state sync on a fixed managed runtime image
+- instance creation, editing, and shared home-state sync with runtime image selection support when container bindings are configured
 - live workspace sessions with preview, terminal, editor, and SSH access
 - latest snapshots, activity history, reporting, billing, and export tools
 
@@ -52,6 +52,23 @@ flare ssh <sessionId>
 ```
 
 `flare ssh` now wakes sleeping sessions if needed, provisions a per-session SSH key in your local `flare` config directory, syncs the public key to the session, and opens the tunnel and SSH session directly. Use `flare ssh <sessionId> --print` if you want to inspect the tunnel endpoint and local attach details.
+
+## Runtime Image Selection
+
+The worker can route session containers by instance base image when image-specific container bindings are configured.
+
+- `SESSION_CONTAINER_IMAGE_BINDINGS`: JSON map of image -> binding name (supports `"*"` fallback)
+- `SESSION_CONTAINER_IMAGE_BINDINGS_STRICT`: when true, reject session start if the selected image has no configured binding
+
+Example:
+
+```json
+{
+  "ubuntu:24.04": "SESSION_CONTAINER_UBUNTU",
+  "debian:12": "SESSION_CONTAINER_DEBIAN",
+  "*": "SESSION_CONTAINER"
+}
+```
 
 ## Local Development
 

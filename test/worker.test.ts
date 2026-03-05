@@ -1701,6 +1701,115 @@ test("worker proxies browser editor requests into the session container editor r
   assert.match(forwarded.bodyText || "", /content=draft\+2/);
 });
 
+test("worker passes instance image metadata to the session container resolver", async () => {
+  const resolutions: Array<{ sessionId: string; runtimeSpec: any }> = [];
+  let runtime: {
+    desiredState: string;
+    status: string;
+    runtimeState: string;
+    bootCount: number;
+    sessionId?: string;
+  } = {
+    desiredState: "stopped",
+    status: "idle",
+    runtimeState: "stopped",
+    bootCount: 0
+  };
+
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer(sessionId: string, runtimeSpec: any = null) {
+      resolutions.push({ sessionId, runtimeSpec });
+      return {
+        async startRuntime({ sessionId: startedSessionId }: { sessionId: string }) {
+          runtime = {
+            ...runtime,
+            sessionId: startedSessionId,
+            desiredState: "running",
+            status: "running",
+            runtimeState: "healthy",
+            bootCount: runtime.bootCount + 1
+          };
+          return runtime;
+        },
+        async getRuntimeState() {
+          return runtime;
+        },
+        async fetch() {
+          return new Response("ok");
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "runtime-image-selection@example.com",
+    name: "Runtime Image Selection"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "runtime-image-selection",
+    description: "Uses image metadata for runtime selection",
+    image: "ubuntu:24.04"
+  });
+  const session = await service.createSession(owner.token, {
+    name: "runtime-image-session",
+    instanceId: instance.instance.id
+  });
+
+  const started = await requestJson(app, `/api/sessions/${session.session.id}/start`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.token}`
+    }
+  });
+
+  assert.equal(started.response.status, 200);
+  assert.equal(started.data.session.state, "running");
+  const imageResolution = resolutions.find((entry) => entry.runtimeSpec && entry.runtimeSpec.baseImage);
+  assert.ok(imageResolution);
+  assert.equal(imageResolution?.runtimeSpec.baseImage, "ubuntu:24.04");
+});
+
+test("worker returns a clear error when runtime resolver rejects an unsupported image", async () => {
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer(_sessionId: string, runtimeSpec: any = null) {
+      if (runtimeSpec?.baseImage === "ubuntu:24.04") {
+        throw new Error("Session base image ubuntu:24.04 is not configured for this worker runtime deployment.");
+      }
+      return null;
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "runtime-image-reject@example.com",
+    name: "Runtime Image Reject"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "runtime-image-reject",
+    description: "Unsupported image should be rejected by runtime resolver",
+    image: "ubuntu:24.04"
+  });
+  const session = await service.createSession(owner.token, {
+    name: "runtime-image-reject-session",
+    instanceId: instance.instance.id
+  });
+
+  const started = await requestJson(app, `/api/sessions/${session.session.id}/start`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${owner.token}`
+    }
+  });
+
+  assert.equal(started.response.status, 409);
+  assert.match(String(started.data.error || ""), /not configured for this worker runtime deployment/i);
+});
+
 test("worker bootstraps runtime containers on start and records lifecycle hooks on stop", async () => {
   const forwarded: {
     bootstrap: any;

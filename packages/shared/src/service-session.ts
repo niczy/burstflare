@@ -126,6 +126,8 @@ export function formatSession(state, session, { includeSshKeys = false }: { incl
     ...baseSession,
     instanceId: session.instanceId || null,
     instanceName: instance?.name || null,
+    instanceBaseImage: instance?.baseImage || instance?.image || null,
+    instanceManagedRuntimeImage: instance?.managedRuntimeImage || null,
     templateName: null,
     eventsCount: events.length,
     snapshotCount: snapshots.length,

@@ -1271,7 +1271,10 @@ export async function runReconcile(options: any = {}): Promise<any> {
       if (session.state !== "running") {
         continue;
       }
-      const container = options.getSessionContainer(session.id);
+      const container = options.getSessionContainer(session.id, {
+        baseImage: session.instanceBaseImage || null,
+        managedRuntimeImage: session.instanceManagedRuntimeImage || null
+      });
       if (!container) {
         continue;
       }
@@ -1375,15 +1378,35 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     return kind !== "api";
   }
 
-  function getSessionContainer(sessionId: string): any {
+  function resolveSessionRuntimeSpec(session: any): any {
+    return {
+      baseImage:
+        session && typeof session.instanceBaseImage === "string" && session.instanceBaseImage.trim()
+          ? session.instanceBaseImage.trim()
+          : null,
+      managedRuntimeImage:
+        session && typeof session.instanceManagedRuntimeImage === "string" && session.instanceManagedRuntimeImage.trim()
+          ? session.instanceManagedRuntimeImage.trim()
+          : null
+    };
+  }
+
+  function getSessionContainer(sessionId: string, runtimeSpec: any = null): any {
     if (!hasContainerBinding()) {
       return null;
     }
-    return options.getSessionContainer(sessionId);
+    try {
+      return options.getSessionContainer(sessionId, runtimeSpec);
+    } catch (error) {
+      throw createHttpError(
+        error instanceof Error ? error.message : "Session runtime image is not supported by this deployment.",
+        409
+      );
+    }
   }
 
-  async function startSessionContainer(sessionId: string): Promise<any> {
-    const container = getSessionContainer(sessionId);
+  async function startSessionContainer(sessionId: string, runtimeSpec: any = null): Promise<any> {
+    const container = getSessionContainer(sessionId, runtimeSpec);
     if (!container) {
       return null;
     }
@@ -1393,13 +1416,14 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     return container;
   }
 
-  async function getSessionRuntimeState(sessionId: string): Promise<any> {
-    const container = getSessionContainer(sessionId);
+  async function getSessionRuntimeState(sessionId: string, runtimeSpec: any = null): Promise<any> {
+    const container = getSessionContainer(sessionId, runtimeSpec);
     return readContainerRuntimeState(container);
   }
 
   async function syncSessionRuntime(action: string, session: any): Promise<any> {
-    const container = getSessionContainer(session.id);
+    const runtimeSpec = resolveSessionRuntimeSpec(session);
+    const container = getSessionContainer(session.id, runtimeSpec);
     if (!container) {
       return null;
     }
@@ -1410,8 +1434,8 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           previewUrl: session.previewUrl
         });
       }
-      await startSessionContainer(session.id);
-      return getSessionRuntimeState(session.id);
+      await startSessionContainer(session.id, runtimeSpec);
+      return getSessionRuntimeState(session.id, runtimeSpec);
     }
     if (action === "stop") {
       return stopContainerRuntime(container, "session_stop", session.id);
@@ -1431,8 +1455,8 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
       if (typeof container.stop === "function") {
         await container.stop();
       }
-      await startSessionContainer(session.id);
-      return getSessionRuntimeState(session.id);
+      await startSessionContainer(session.id, runtimeSpec);
+      return getSessionRuntimeState(session.id, runtimeSpec);
     }
     if (action === "delete") {
       await emitRuntimeLifecycleHook(container, session.id, "delete", "delete", {
@@ -1444,9 +1468,9 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
       if (typeof container.destroy === "function") {
         await container.destroy();
       }
-      return getSessionRuntimeState(session.id);
+      return getSessionRuntimeState(session.id, runtimeSpec);
     }
-    return getSessionRuntimeState(session.id);
+    return getSessionRuntimeState(session.id, runtimeSpec);
   }
 
   async function transitionSession(token: string, sessionId: string, action: string): Promise<any> {
@@ -1480,7 +1504,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
       result.session.state === "running" &&
       !result.stale
     ) {
-      const container = getSessionContainer(result.session.id);
+      const container = getSessionContainer(result.session.id, resolveSessionRuntimeSpec(result.session));
       const runtimeSecrets = await service.getSystemRuntimeSecrets(result.session.id);
       await applyRuntimeBootstrapToContainer(container, result.session, runtimeSecrets);
       if (result.session.lastRestoredSnapshotId) {
@@ -1593,7 +1617,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   async function applySnapshotContentToRuntime(session: any, snapshotId: string, snapshot: any, content: any): Promise<any> {
-    const container = getSessionContainer(session.id);
+    const container = getSessionContainer(session.id, resolveSessionRuntimeSpec(session));
     if (!container || typeof container.fetch !== "function") {
       return null;
     }
@@ -1634,7 +1658,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   async function captureSnapshotFromRuntime(session: any): Promise<any> {
-    const container = getSessionContainer(session.id);
+    const container = getSessionContainer(session.id, resolveSessionRuntimeSpec(session));
     if (!container || typeof container.fetch !== "function") {
       return null;
     }
@@ -1685,7 +1709,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   async function applyCommonStateContentToRuntime(session: any, content: any): Promise<any> {
-    const container = getSessionContainer(session.id);
+    const container = getSessionContainer(session.id, resolveSessionRuntimeSpec(session));
     if (!container || typeof container.fetch !== "function") {
       return null;
     }
@@ -1721,7 +1745,7 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
   }
 
   async function captureCommonStateFromRuntime(session: any): Promise<any> {
-    const container = getSessionContainer(session.id);
+    const container = getSessionContainer(session.id, resolveSessionRuntimeSpec(session));
     if (!container || typeof container.fetch !== "function") {
       return null;
     }

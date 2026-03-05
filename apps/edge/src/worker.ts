@@ -318,7 +318,9 @@ export class BurstFlareSessionContainer extends Container {
 }
 
 interface EnvWithSessionContainer {
-  SESSION_CONTAINER?: string;
+  SESSION_CONTAINER?: unknown;
+  SESSION_CONTAINER_IMAGE_BINDINGS?: string;
+  SESSION_CONTAINER_IMAGE_BINDINGS_STRICT?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
   [key: string]: unknown;
 }
@@ -326,10 +328,49 @@ interface EnvWithSessionContainer {
 interface RuntimeOptions {
   containersEnabled: boolean;
   getFrontendAssetResponse?: (request: Request) => Promise<Response | null> | Response | null;
-  getSessionContainer?: (sessionId: string) => ReturnType<typeof getContainer> | null;
+  getSessionContainer?: (sessionId: string, runtimeSpec?: any) => ReturnType<typeof getContainer> | null;
+}
+
+function parseImageBindingMap(raw: unknown): Record<string, string> {
+  const value = String(raw || "").trim();
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const bindings: Record<string, string> = {};
+    for (const [key, bindingName] of Object.entries(parsed as Record<string, unknown>)) {
+      const image = String(key || "").trim();
+      const name = String(bindingName || "").trim();
+      if (!image || !name) {
+        continue;
+      }
+      bindings[image] = name;
+    }
+    return bindings;
+  } catch {
+    return {};
+  }
+}
+
+function parseRuntimeFlag(raw: unknown, fallback: boolean): boolean {
+  const value = String(raw == null ? "" : raw).trim().toLowerCase();
+  if (!value) {
+    return fallback;
+  }
+  return !["0", "false", "no", "off"].includes(value);
 }
 
 function createRuntimeOptions(env: EnvWithSessionContainer): RuntimeOptions {
+  const imageBindingMap = parseImageBindingMap(env?.SESSION_CONTAINER_IMAGE_BINDINGS);
+  const configuredImageBindings = Object.keys(imageBindingMap).length > 0;
+  const strictImageSelection = parseRuntimeFlag(
+    env?.SESSION_CONTAINER_IMAGE_BINDINGS_STRICT,
+    configuredImageBindings
+  );
   return {
     ...env,
     containersEnabled: Boolean(env?.SESSION_CONTAINER),
@@ -339,11 +380,26 @@ function createRuntimeOptions(env: EnvWithSessionContainer): RuntimeOptions {
       }
       return env.ASSETS.fetch(request);
     },
-    getSessionContainer(sessionId: string) {
-      if (!env?.SESSION_CONTAINER) {
+    getSessionContainer(sessionId: string, runtimeSpec: any = null) {
+      const requestedBaseImage = String(runtimeSpec?.baseImage || "").trim();
+      const explicitBindingName = requestedBaseImage ? imageBindingMap[requestedBaseImage] : "";
+      const fallbackBindingName = imageBindingMap["*"] || imageBindingMap.default || "";
+      const selectedBindingName = explicitBindingName || fallbackBindingName || "SESSION_CONTAINER";
+      const selectedBinding = env?.[selectedBindingName];
+      if (requestedBaseImage && strictImageSelection && configuredImageBindings && !explicitBindingName && !fallbackBindingName) {
+        throw new Error(
+          `Session base image ${requestedBaseImage} is not configured for this worker runtime deployment.`
+        );
+      }
+      if (!selectedBinding) {
+        if (requestedBaseImage && strictImageSelection) {
+          throw new Error(
+            `Session base image ${requestedBaseImage} is not bound to a runtime container in this deployment.`
+          );
+        }
         return null;
       }
-      return getContainer(env.SESSION_CONTAINER, sessionId);
+      return getContainer(selectedBinding as any, sessionId);
     }
   };
 }
