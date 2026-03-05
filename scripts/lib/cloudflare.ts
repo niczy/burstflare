@@ -59,6 +59,8 @@ export async function loadCloudflareConfig() {
     apiToken: getRequiredEnv(env, "CLOUDFLARE_API_TOKEN"),
     enableContainers: env.CLOUDFLARE_ENABLE_CONTAINERS === "1" || Boolean(env.CLOUDFLARE_CONTAINER_IMAGE),
     containerImage: env.CLOUDFLARE_CONTAINER_IMAGE || "",
+    containerImageUbuntu: env.CLOUDFLARE_CONTAINER_IMAGE_UBUNTU || "",
+    containerImageDebian: env.CLOUDFLARE_CONTAINER_IMAGE_DEBIAN || "",
     turnstileSiteKey: env.TURNSTILE_SITE_KEY || "",
     turnstileSecret: env.TURNSTILE_SECRET || "",
     resendApiKey: env.RESEND_API_KEY || "",

@@ -317,6 +317,10 @@ export class BurstFlareSessionContainer extends Container {
   }
 }
 
+export class BurstFlareSessionContainerUbuntu extends BurstFlareSessionContainer {}
+
+export class BurstFlareSessionContainerDebian extends BurstFlareSessionContainer {}
+
 interface EnvWithSessionContainer {
   SESSION_CONTAINER?: unknown;
   SESSION_CONTAINER_IMAGE_BINDINGS?: string;
