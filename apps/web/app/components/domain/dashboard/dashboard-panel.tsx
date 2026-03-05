@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ErrorBoundary } from "../../primitives/error-boundary.js";
+import { RuntimeWorkbench } from "../runtime/runtime-workbench.js";
 import { Badge } from "../../primitives/badge.js";
 import { Button } from "../../primitives/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../primitives/card.js";
@@ -1049,43 +1050,54 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
         </ErrorBoundary>
       </div>
 
-      <ErrorBoundary fallback={<div className="section-fallback">Activity section failed. Refresh to retry.</div>}>
-        <Card>
-          <CardHeader>
-            <CardTitle>Activity</CardTitle>
-            <CardDescription>Recent audit events for this workspace.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {audit.length === 0 ? (
-              <div className="dashboard-empty">No recent activity.</div>
-            ) : (
-              <div className="dashboard-table-wrap">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Target</TableHead>
-                      <TableHead>Time</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {audit.slice(0, 12).map((entry, index) => (
-                      <TableRow key={entry.id || `${entry.action}-${index}`}>
-                        <TableCell>{entry.action}</TableCell>
-                        <TableCell>
-                          {entry.targetType || "-"}
-                          {entry.targetId ? `:${entry.targetId}` : ""}
-                        </TableCell>
-                        <TableCell>{formatDate(entry.createdAt)}</TableCell>
+      <div className="dashboard-grid">
+        <ErrorBoundary fallback={<div className="section-fallback">Runtime section failed. Refresh to retry.</div>}>
+          <RuntimeWorkbench
+            sessions={sessions}
+            disabled={pending || !isSignedIn}
+            onError={setError}
+            onToast={pushToast}
+          />
+        </ErrorBoundary>
+
+        <ErrorBoundary fallback={<div className="section-fallback">Activity section failed. Refresh to retry.</div>}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Activity</CardTitle>
+              <CardDescription>Recent audit events for this workspace.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {audit.length === 0 ? (
+                <div className="dashboard-empty">No recent activity.</div>
+              ) : (
+                <div className="dashboard-table-wrap">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Time</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </ErrorBoundary>
+                    </TableHeader>
+                    <TableBody>
+                      {audit.slice(0, 12).map((entry, index) => (
+                        <TableRow key={entry.id || `${entry.action}-${index}`}>
+                          <TableCell>{entry.action}</TableCell>
+                          <TableCell>
+                            {entry.targetType || "-"}
+                            {entry.targetId ? `:${entry.targetId}` : ""}
+                          </TableCell>
+                          <TableCell>{formatDate(entry.createdAt)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </ErrorBoundary>
+      </div>
 
       {toasts.length > 0 ? (
         <div className="toast-stack" role="status" aria-live="polite">

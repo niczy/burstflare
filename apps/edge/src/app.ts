@@ -3297,11 +3297,28 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
         },
         withErrorHandling(async (request, { sessionId }: { sessionId: string }) => {
           const url = new URL(request.url);
-          const token = url.searchParams.get("token");
-          if (!token) {
-            return unauthorized("Runtime token missing");
+          const runtimeToken = url.searchParams.get("token");
+          let runtimeAccess: any;
+          let accessToken: string | null = null;
+          let fromRuntimeToken = false;
+          if (runtimeToken) {
+            runtimeAccess = await service.validateRuntimeToken(runtimeToken, sessionId);
+            accessToken = runtimeToken;
+            fromRuntimeToken = true;
+          } else {
+            const token = requireToken(request, service);
+            if (!token) {
+              return unauthorized("Runtime token missing");
+            }
+            const detail = await service.getSession(token, sessionId);
+            if (detail.session.state !== "running") {
+              throw createHttpError("Session is not running", 409);
+            }
+            runtimeAccess = {
+              session: detail.session
+            };
+            accessToken = token;
           }
-          const runtimeAccess = await service.validateRuntimeToken(token, sessionId);
           if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
             return new Response("WebSocket upgrade required for terminal attach.", {
               status: 426,
@@ -3312,8 +3329,8 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
           if (container && typeof container.fetch === "function") {
             const runtimeSecrets = await service.getSystemRuntimeSecrets(runtimeAccess.session.id);
             await applyRuntimeBootstrapToContainer(container, runtimeAccess.session, runtimeSecrets);
-            if (runtimeAccess.session?.lastRestoredSnapshotId) {
-              await applyRuntimeSnapshotHydration(token, runtimeAccess.session, { runtimeToken: true });
+            if (runtimeAccess.session?.lastRestoredSnapshotId && accessToken) {
+              await applyRuntimeSnapshotHydration(accessToken, runtimeAccess.session, { runtimeToken: fromRuntimeToken });
             }
             return container.fetch(createRuntimeTerminalRequest(request, sessionId));
           }
