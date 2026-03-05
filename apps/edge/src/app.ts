@@ -1284,8 +1284,9 @@ async function stopContainerRuntime(container: any, reason: string = "reconcile"
 export async function runReconcile(options: any = {}): Promise<any> {
   const service = createWorkerService(options);
   let runtimeSleptSessions = 0;
+  const sleepRunningSessions = options.sleepRunningSessions === true;
 
-  if (hasRuntimeBinding(options)) {
+  if (sleepRunningSessions && hasRuntimeBinding(options)) {
     const result = await service.listSessionsForRuntimeReconcile();
     for (const session of result.sessions) {
       if (session.state !== "running") {

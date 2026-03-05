@@ -1037,7 +1037,7 @@ test("worker queue consumer ignores legacy build jobs and still runs reconcile",
   );
 
   const detail = await service.getSession(owner.token, session.session.id);
-  assert.equal(detail.session.state, "sleeping");
+  assert.equal(detail.session.state, "running");
   const refreshedInstance = await service.getInstance(owner.token, instance.instance.id);
   assert.equal(refreshedInstance.instance.buildStatus, "ready");
   assert.equal(refreshedInstance.instance.buildArtifactKey, null);
@@ -1410,6 +1410,7 @@ test("runtime-aware reconcile stops running sessions and persists runtime state"
   const stopped: Array<{ sessionId: string; reason: string }> = [];
   const reconciled = await runReconcile({
     service,
+    sleepRunningSessions: true,
     containersEnabled: true,
     getSessionContainer(sessionId: string) {
       return {
