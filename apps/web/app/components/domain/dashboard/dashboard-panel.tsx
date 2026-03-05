@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ErrorBoundary } from "../../primitives/error-boundary.js";
 import { Badge } from "../../primitives/badge.js";
 import { Button } from "../../primitives/button.js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../primitives/card.js";
@@ -19,6 +20,10 @@ import type {
   AdminReportResponse,
   AuditRecord,
   AuditResponse,
+  BillingCheckoutResponse,
+  BillingInvoiceResponse,
+  BillingPortalResponse,
+  BillingSummaryResponse,
   DashboardSnapshot,
   InstanceRecord,
   InstancesResponse,
@@ -30,6 +35,25 @@ import type {
 
 type DashboardPanelProps = {
   initialSnapshot: DashboardSnapshot;
+};
+
+type ToastKind = "info" | "success" | "error";
+
+type Toast = {
+  id: number;
+  kind: ToastKind;
+  message: string;
+};
+
+type RefreshOptions = {
+  quiet?: boolean;
+};
+
+type RunActionOptions = {
+  successMessage?: string;
+  refresh?: boolean;
+  optimistic?: () => (() => void) | void;
+  onSuccess?: () => void;
 };
 
 const EMPTY_USAGE_TOTALS = {
@@ -88,6 +112,15 @@ function formatDate(value: string | null | undefined): string {
   return parsed.toLocaleString();
 }
 
+function formatUsd(value: number | undefined | null, currency = "usd"): string {
+  const amount = Number.isFinite(value) ? Number(value) : 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: (currency || "usd").toUpperCase(),
+    minimumFractionDigits: 2
+  }).format(amount);
+}
+
 function percent(value: number, max: number | null | undefined): number {
   if (!Number.isFinite(value) || !Number.isFinite(max) || !max || max <= 0) {
     return 0;
@@ -114,6 +147,26 @@ function sessionPrimaryAction(session: SessionRecord): "start" | "stop" {
   return session.state === "running" ? "stop" : "start";
 }
 
+function optimisticSessionState(action: "start" | "stop" | "restart", session: SessionRecord): string {
+  if (action === "start") {
+    return session.state === "running" ? "running" : "starting";
+  }
+  if (action === "stop") {
+    return session.state === "sleeping" ? "sleeping" : "stopping";
+  }
+  return "starting";
+}
+
+function toastClassName(kind: ToastKind): string {
+  if (kind === "success") {
+    return "toast toast-success";
+  }
+  if (kind === "error") {
+    return "toast toast-error";
+  }
+  return "toast toast-info";
+}
+
 export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
   const [viewer, setViewer] = useState<Viewer | null>(initialSnapshot.viewer);
   const [instances, setInstances] = useState<InstanceRecord[]>(initialSnapshot.instances);
@@ -121,10 +174,25 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
   const [usage, setUsage] = useState<UsageResponse | null>(initialSnapshot.usage);
   const [report, setReport] = useState<AdminReport | null>(initialSnapshot.report);
   const [audit, setAudit] = useState<AuditRecord[]>(initialSnapshot.audit);
+  const [billing, setBilling] = useState<BillingSummaryResponse | null>(initialSnapshot.billing);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(initialSnapshot.lastRefreshedAt);
   const [warning, setWarning] = useState<string>(initialSnapshot.warning || "");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [billingFlowStatus, setBillingFlowStatus] = useState(() => {
+    if (typeof window === "undefined") {
+      return "Billing flow idle.";
+    }
+    const state = new URLSearchParams(window.location.search).get("billing") || "";
+    if (state === "success") {
+      return "Stripe checkout completed. Refresh billing to confirm updates.";
+    }
+    if (state === "cancel") {
+      return "Stripe checkout canceled. No payment method was changed.";
+    }
+    return "Billing flow idle.";
+  });
 
   const [instanceName, setInstanceName] = useState("");
   const [instanceImageValue, setInstanceImageValue] = useState("ubuntu:24.04");
@@ -148,20 +216,32 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
   const runtimePct = percent(totals.runtimeMinutes, runtimeLimit);
   const storagePct = percent(totals.currentStorageBytes, storageLimitBytes);
 
-  async function refreshDashboard(): Promise<void> {
-    setPending(true);
+  function pushToast(kind: ToastKind, message: string): void {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((previous) => [...previous, { id, kind, message }].slice(-4));
+    setTimeout(() => {
+      setToasts((previous) => previous.filter((entry) => entry.id !== id));
+    }, 4500);
+  }
+
+  async function refreshDashboard(options: RefreshOptions = {}): Promise<void> {
+    const quiet = Boolean(options.quiet);
+    if (!quiet) {
+      setPending(true);
+    }
     setError("");
     setWarning("");
     try {
       const nextViewer = await clientApiJson<Viewer>("/api/auth/me");
       setViewer(nextViewer);
 
-      const [instancesResult, sessionsResult, usageResult, reportResult, auditResult] = await Promise.allSettled([
+      const [instancesResult, sessionsResult, usageResult, reportResult, auditResult, billingResult] = await Promise.allSettled([
         clientApiJson<InstancesResponse>("/api/instances"),
         clientApiJson<SessionsResponse>("/api/sessions"),
         clientApiJson<UsageResponse>("/api/usage"),
         clientApiJson<AdminReportResponse>("/api/admin/report"),
-        clientApiJson<AuditResponse>("/api/audit")
+        clientApiJson<AuditResponse>("/api/audit"),
+        clientApiJson<BillingSummaryResponse>("/api/workspaces/current/billing")
       ]);
 
       const warnings: string[] = [];
@@ -207,6 +287,12 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
       }
       setAudit(nextAudit);
 
+      const nextBilling = billingResult.status === "fulfilled" ? billingResult.value : null;
+      if (billingResult.status === "rejected") {
+        warnings.push("billing");
+      }
+      setBilling(nextBilling);
+
       setLastRefreshedAt(new Date().toISOString());
       if (warnings.length > 0) {
         setWarning(`Some sections could not be loaded: ${warnings.join(", ")}.`);
@@ -223,23 +309,46 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
         setUsage(null);
         setReport(null);
         setAudit([]);
-        setWarning("Sign in to manage instances, sessions, and usage.");
+        setBilling(null);
+        setWarning("Sign in to manage instances, sessions, usage, and billing.");
       } else {
-        setError(normalizeError(refreshError));
+        const message = normalizeError(refreshError);
+        setError(message);
+        pushToast("error", message);
       }
     } finally {
-      setPending(false);
+      if (!quiet) {
+        setPending(false);
+      }
     }
   }
 
-  async function runAction(action: () => Promise<void>): Promise<void> {
+  async function runAction(action: () => Promise<void>, options: RunActionOptions = {}): Promise<void> {
     setPending(true);
     setError("");
+    let rollback: (() => void) | undefined;
     try {
+      if (options.optimistic) {
+        rollback = options.optimistic() || undefined;
+      }
       await action();
-      await refreshDashboard();
+      if (options.onSuccess) {
+        options.onSuccess();
+      }
+      if (options.successMessage) {
+        pushToast("success", options.successMessage);
+      }
+      if (options.refresh !== false) {
+        await refreshDashboard({ quiet: true });
+      }
     } catch (actionError) {
-      setError(normalizeError(actionError));
+      if (rollback) {
+        rollback();
+      }
+      const message = normalizeError(actionError);
+      setError(message);
+      pushToast("error", message);
+    } finally {
       setPending(false);
     }
   }
@@ -251,22 +360,47 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
       setError("Instance name is required.");
       return;
     }
-    await runAction(async () => {
-      await clientApiJson<{ instance: InstanceRecord }>("/api/instances", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json; charset=utf-8"
+    const optimisticId = `tmp-ins-${Date.now()}`;
+    const optimisticInstance: InstanceRecord = {
+      id: optimisticId,
+      name,
+      description: instanceDescription.trim(),
+      image,
+      baseImage: image,
+      commonStateBytes: 0,
+      updatedAt: new Date().toISOString()
+    };
+    await runAction(
+      async () => {
+        await clientApiJson<{ instance: InstanceRecord }>("/api/instances", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json; charset=utf-8"
+          },
+          body: JSON.stringify({
+            name,
+            description: instanceDescription.trim(),
+            image,
+            baseImage: image
+          })
+        });
+      },
+      {
+        successMessage: "Instance created.",
+        optimistic: () => {
+          setInstances((previous) => [...previous, optimisticInstance]);
+          setSessionInstanceId((current) => current || optimisticId);
+          setCommonStateInstanceId((current) => current || optimisticId);
+          return () => {
+            setInstances((previous) => previous.filter((entry) => entry.id !== optimisticId));
+          };
         },
-        body: JSON.stringify({
-          name,
-          description: instanceDescription.trim(),
-          image,
-          baseImage: image
-        })
-      });
-      setInstanceName("");
-      setInstanceDescription("");
-    });
+        onSuccess: () => {
+          setInstanceName("");
+          setInstanceDescription("");
+        }
+      }
+    );
   }
 
   async function syncCommonState(instanceId: string, direction: "push" | "pull"): Promise<void> {
@@ -274,19 +408,49 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
       setError("Select an instance first.");
       return;
     }
-    await runAction(async () => {
-      await clientApiJson(`/api/instances/${instanceId}/${direction}`, {
-        method: "POST"
-      });
-    });
+    await runAction(
+      async () => {
+        await clientApiJson(`/api/instances/${instanceId}/${direction}`, {
+          method: "POST"
+        });
+      },
+      {
+        successMessage: direction === "push" ? "Common state pushed." : "Common state pulled."
+      }
+    );
   }
 
   async function deleteInstance(instanceId: string): Promise<void> {
-    await runAction(async () => {
-      await clientApiJson(`/api/instances/${instanceId}`, {
-        method: "DELETE"
-      });
-    });
+    const removed = instances.find((instance) => instance.id === instanceId) || null;
+    const index = instances.findIndex((instance) => instance.id === instanceId);
+    await runAction(
+      async () => {
+        await clientApiJson(`/api/instances/${instanceId}`, {
+          method: "DELETE"
+        });
+      },
+      {
+        successMessage: "Instance deleted.",
+        optimistic: () => {
+          setInstances((previous) => previous.filter((entry) => entry.id !== instanceId));
+          setSessionInstanceId((current) => (current === instanceId ? "" : current));
+          setCommonStateInstanceId((current) => (current === instanceId ? "" : current));
+          return () => {
+            if (!removed || index < 0) {
+              return;
+            }
+            setInstances((previous) => {
+              if (previous.some((entry) => entry.id === removed.id)) {
+                return previous;
+              }
+              const next = [...previous];
+              next.splice(Math.min(index, next.length), 0, removed);
+              return next;
+            });
+          };
+        }
+      }
+    );
   }
 
   async function createSession(): Promise<void> {
@@ -299,39 +463,214 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
       setError("Select an instance for the session.");
       return;
     }
-    await runAction(async () => {
-      const created = await clientApiJson<{ session: SessionRecord }>("/api/sessions", {
+
+    const optimisticId = `tmp-ses-${Date.now()}`;
+    const optimisticSession: SessionRecord = {
+      id: optimisticId,
+      name,
+      state: "starting",
+      instanceId: sessionInstanceId,
+      instanceName: instances.find((entry) => entry.id === sessionInstanceId)?.name || null,
+      previewUrl: null,
+      updatedAt: new Date().toISOString()
+    };
+
+    await runAction(
+      async () => {
+        const created = await clientApiJson<{ session: SessionRecord }>("/api/sessions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json; charset=utf-8"
+          },
+          body: JSON.stringify({
+            name,
+            instanceId: sessionInstanceId
+          })
+        });
+        if (created.session?.id) {
+          await clientApiJson(`/api/sessions/${created.session.id}/start`, {
+            method: "POST"
+          });
+        }
+      },
+      {
+        successMessage: "Session created and start requested.",
+        optimistic: () => {
+          setSessions((previous) => [...previous, optimisticSession]);
+          return () => {
+            setSessions((previous) => previous.filter((entry) => entry.id !== optimisticId));
+          };
+        },
+        onSuccess: () => {
+          setSessionName("sandbox");
+        }
+      }
+    );
+  }
+
+  async function transitionSession(sessionId: string, action: "start" | "stop" | "restart" | "delete"): Promise<void> {
+    const previousSession = sessions.find((entry) => entry.id === sessionId) || null;
+    const previousIndex = sessions.findIndex((entry) => entry.id === sessionId);
+
+    await runAction(
+      async () => {
+        if (action === "delete") {
+          await clientApiJson(`/api/sessions/${sessionId}`, {
+            method: "DELETE"
+          });
+          return;
+        }
+        await clientApiJson(`/api/sessions/${sessionId}/${action}`, {
+          method: "POST"
+        });
+      },
+      {
+        successMessage:
+          action === "delete"
+            ? "Session deleted."
+            : action === "restart"
+              ? "Session restart requested."
+              : action === "start"
+                ? "Session start requested."
+                : "Session stop requested.",
+        optimistic: () => {
+          if (action === "delete") {
+            setSessions((previous) => previous.filter((entry) => entry.id !== sessionId));
+            return () => {
+              if (!previousSession || previousIndex < 0) {
+                return;
+              }
+              setSessions((previous) => {
+                if (previous.some((entry) => entry.id === previousSession.id)) {
+                  return previous;
+                }
+                const next = [...previous];
+                next.splice(Math.min(previousIndex, next.length), 0, previousSession);
+                return next;
+              });
+            };
+          }
+
+          setSessions((previous) =>
+            previous.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    state: optimisticSessionState(action, session),
+                    updatedAt: new Date().toISOString()
+                  }
+                : session
+            )
+          );
+
+          return () => {
+            if (!previousSession) {
+              return;
+            }
+            setSessions((previous) =>
+              previous.map((session) =>
+                session.id === sessionId
+                  ? previousSession
+                  : session
+              )
+            );
+          };
+        }
+      }
+    );
+  }
+
+  async function addPaymentMethod(): Promise<void> {
+    if (typeof window === "undefined") {
+      return;
+    }
+    setPending(true);
+    setError("");
+    setBillingFlowStatus("Opening secure Stripe checkout...");
+    try {
+      const successUrl = new URL("/dashboard?billing=success", window.location.origin).toString();
+      const cancelUrl = new URL("/dashboard?billing=cancel", window.location.origin).toString();
+      const checkout = await clientApiJson<BillingCheckoutResponse>("/api/workspaces/current/billing/checkout", {
         method: "POST",
         headers: {
           "content-type": "application/json; charset=utf-8"
         },
         body: JSON.stringify({
-          name,
-          instanceId: sessionInstanceId
+          successUrl,
+          cancelUrl
         })
       });
-      if (created.session?.id) {
-        await clientApiJson(`/api/sessions/${created.session.id}/start`, {
-          method: "POST"
-        });
+      const checkoutUrl = checkout.checkoutSession?.url || checkout.url || "";
+      if (!checkoutUrl) {
+        throw new Error("Checkout session URL missing.");
       }
-      setSessionName("sandbox");
-    });
+      pushToast("info", "Redirecting to Stripe checkout.");
+      window.location.assign(checkoutUrl);
+    } catch (checkoutError) {
+      const message = normalizeError(checkoutError);
+      setError(message);
+      setBillingFlowStatus("Checkout could not be started.");
+      pushToast("error", message);
+      setPending(false);
+    }
   }
 
-  async function transitionSession(sessionId: string, action: "start" | "stop" | "restart" | "delete"): Promise<void> {
-    await runAction(async () => {
-      if (action === "delete") {
-        await clientApiJson(`/api/sessions/${sessionId}`, {
-          method: "DELETE"
-        });
-        return;
-      }
-      await clientApiJson(`/api/sessions/${sessionId}/${action}`, {
-        method: "POST"
+  async function openBillingPortal(): Promise<void> {
+    if (typeof window === "undefined") {
+      return;
+    }
+    setPending(true);
+    setError("");
+    setBillingFlowStatus("Opening billing portal...");
+    try {
+      const portal = await clientApiJson<BillingPortalResponse>("/api/workspaces/current/billing/portal", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json; charset=utf-8"
+        },
+        body: JSON.stringify({
+          returnUrl: new URL("/dashboard", window.location.origin).toString()
+        })
       });
-    });
+      const portalUrl = portal.portalSession?.url || "";
+      if (!portalUrl) {
+        throw new Error("Billing portal URL missing.");
+      }
+      pushToast("info", "Redirecting to billing portal.");
+      window.location.assign(portalUrl);
+    } catch (portalError) {
+      const message = normalizeError(portalError);
+      setError(message);
+      setBillingFlowStatus("Billing portal could not be started.");
+      pushToast("error", message);
+      setPending(false);
+    }
   }
+
+  async function createUsageInvoice(): Promise<void> {
+    await runAction(
+      async () => {
+        const created = await clientApiJson<BillingInvoiceResponse>("/api/workspaces/current/billing/invoice", {
+          method: "POST"
+        });
+        if (created.invoice?.hostedInvoiceUrl && typeof window !== "undefined") {
+          window.open(created.invoice.hostedInvoiceUrl, "_blank", "noopener,noreferrer");
+          setBillingFlowStatus("Usage invoice created. Hosted invoice opened in a new tab.");
+          return;
+        }
+        if (created.invoice === null) {
+          setBillingFlowStatus("No unbilled usage yet.");
+          return;
+        }
+        setBillingFlowStatus("Usage invoice created.");
+      },
+      {
+        successMessage: "Billing invoice request completed."
+      }
+    );
+  }
+
+  const billingEstimate = billing?.pendingInvoiceEstimate;
 
   return (
     <section className="dashboard-stack">
@@ -342,7 +681,7 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
         </CardHeader>
         <CardContent>
           <div className="dashboard-toolbar">
-            <Button variant="secondary" onClick={refreshDashboard} disabled={pending}>
+            <Button variant="secondary" onClick={() => refreshDashboard()} disabled={pending}>
               Refresh
             </Button>
             <span className="dashboard-copy">Last refresh: {formatDate(lastRefreshedAt)}</span>
@@ -353,312 +692,364 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
       </Card>
 
       <div className="dashboard-grid">
-        <Card>
-          <CardHeader>
-            <CardTitle>Instances</CardTitle>
-            <CardDescription>
-              Reusable runtime definitions with shared <code>/home/flare</code> common state.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="panel-stack">
-            <div className="dashboard-form">
-              <div className="dashboard-field">
-                <label htmlFor="instanceName">Instance name</label>
-                <Input
-                  id="instanceName"
-                  placeholder="node-dev"
-                  value={instanceName}
-                  disabled={pending || !isSignedIn}
-                  onChange={(event) => setInstanceName(event.target.value)}
-                />
+        <ErrorBoundary fallback={<div className="section-fallback">Instances section failed. Refresh to retry.</div>}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Instances</CardTitle>
+              <CardDescription>
+                Reusable runtime definitions with shared <code>/home/flare</code> common state.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="panel-stack">
+              <div className="dashboard-form">
+                <div className="dashboard-field">
+                  <label htmlFor="instanceName">Instance name</label>
+                  <Input
+                    id="instanceName"
+                    placeholder="node-dev"
+                    value={instanceName}
+                    disabled={pending || !isSignedIn}
+                    onChange={(event) => setInstanceName(event.target.value)}
+                  />
+                </div>
+                <div className="dashboard-field">
+                  <label htmlFor="instanceImage">Image</label>
+                  <Input
+                    id="instanceImage"
+                    placeholder="ubuntu:24.04"
+                    value={instanceImageValue}
+                    disabled={pending || !isSignedIn}
+                    onChange={(event) => setInstanceImageValue(event.target.value)}
+                  />
+                </div>
+                <div className="dashboard-field">
+                  <label htmlFor="instanceDescription">Description</label>
+                  <textarea
+                    id="instanceDescription"
+                    className="dashboard-textarea"
+                    placeholder="Base image for ad-hoc coding sessions"
+                    value={instanceDescription}
+                    disabled={pending || !isSignedIn}
+                    onChange={(event) => setInstanceDescription(event.target.value)}
+                  />
+                </div>
+                <div className="inline-actions">
+                  <Button onClick={createInstance} disabled={pending || !isSignedIn}>
+                    Create instance
+                  </Button>
+                </div>
               </div>
-              <div className="dashboard-field">
-                <label htmlFor="instanceImage">Image</label>
-                <Input
-                  id="instanceImage"
-                  placeholder="ubuntu:24.04"
-                  value={instanceImageValue}
-                  disabled={pending || !isSignedIn}
-                  onChange={(event) => setInstanceImageValue(event.target.value)}
-                />
-              </div>
-              <div className="dashboard-field">
-                <label htmlFor="instanceDescription">Description</label>
-                <textarea
-                  id="instanceDescription"
-                  className="dashboard-textarea"
-                  placeholder="Base image for ad-hoc coding sessions"
-                  value={instanceDescription}
-                  disabled={pending || !isSignedIn}
-                  onChange={(event) => setInstanceDescription(event.target.value)}
-                />
-              </div>
-              <div className="inline-actions">
-                <Button onClick={createInstance} disabled={pending || !isSignedIn}>
-                  Create instance
-                </Button>
-              </div>
-            </div>
 
-            <div className="dashboard-row">
-              <div className="dashboard-field">
-                <label htmlFor="commonStateInstance">Common state instance</label>
-                <select
-                  id="commonStateInstance"
-                  className="dashboard-select"
-                  value={commonStateInstanceId}
-                  disabled={pending || !isSignedIn || instances.length === 0}
-                  onChange={(event) => setCommonStateInstanceId(event.target.value)}
-                >
-                  {instances.map((instance) => (
-                    <option key={instance.id} value={instance.id}>
-                      {instance.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="inline-actions">
-                <Button
-                  variant="secondary"
-                  onClick={() => syncCommonState(commonStateInstanceId, "push")}
-                  disabled={pending || !isSignedIn || !commonStateInstanceId}
-                >
-                  Push
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => syncCommonState(commonStateInstanceId, "pull")}
-                  disabled={pending || !isSignedIn || !commonStateInstanceId}
-                >
-                  Pull
-                </Button>
-              </div>
-            </div>
-
-            {instances.length === 0 ? (
-              <div className="dashboard-empty">No instances yet.</div>
-            ) : (
-              <div className="dashboard-table-wrap">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Image</TableHead>
-                      <TableHead>Common state</TableHead>
-                      <TableHead>Updated</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+              <div className="dashboard-row">
+                <div className="dashboard-field">
+                  <label htmlFor="commonStateInstance">Common state instance</label>
+                  <select
+                    id="commonStateInstance"
+                    className="dashboard-select"
+                    value={commonStateInstanceId}
+                    disabled={pending || !isSignedIn || instances.length === 0}
+                    onChange={(event) => setCommonStateInstanceId(event.target.value)}
+                  >
                     {instances.map((instance) => (
-                      <TableRow key={instance.id}>
-                        <TableCell>{instance.name}</TableCell>
-                        <TableCell>{instanceImage(instance)}</TableCell>
-                        <TableCell>{formatBytes(instance.commonStateBytes)}</TableCell>
-                        <TableCell>{formatDate(instance.updatedAt)}</TableCell>
-                        <TableCell>
-                          <div className="inline-actions">
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={pending || !isSignedIn}
-                              onClick={() => syncCommonState(instance.id, "push")}
-                            >
-                              Push
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={pending || !isSignedIn}
-                              onClick={() => syncCommonState(instance.id, "pull")}
-                            >
-                              Pull
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={pending || !isSignedIn}
-                              onClick={() => deleteInstance(instance.id)}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                      <option key={instance.id} value={instance.id}>
+                        {instance.name}
+                      </option>
                     ))}
-                  </TableBody>
-                </Table>
+                  </select>
+                </div>
+                <div className="inline-actions">
+                  <Button
+                    variant="secondary"
+                    onClick={() => syncCommonState(commonStateInstanceId, "push")}
+                    disabled={pending || !isSignedIn || !commonStateInstanceId}
+                  >
+                    Push
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => syncCommonState(commonStateInstanceId, "pull")}
+                    disabled={pending || !isSignedIn || !commonStateInstanceId}
+                  >
+                    Pull
+                  </Button>
+                </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Sessions</CardTitle>
-            <CardDescription>Launch isolated workspaces and control runtime state.</CardDescription>
-          </CardHeader>
-          <CardContent className="panel-stack">
-            <div className="dashboard-form">
-              <div className="dashboard-field">
-                <label htmlFor="sessionName">Session name</label>
-                <Input
-                  id="sessionName"
-                  placeholder="sandbox"
-                  value={sessionName}
-                  disabled={pending || !isSignedIn}
-                  onChange={(event) => setSessionName(event.target.value)}
-                />
-              </div>
-              <div className="dashboard-field">
-                <label htmlFor="sessionInstance">Instance</label>
-                <select
-                  id="sessionInstance"
-                  className="dashboard-select"
-                  value={sessionInstanceId}
-                  disabled={pending || !isSignedIn || instances.length === 0}
-                  onChange={(event) => setSessionInstanceId(event.target.value)}
-                >
-                  {instances.map((instance) => (
-                    <option key={instance.id} value={instance.id}>
-                      {instance.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="inline-actions">
-                <Button onClick={createSession} disabled={pending || !isSignedIn || !sessionInstanceId}>
-                  Create and start
-                </Button>
-              </div>
-            </div>
-
-            {sessions.length === 0 ? (
-              <div className="dashboard-empty">No sessions yet.</div>
-            ) : (
-              <div className="dashboard-table-wrap">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Instance</TableHead>
-                      <TableHead>State</TableHead>
-                      <TableHead>Updated</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sessions.map((session) => {
-                      const primaryAction = sessionPrimaryAction(session);
-                      return (
-                        <TableRow key={session.id}>
-                          <TableCell>{session.name}</TableCell>
-                          <TableCell>{session.instanceName || "-"}</TableCell>
-                          <TableCell>
-                            <Badge variant={session.state === "running" ? "accent" : "default"}>
-                              {session.state}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{formatDate(session.updatedAt)}</TableCell>
+              {instances.length === 0 ? (
+                <div className="dashboard-empty">No instances yet.</div>
+              ) : (
+                <div className="dashboard-table-wrap">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Image</TableHead>
+                        <TableHead>Common state</TableHead>
+                        <TableHead>Updated</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {instances.map((instance) => (
+                        <TableRow key={instance.id}>
+                          <TableCell>{instance.name}</TableCell>
+                          <TableCell>{instanceImage(instance)}</TableCell>
+                          <TableCell>{formatBytes(instance.commonStateBytes)}</TableCell>
+                          <TableCell>{formatDate(instance.updatedAt)}</TableCell>
                           <TableCell>
                             <div className="inline-actions">
                               <Button
                                 size="sm"
                                 variant="secondary"
                                 disabled={pending || !isSignedIn}
-                                onClick={() => transitionSession(session.id, primaryAction)}
+                                onClick={() => syncCommonState(instance.id, "push")}
                               >
-                                {primaryAction === "start" ? "Start" : "Stop"}
+                                Push
                               </Button>
                               <Button
                                 size="sm"
                                 variant="secondary"
                                 disabled={pending || !isSignedIn}
-                                onClick={() => transitionSession(session.id, "restart")}
+                                onClick={() => syncCommonState(instance.id, "pull")}
                               >
-                                Restart
+                                Pull
                               </Button>
                               <Button
                                 size="sm"
                                 variant="secondary"
                                 disabled={pending || !isSignedIn}
-                                onClick={() => transitionSession(session.id, "delete")}
+                                onClick={() => deleteInstance(instance.id)}
                               >
                                 Delete
                               </Button>
-                              {session.previewUrl ? (
-                                <a className="dashboard-link" href={session.previewUrl} target="_blank" rel="noreferrer">
-                                  Preview
-                                </a>
-                              ) : null}
-                              <a
-                                className="dashboard-link"
-                                href={`/runtime/sessions/${session.id}/editor?path=${encodeURIComponent("/workspace")}`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Editor
-                              </a>
                             </div>
                           </TableCell>
                         </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </ErrorBoundary>
+
+        <ErrorBoundary fallback={<div className="section-fallback">Sessions section failed. Refresh to retry.</div>}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Sessions</CardTitle>
+              <CardDescription>Launch isolated workspaces and control runtime state.</CardDescription>
+            </CardHeader>
+            <CardContent className="panel-stack">
+              <div className="dashboard-form">
+                <div className="dashboard-field">
+                  <label htmlFor="sessionName">Session name</label>
+                  <Input
+                    id="sessionName"
+                    placeholder="sandbox"
+                    value={sessionName}
+                    disabled={pending || !isSignedIn}
+                    onChange={(event) => setSessionName(event.target.value)}
+                  />
+                </div>
+                <div className="dashboard-field">
+                  <label htmlFor="sessionInstance">Instance</label>
+                  <select
+                    id="sessionInstance"
+                    className="dashboard-select"
+                    value={sessionInstanceId}
+                    disabled={pending || !isSignedIn || instances.length === 0}
+                    onChange={(event) => setSessionInstanceId(event.target.value)}
+                  >
+                    {instances.map((instance) => (
+                      <option key={instance.id} value={instance.id}>
+                        {instance.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="inline-actions">
+                  <Button onClick={createSession} disabled={pending || !isSignedIn || !sessionInstanceId}>
+                    Create and start
+                  </Button>
+                </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              {sessions.length === 0 ? (
+                <div className="dashboard-empty">No sessions yet.</div>
+              ) : (
+                <div className="dashboard-table-wrap">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Instance</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead>Updated</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sessions.map((session) => {
+                        const primaryAction = sessionPrimaryAction(session);
+                        return (
+                          <TableRow key={session.id}>
+                            <TableCell>{session.name}</TableCell>
+                            <TableCell>{session.instanceName || "-"}</TableCell>
+                            <TableCell>
+                              <Badge variant={session.state === "running" ? "accent" : "default"}>
+                                {session.state}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{formatDate(session.updatedAt)}</TableCell>
+                            <TableCell>
+                              <div className="inline-actions">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={pending || !isSignedIn}
+                                  onClick={() => transitionSession(session.id, primaryAction)}
+                                >
+                                  {primaryAction === "start" ? "Start" : "Stop"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={pending || !isSignedIn}
+                                  onClick={() => transitionSession(session.id, "restart")}
+                                >
+                                  Restart
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={pending || !isSignedIn}
+                                  onClick={() => transitionSession(session.id, "delete")}
+                                >
+                                  Delete
+                                </Button>
+                                {session.previewUrl ? (
+                                  <a className="dashboard-link" href={session.previewUrl} target="_blank" rel="noreferrer">
+                                    Preview
+                                  </a>
+                                ) : null}
+                                <a
+                                  className="dashboard-link"
+                                  href={`/runtime/sessions/${session.id}/editor?path=${encodeURIComponent("/workspace")}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  Editor
+                                </a>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </ErrorBoundary>
       </div>
 
       <div className="dashboard-grid">
-        <Card>
-          <CardHeader>
-            <CardTitle>Usage</CardTitle>
-            <CardDescription>Usage-based billing summary with runtime and storage visibility.</CardDescription>
-          </CardHeader>
-          <CardContent className="panel-stack">
-            <div className="metric-grid">
-              <div className="metric-card">
-                <div className="metric-label">Runtime minutes</div>
-                <div className="metric-value">{formatNumber(totals.runtimeMinutes)}</div>
-                <div className="metric-help">
-                  Limit: {runtimeLimit ? formatNumber(runtimeLimit) : "unbounded"}
+        <ErrorBoundary fallback={<div className="section-fallback">Usage section failed. Refresh to retry.</div>}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Usage</CardTitle>
+              <CardDescription>Usage-based billing summary with runtime and storage visibility.</CardDescription>
+            </CardHeader>
+            <CardContent className="panel-stack">
+              <div className="metric-grid">
+                <div className="metric-card">
+                  <div className="metric-label">Runtime minutes</div>
+                  <div className="metric-value">{formatNumber(totals.runtimeMinutes)}</div>
+                  <div className="metric-help">
+                    Limit: {runtimeLimit ? formatNumber(runtimeLimit) : "unbounded"}
+                  </div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${runtimePct}%` }} />
+                  </div>
                 </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${runtimePct}%` }} />
+                <div className="metric-card">
+                  <div className="metric-label">Current storage</div>
+                  <div className="metric-value">{formatBytes(totals.currentStorageBytes)}</div>
+                  <div className="metric-help">
+                    Limit: {storageLimitBytes ? formatBytes(storageLimitBytes) : "unbounded"}
+                  </div>
+                  <div className="progress-track">
+                    <div className="progress-fill" style={{ width: `${storagePct}%` }} />
+                  </div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-label">Storage GB-days</div>
+                  <div className="metric-value">{formatNumber(totals.storageGbDays)}</div>
+                  <div className="metric-help">Monthly estimate: {formatNumber(totals.storageGbMonths)} GB-months</div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-label">Sessions</div>
+                  <div className="metric-value">
+                    {formatNumber(report?.sessionsRunning || 0)} running / {formatNumber(report?.sessionsTotal || sessions.length)} total
+                  </div>
+                  <div className="metric-help">
+                    Sleeping: {formatNumber(report?.sessionsSleeping || 0)} · stale eligible: {formatNumber(report?.sessionsStaleEligible || 0)}
+                  </div>
                 </div>
               </div>
-              <div className="metric-card">
-                <div className="metric-label">Current storage</div>
-                <div className="metric-value">{formatBytes(totals.currentStorageBytes)}</div>
-                <div className="metric-help">
-                  Limit: {storageLimitBytes ? formatBytes(storageLimitBytes) : "unbounded"}
-                </div>
-                <div className="progress-track">
-                  <div className="progress-fill" style={{ width: `${storagePct}%` }} />
-                </div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-label">Storage GB-days</div>
-                <div className="metric-value">{formatNumber(totals.storageGbDays)}</div>
-                <div className="metric-help">Monthly estimate: {formatNumber(totals.storageGbMonths)} GB-months</div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-label">Sessions</div>
-                <div className="metric-value">
-                  {formatNumber(report?.sessionsRunning || 0)} running / {formatNumber(report?.sessionsTotal || sessions.length)} total
-                </div>
-                <div className="metric-help">
-                  Sleeping: {formatNumber(report?.sessionsSleeping || 0)} · stale eligible: {formatNumber(report?.sessionsStaleEligible || 0)}
-                </div>
-              </div>
-            </div>
-            <div className="status-box">BurstFlare uses usage-based billing only.</div>
-          </CardContent>
-        </Card>
+              <div className="status-box">BurstFlare uses usage-based billing only.</div>
+            </CardContent>
+          </Card>
+        </ErrorBoundary>
 
+        <ErrorBoundary fallback={<div className="section-fallback">Billing section failed. Refresh to retry.</div>}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Billing actions</CardTitle>
+              <CardDescription>Manage payment method setup, portal access, and usage invoices.</CardDescription>
+            </CardHeader>
+            <CardContent className="panel-stack">
+              <div className="meta-grid">
+                <div className="status-box">
+                  <strong>Provider</strong>
+                  <div>{billing?.billing?.provider || "Not configured"}</div>
+                </div>
+                <div className="status-box">
+                  <strong>Status</strong>
+                  <div>{billing?.billing?.billingStatus || "Not configured"}</div>
+                </div>
+                <div className="status-box">
+                  <strong>Default payment method</strong>
+                  <div>{billing?.billing?.defaultPaymentMethodId || "Not set"}</div>
+                </div>
+                <div className="status-box">
+                  <strong>Pending invoice estimate</strong>
+                  <div>{formatUsd(billingEstimate?.totalUsd, billingEstimate?.currency || "usd")}</div>
+                </div>
+              </div>
+              <div className="inline-actions">
+                <Button onClick={addPaymentMethod} disabled={pending || !isSignedIn}>
+                  Add payment method
+                </Button>
+                <Button variant="secondary" onClick={openBillingPortal} disabled={pending || !isSignedIn}>
+                  Open billing portal
+                </Button>
+                <Button variant="secondary" onClick={createUsageInvoice} disabled={pending || !isSignedIn}>
+                  Create usage invoice
+                </Button>
+                <Button variant="secondary" onClick={() => refreshDashboard()} disabled={pending || !isSignedIn}>
+                  Refresh billing
+                </Button>
+              </div>
+              <div className="status-box">{billingFlowStatus}</div>
+            </CardContent>
+          </Card>
+        </ErrorBoundary>
+      </div>
+
+      <ErrorBoundary fallback={<div className="section-fallback">Activity section failed. Refresh to retry.</div>}>
         <Card>
           <CardHeader>
             <CardTitle>Activity</CardTitle>
@@ -694,7 +1085,17 @@ export function DashboardPanel({ initialSnapshot }: DashboardPanelProps) {
             )}
           </CardContent>
         </Card>
-      </div>
+      </ErrorBoundary>
+
+      {toasts.length > 0 ? (
+        <div className="toast-stack" role="status" aria-live="polite">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={toastClassName(toast.kind)}>
+              {toast.message}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
