@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow
 } from "./components/primitives/table.js";
+import { getHealth } from "./lib/server/api.js";
 
 export const metadata = {
   title: "BurstFlare",
@@ -22,7 +23,9 @@ export const metadata = {
     "Spin up ready-to-code cloud workspaces in minutes with shared instance state and per-session state that stays yours."
 };
 
-export default function HomePage() {
+export default async function HomePage() {
+  const health = await getHealth().catch(() => null);
+
   return (
     <AppShell active="home">
       <section className="hero-grid">
@@ -73,7 +76,9 @@ export default function HomePage() {
         <Card>
           <CardHeader>
             <CardTitle>Quickstart</CardTitle>
-            <CardDescription>CLI workflow with persistent session state.</CardDescription>
+            <CardDescription>
+              CLI workflow with persistent session state.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <pre className="code-panel">{`flare instance create node-dev --image ubuntu:24.04
@@ -92,6 +97,16 @@ flare ssh <sessionId>`}</pre>
                     <code>/home/flare</code>
                   </TableCell>
                   <TableCell>Shared at instance level</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Runtime availability</TableCell>
+                  <TableCell>
+                    {health?.runtime?.containersEnabled ? "Containers enabled" : "Runtime unavailable"}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>SSR health check</TableCell>
+                  <TableCell>{health?.ok ? "Healthy" : "Unavailable"}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>
