@@ -11,7 +11,7 @@ export default function RawDocsPage() {
    Sign in with email to open a single-owner workspace.
 
 2. Instances
-   Instances define the image, env vars, secrets, persisted paths, and shared /home/flare state.
+   Instances define the image, env vars, secrets, startup bootstrap script, persisted paths, and shared /home/flare state.
 
 3. Sessions
    Sessions are the live containers created from an instance.
@@ -22,7 +22,7 @@ export default function RawDocsPage() {
    Each instance keeps one shared /home/flare common-state object.
 
 Key commands
-  flare instance create node-dev --image node:20
+  flare instance create node-dev --image node:20 --bootstrap-file ./bootstrap.sh
   flare session up sandbox --instance <instance-id>
   flare instance push <instance-id>
   flare instance pull <instance-id>`}</pre>
