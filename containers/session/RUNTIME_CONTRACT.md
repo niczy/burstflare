@@ -36,13 +36,15 @@ The canonical route constants and payload builders live in [runtime-contract.mjs
 
 ### Custom Bootstrap Script
 
-The bootstrap payload accepts an optional `bootstrapScript` field (string, max 64 KB). When present, the runtime agent:
+The bootstrap payload accepts:
 
-1. Computes a SHA-256 hash of the script content.
-2. Checks `/run/burstflare/bootstrap-user.done` — if the stored hash matches, execution is skipped (`"cached"`).
-3. Otherwise writes the script to `/run/burstflare/bootstrap-user.sh`, executes it via `/bin/sh`, and records the hash on success.
+- `bootstrapScript` (optional string, max 64 KB)
+- `runBootstrapScript` (boolean)
 
-The `BootstrapState` response includes `bootstrapScriptHash` and `bootstrapScriptStatus` (`"executed"`, `"cached"`, or `"failed"`).
+When `bootstrapScript` is present, the runtime agent always computes and reports `bootstrapScriptHash`.
+The script executes only when `runBootstrapScript=true` (session start/restart flows). On attach-time bootstrap calls where `runBootstrapScript=false`, execution is skipped intentionally.
+
+The `BootstrapState` response includes `bootstrapScriptHash` and `bootstrapScriptStatus` (`"executed"`, `"skipped"`, or `"failed"`).
 
 ### Runtime Metadata Files
 
@@ -52,7 +54,6 @@ The runtime writes these compatibility files:
 - `/workspace/.burstflare/lifecycle.json`
 - `/run/burstflare/secrets.env`
 - `/run/burstflare/bootstrap-user.sh` (custom bootstrap script, when provided)
-- `/run/burstflare/bootstrap-user.done` (hash marker for script caching)
 - `/home/flare/.ssh/authorized_keys`
 - `/workspace/.burstflare/last.snapshot`
 

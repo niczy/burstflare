@@ -1303,11 +1303,18 @@ function createContainerControlRequest(pathname: string, payload: unknown): Requ
   });
 }
 
-async function applyRuntimeBootstrapToContainer(container: any, session: any, runtimeSecrets: any = null): Promise<any> {
+async function applyRuntimeBootstrapToContainer(
+  container: any,
+  session: any,
+  runtimeSecrets: any = null,
+  options: { runBootstrapScript?: boolean } = {}
+): Promise<any> {
   if (!container || !session) {
     return null;
   }
-  const payload = createRuntimeBootstrapPayload(session, runtimeSecrets);
+  const payload = createRuntimeBootstrapPayload(session, runtimeSecrets, {
+    runBootstrapScript: Boolean(options.runBootstrapScript)
+  });
 
   let result = null;
   if (typeof container.fetch === "function") {
@@ -1635,7 +1642,9 @@ export function createApp(options: any = {}): { fetch(request: Request): Promise
     ) {
       const container = getSessionContainer(result.session.id, resolveSessionRuntimeSpec(result.session));
       const runtimeSecrets = await service.getSystemRuntimeSecrets(result.session.id);
-      await applyRuntimeBootstrapToContainer(container, result.session, runtimeSecrets);
+      await applyRuntimeBootstrapToContainer(container, result.session, runtimeSecrets, {
+        runBootstrapScript: true
+      });
       if (result.session.lastRestoredSnapshotId) {
         const runtimeRestore = await applyRuntimeSnapshotHydration(token, result.session);
         if (runtimeRestore) {

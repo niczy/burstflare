@@ -69,8 +69,14 @@ function normalizeRuntimeSecretsPayload(runtimeSecrets = null) {
   };
 }
 
-export function createRuntimeBootstrapPayload(session = {}, runtimeSecrets = null) {
+export function createRuntimeBootstrapPayload(session = {}, runtimeSecrets = null, options = null) {
   const secretPayload = normalizeRuntimeSecretsPayload(runtimeSecrets);
+  const runBootstrapScript =
+    options &&
+    typeof options === "object" &&
+    Object.prototype.hasOwnProperty.call(options, "runBootstrapScript")
+      ? Boolean(options.runBootstrapScript)
+      : false;
   return {
     sessionId: session?.id || null,
     workspaceId: session?.workspaceId || null,
@@ -85,7 +91,8 @@ export function createRuntimeBootstrapPayload(session = {}, runtimeSecrets = nul
     runtimeSecrets: secretPayload.runtimeSecrets,
     runtimeVersion: Number.isInteger(session?.runtimeVersion) ? session.runtimeVersion : 0,
     sshAuthorizedKeys: Array.isArray(session?.sshAuthorizedKeys) ? session.sshAuthorizedKeys : [],
-    bootstrapScript: session?.instanceBootstrapScript || session?.bootstrapScript || null
+    bootstrapScript: session?.instanceBootstrapScript || session?.bootstrapScript || null,
+    runBootstrapScript
   };
 }
 

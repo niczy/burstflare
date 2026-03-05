@@ -194,8 +194,27 @@ func TestBootstrapScriptHashIncludedInState(t *testing.T) {
 	if bootstrap.BootstrapScriptHash != expectedHash {
 		t.Fatalf("unexpected hash: got %s, want %s", bootstrap.BootstrapScriptHash, expectedHash)
 	}
-	if bootstrap.BootstrapScriptStatus == "" {
-		t.Fatalf("expected bootstrap script status to be set")
+	if bootstrap.BootstrapScriptStatus != "skipped" {
+		t.Fatalf("expected bootstrap script status to be skipped by default, got %s", bootstrap.BootstrapScriptStatus)
+	}
+}
+
+func TestBootstrapScriptRunsOnEveryStartRequest(t *testing.T) {
+	state := NewState()
+	payload := BootstrapPayload{
+		SessionID:          "ses_script_start",
+		BootstrapScript:    "#!/bin/sh\ntrue",
+		RunBootstrapScript: true,
+	}
+
+	first := state.ApplyRuntimeBootstrap(payload)
+	second := state.ApplyRuntimeBootstrap(payload)
+
+	if first.BootstrapScriptStatus != "executed" {
+		t.Fatalf("expected first bootstrap execution to run, got %s", first.BootstrapScriptStatus)
+	}
+	if second.BootstrapScriptStatus != "executed" {
+		t.Fatalf("expected second bootstrap execution to run, got %s", second.BootstrapScriptStatus)
 	}
 }
 
