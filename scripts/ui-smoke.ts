@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   const pages = [
     {
       path: "/",
-      required: ["BurstFlare", "Instances first.", "/dashboard", "/docs", "rel=\"modulepreload\""],
+      required: ["BurstFlare", "Ship faster with reusable cloud workspaces.", "Try the dashboard", "/docs", "rel=\"modulepreload\""],
       forbidden: ["Template", "Release"]
     },
     {
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     },
     {
       path: "/profile",
-      required: ["Workspace", "Browser sessions", "Upgrade to Pro", "rel=\"modulepreload\""],
+      required: ["Billing", "Browser sessions", "Add payment method", "rel=\"modulepreload\""],
       forbidden: ["Members &amp; invites", "Approve device"]
     },
     {
