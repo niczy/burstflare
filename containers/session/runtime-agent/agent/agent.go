@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -252,6 +254,88 @@ func (s *RuntimeState) resetPersistedFiles(persistedPaths []string) {
 	}
 }
 
+func collectPersistedFilesystemFiles(persistedPaths []string) []FileEntry {
+	normalizedPaths := NormalizePersistedPaths(persistedPaths)
+	filesByPath := map[string]string{}
+
+	for _, basePath := range normalizedPaths {
+		info, err := os.Stat(basePath)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			content, readErr := os.ReadFile(basePath)
+			if readErr == nil {
+				filesByPath[basePath] = string(content)
+			}
+			continue
+		}
+		_ = filepath.WalkDir(basePath, func(current string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil || entry.IsDir() {
+				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			filePath := normalizeRuntimeFilePath(current)
+			if filePath == "" || !isWithinPersistedPaths(filePath, normalizedPaths) {
+				return nil
+			}
+			content, readErr := os.ReadFile(current)
+			if readErr != nil {
+				return nil
+			}
+			filesByPath[filePath] = string(content)
+			return nil
+		})
+	}
+
+	files := make([]FileEntry, 0, len(filesByPath))
+	for filePath, content := range filesByPath {
+		files = append(files, FileEntry{
+			Path:    filePath,
+			Content: content,
+		})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Path < files[j].Path
+	})
+	return files
+}
+
+func clearPersistedFilesystem(persistedPaths []string) {
+	for _, basePath := range NormalizePersistedPaths(persistedPaths) {
+		if basePath == "/" {
+			continue
+		}
+		entries, err := os.ReadDir(basePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				_ = os.MkdirAll(basePath, 0o755)
+			}
+			continue
+		}
+		for _, entry := range entries {
+			_ = os.RemoveAll(path.Join(basePath, entry.Name()))
+		}
+	}
+	ensureRuntimeFilesystemLayout()
+}
+
+func writeRuntimeFile(filePath string, content string) {
+	normalized := normalizeRuntimeFilePath(filePath)
+	if normalized == "" {
+		return
+	}
+	parent := path.Dir(normalized)
+	_ = os.MkdirAll(parent, 0o755)
+	_ = os.WriteFile(normalized, []byte(content), 0o644)
+	if uid, gid, ok := runtimeUserIdentity(); ok {
+		_ = os.Chown(parent, uid, gid)
+		_ = os.Chown(normalized, uid, gid)
+	}
+}
+
 func parseSnapshotEnvelope(raw []byte, contentType string, persistedPaths []string) *SnapshotEnvelope {
 	if !strings.Contains(contentType, "json") && !strings.Contains(contentType, "burstflare.snapshot+json") {
 		return nil
@@ -287,14 +371,21 @@ func parseSnapshotEnvelope(raw []byte, contentType string, persistedPaths []stri
 
 func (s *RuntimeState) createSnapshotEnvelope(sessionID string, persistedPaths []string) SnapshotEnvelope {
 	normalizedPaths := NormalizePersistedPaths(persistedPaths)
-	files := make([]FileEntry, 0)
+	filesByPath := map[string]string{}
 	for filePath, content := range s.Files {
 		if isWithinPersistedPaths(filePath, normalizedPaths) {
-			files = append(files, FileEntry{
-				Path:    filePath,
-				Content: content,
-			})
+			filesByPath[filePath] = content
 		}
+	}
+	for _, file := range collectPersistedFilesystemFiles(normalizedPaths) {
+		filesByPath[file.Path] = file.Content
+	}
+	files := make([]FileEntry, 0, len(filesByPath))
+	for filePath, content := range filesByPath {
+		files = append(files, FileEntry{
+			Path:    filePath,
+			Content: content,
+		})
 	}
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].Path < files[j].Path
@@ -336,8 +427,10 @@ func (s *RuntimeState) ApplySnapshotRestore(payload SnapshotRestorePayload) (Sna
 
 	restoredPaths := make([]string, 0)
 	if envelope != nil {
+		clearPersistedFilesystem(persistedPaths)
 		for _, file := range envelope.Files {
 			s.Files[file.Path] = file.Content
+			writeRuntimeFile(file.Path, file.Content)
 			restoredPaths = append(restoredPaths, file.Path)
 		}
 	}
@@ -636,6 +729,7 @@ func (s *RuntimeState) UpdateEditorFile(filePath string, content string, persist
 	}
 	s.PersistedPaths = listed.Scope
 	s.Files[normalized] = content
+	writeRuntimeFile(normalized, content)
 	return EditorUpdateResult{
 		OK:    true,
 		Path:  normalized,
