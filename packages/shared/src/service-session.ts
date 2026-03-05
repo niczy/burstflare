@@ -110,6 +110,7 @@ export function formatInstance(instance) {
     managedImageDigest: runtimeSpec.managedImageDigest,
     envVars: { ...(instance.envVars || {}) },
     persistedPaths: Array.isArray(instance.persistedPaths) ? [...instance.persistedPaths] : [],
+    bootstrapScript: instance.bootstrapScript || null,
     secretNames,
     secretCount: secretNames.length
   };
@@ -128,6 +129,7 @@ export function formatSession(state, session, { includeSshKeys = false }: { incl
     instanceName: instance?.name || null,
     instanceBaseImage: instance?.baseImage || instance?.image || null,
     instanceManagedRuntimeImage: instance?.managedRuntimeImage || null,
+    instanceBootstrapScript: instance?.bootstrapScript || null,
     templateName: null,
     eventsCount: events.length,
     snapshotCount: snapshots.length,

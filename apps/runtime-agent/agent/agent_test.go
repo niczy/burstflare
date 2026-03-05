@@ -179,6 +179,41 @@ func TestEditorRouteStaysScoped(t *testing.T) {
 	}
 }
 
+func TestBootstrapScriptHashIncludedInState(t *testing.T) {
+	state := NewState()
+
+	bootstrap := state.ApplyRuntimeBootstrap(BootstrapPayload{
+		SessionID:       "ses_script",
+		BootstrapScript: "#!/bin/sh\necho hello",
+	})
+
+	if bootstrap.BootstrapScriptHash == "" {
+		t.Fatalf("expected bootstrap script hash to be set")
+	}
+	expectedHash := scriptHash("#!/bin/sh\necho hello")
+	if bootstrap.BootstrapScriptHash != expectedHash {
+		t.Fatalf("unexpected hash: got %s, want %s", bootstrap.BootstrapScriptHash, expectedHash)
+	}
+	if bootstrap.BootstrapScriptStatus == "" {
+		t.Fatalf("expected bootstrap script status to be set")
+	}
+}
+
+func TestBootstrapWithoutScriptHasNoHash(t *testing.T) {
+	state := NewState()
+
+	bootstrap := state.ApplyRuntimeBootstrap(BootstrapPayload{
+		SessionID: "ses_noscript",
+	})
+
+	if bootstrap.BootstrapScriptHash != "" {
+		t.Fatalf("expected no bootstrap script hash, got %s", bootstrap.BootstrapScriptHash)
+	}
+	if bootstrap.BootstrapScriptStatus != "" {
+		t.Fatalf("expected no bootstrap script status, got %s", bootstrap.BootstrapScriptStatus)
+	}
+}
+
 func TestHandlerServesHealthAndMeta(t *testing.T) {
 	state := NewState()
 	handler := http.Handler(state)

@@ -71,8 +71,23 @@ test("runtime bootstrap payload builder normalizes the worker-to-container body 
       API_TOKEN: "secret-value"
     },
     runtimeVersion: 7,
-    sshAuthorizedKeys: ["ssh-ed25519 AAAA user@test"]
+    sshAuthorizedKeys: ["ssh-ed25519 AAAA user@test"],
+    bootstrapScript: null
   });
+});
+
+test("runtime bootstrap payload includes bootstrapScript from session", () => {
+  const payload = createRuntimeBootstrapPayload({
+    id: "ses_456",
+    instanceBootstrapScript: "#!/bin/sh\napt-get install -y curl",
+    sshAuthorizedKeys: []
+  });
+  assert.equal(payload.bootstrapScript, "#!/bin/sh\napt-get install -y curl");
+});
+
+test("runtime bootstrap payload defaults bootstrapScript to null", () => {
+  const payload = createRuntimeBootstrapPayload({ id: "ses_789", sshAuthorizedKeys: [] });
+  assert.equal(payload.bootstrapScript, null);
 });
 
 test("runtime lifecycle payload builder fills the default reason from the phase", () => {

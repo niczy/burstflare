@@ -2,13 +2,16 @@ package agent
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -37,11 +40,14 @@ const (
 	SnapshotContentType    = "application/vnd.burstflare.snapshot+json; charset=utf-8"
 	CommonStateContentType = "application/vnd.burstflare.common-state+json; charset=utf-8"
 
-	AuthorizedKeysPath = "/home/flare/.ssh/authorized_keys"
-	LastSnapshotAlias  = "/workspace/.burstflare/last.snapshot"
-	LifecycleMetadata  = "/workspace/.burstflare/lifecycle.json"
-	SecretsEnvPath     = "/run/burstflare/secrets.env"
-	SessionMetadata    = "/workspace/.burstflare/session.json"
+	AuthorizedKeysPath     = "/home/flare/.ssh/authorized_keys"
+	LastSnapshotAlias      = "/workspace/.burstflare/last.snapshot"
+	LifecycleMetadata      = "/workspace/.burstflare/lifecycle.json"
+	SecretsEnvPath         = "/run/burstflare/secrets.env"
+	SessionMetadata        = "/workspace/.burstflare/session.json"
+	BootstrapScriptPath    = "/run/burstflare/bootstrap-user.sh"
+	BootstrapScriptHashDir = "/run/burstflare"
+	BootstrapScriptDone    = "/run/burstflare/bootstrap-user.done"
 )
 
 var authorizedKeyPattern = regexp.MustCompile(`^ssh-(ed25519|rsa)\s+[A-Za-z0-9+/=]+(?:\s+.*)?$`)
@@ -119,6 +125,7 @@ type BootstrapPayload struct {
 	RuntimeSecrets         map[string]string `json:"runtimeSecrets"`
 	RuntimeVersion         int               `json:"runtimeVersion"`
 	SSHAuthorizedKeys      []string          `json:"sshAuthorizedKeys"`
+	BootstrapScript        string            `json:"bootstrapScript"`
 }
 
 type BootstrapState struct {
@@ -135,6 +142,8 @@ type BootstrapState struct {
 	SSHKeyCount            int      `json:"sshKeyCount"`
 	RuntimeVersion         int      `json:"runtimeVersion"`
 	BootstrappedAt         string   `json:"bootstrappedAt"`
+	BootstrapScriptHash    string   `json:"bootstrapScriptHash,omitempty"`
+	BootstrapScriptStatus  string   `json:"bootstrapScriptStatus,omitempty"`
 }
 
 type LifecyclePayload struct {
@@ -635,6 +644,41 @@ func (s *RuntimeState) applyAuthorizedKeys(values []string) []string {
 	return keys
 }
 
+func scriptHash(script string) string {
+	h := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(h[:])
+}
+
+func runBootstrapScript(script string) (string, error) {
+	hash := scriptHash(script)
+
+	// Check if this exact script already ran (cached by hash).
+	doneData, err := os.ReadFile(BootstrapScriptDone)
+	if err == nil && strings.TrimSpace(string(doneData)) == hash {
+		return "cached", nil
+	}
+
+	_ = os.MkdirAll(BootstrapScriptHashDir, 0o755)
+	if err := os.WriteFile(BootstrapScriptPath, []byte(script), 0o700); err != nil {
+		return "write_error", fmt.Errorf("failed to write bootstrap script: %w", err)
+	}
+	if uid, gid, ok := runtimeUserIdentity(); ok {
+		_ = os.Chown(BootstrapScriptPath, uid, gid)
+	}
+
+	cmd := exec.Command("/bin/sh", BootstrapScriptPath)
+	cmd.Dir = "/workspace"
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "failed", fmt.Errorf("bootstrap script exited with error: %w", err)
+	}
+
+	// Write marker so future bootstraps with the same script are skipped.
+	_ = os.WriteFile(BootstrapScriptDone, []byte(hash), 0o644)
+	return "executed", nil
+}
+
 func (s *RuntimeState) ApplyRuntimeBootstrap(payload BootstrapPayload) BootstrapState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -682,6 +726,20 @@ func (s *RuntimeState) ApplyRuntimeBootstrap(payload BootstrapPayload) Bootstrap
 		s.Files[SecretsEnvPath] = secretsBody
 	} else {
 		delete(s.Files, SecretsEnvPath)
+	}
+
+	// Execute custom bootstrap script if provided.
+	if strings.TrimSpace(payload.BootstrapScript) != "" {
+		bootstrap.BootstrapScriptHash = scriptHash(payload.BootstrapScript)
+		// Unlock while running the script to avoid blocking other requests.
+		s.mu.Unlock()
+		status, _ := runBootstrapScript(payload.BootstrapScript)
+		s.mu.Lock()
+		bootstrap.BootstrapScriptStatus = status
+		s.Bootstrap = &bootstrap
+		// Refresh session metadata with script status.
+		sessionBody, _ = json.MarshalIndent(bootstrap, "", "  ")
+		s.Files[SessionMetadata] = string(sessionBody)
 	}
 
 	return bootstrap
