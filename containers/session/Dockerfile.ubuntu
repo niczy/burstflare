@@ -1,0 +1,29 @@
+FROM golang:1.24 AS burstflare-runtime-build
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+WORKDIR /src
+
+COPY runtime-agent/ /src/
+
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/burstflare-runtime .
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssh-server ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd -m -s /bin/bash flare \
+  && mkdir -p /run/sshd /var/run/sshd /home/flare/.ssh /workspace \
+  && chown -R flare:flare /home/flare /workspace
+
+COPY --from=burstflare-runtime-build /out/burstflare-runtime /usr/local/bin/burstflare-runtime
+
+ENV PORT=8080
+
+EXPOSE 8080
+
+CMD ["/usr/local/bin/burstflare-runtime"]

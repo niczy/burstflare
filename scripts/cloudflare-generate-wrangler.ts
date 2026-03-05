@@ -9,6 +9,8 @@ interface CloudflareScriptError extends Error {
 function renderWrangler(state: any, config: CloudflareConfig): string {
   const { resources } = state;
   const containerImage = config.containerImage || "./containers/session/Dockerfile";
+  const containerImageUbuntu = config.containerImageUbuntu || "./containers/session/Dockerfile.ubuntu";
+  const containerImageDebian = config.containerImageDebian || "./containers/session/Dockerfile.debian";
   const dataFile =
     config.environment === "production"
       ? ".local/burstflare-data.json"
@@ -35,6 +37,22 @@ function renderWrangler(state: any, config: CloudflareConfig): string {
   }
   if (config.remoteBuildToken) {
     vars.push(`REMOTE_BUILD_TOKEN = "${config.remoteBuildToken}"`);
+  }
+  if (config.enableContainers) {
+    const imageBindings = {
+      "ubuntu:24.04": "SESSION_CONTAINER_UBUNTU",
+      "debian:12": "SESSION_CONTAINER_DEBIAN",
+      "node:20": "SESSION_CONTAINER_DEBIAN",
+      "node:22": "SESSION_CONTAINER_DEBIAN",
+      "python:3.12": "SESSION_CONTAINER_DEBIAN",
+      "burstflare/session-runtime:v1": "SESSION_CONTAINER",
+      "*": "SESSION_CONTAINER"
+    };
+    const bindingJson = JSON.stringify(imageBindings)
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"');
+    vars.push(`SESSION_CONTAINER_IMAGE_BINDINGS = "${bindingJson}"`);
+    vars.push(`SESSION_CONTAINER_IMAGE_BINDINGS_STRICT = "1"`);
   }
   const lines = [`name = "${config.workerName}"
 main = "apps/edge/src/worker.ts"
@@ -71,12 +89,27 @@ id = "${resources.kv.cache.id}"`];
     lines.push(`[[durable_objects.bindings]]
 name = "SESSION_CONTAINER"
 class_name = "BurstFlareSessionContainer"`);
+    lines.push(`[[durable_objects.bindings]]
+name = "SESSION_CONTAINER_UBUNTU"
+class_name = "BurstFlareSessionContainerUbuntu"`);
+    lines.push(`[[durable_objects.bindings]]
+name = "SESSION_CONTAINER_DEBIAN"
+class_name = "BurstFlareSessionContainerDebian"`);
     lines.push(`[[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BurstFlareSessionContainer"]`);
+    lines.push(`[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["BurstFlareSessionContainerUbuntu", "BurstFlareSessionContainerDebian"]`);
     lines.push(`[[containers]]
 class_name = "BurstFlareSessionContainer"
 image = "${containerImage}"`);
+    lines.push(`[[containers]]
+class_name = "BurstFlareSessionContainerUbuntu"
+image = "${containerImageUbuntu}"`);
+    lines.push(`[[containers]]
+class_name = "BurstFlareSessionContainerDebian"
+image = "${containerImageDebian}"`);
   }
 
   if (resources.r2) {

@@ -163,6 +163,7 @@ type RuntimeState struct {
 }
 
 func NewState() *RuntimeState {
+	ensureRuntimeFilesystemLayout()
 	return &RuntimeState{
 		Files: map[string]string{},
 	}
@@ -170,6 +171,26 @@ func NewState() *RuntimeState {
 
 func NewHandler() http.Handler {
 	return NewState()
+}
+
+func ensureRuntimeFilesystemLayout() {
+	paths := []string{
+		"/workspace",
+		"/workspace/.burstflare",
+		"/workspace/.burstflare/snapshots",
+		"/home/flare",
+		"/home/flare/.ssh",
+	}
+	for _, entry := range paths {
+		_ = os.MkdirAll(entry, 0o755)
+	}
+	_ = os.Chmod("/home/flare/.ssh", 0o700)
+
+	if uid, gid, ok := runtimeUserIdentity(); ok {
+		for _, entry := range []string{"/workspace", "/workspace/.burstflare", "/workspace/.burstflare/snapshots", "/home/flare", "/home/flare/.ssh"} {
+			_ = os.Chown(entry, uid, gid)
+		}
+	}
 }
 
 func NormalizePersistedPaths(values []string) []string {
