@@ -18,6 +18,12 @@ export function getAppScript(turnstileKey = ""): string {
     function getValue(id){ const node = byId(id); return node && typeof node.value === "string" ? node.value.trim() : ""; }
     function setError(message){ setText("errors", message || ""); }
     function setEmailCodeStatus(message){ setText("emailCodeStatus", message || ""); }
+    function revealEmailCodeEntry(){
+      const verifyButton = byId("verifyEmailCodeButton");
+      const emailCodeSection = byId("emailCodeSection");
+      if (verifyButton) verifyButton.style.display = "inline-flex";
+      if (emailCodeSection) emailCodeSection.style.display = "block";
+    }
     function token(){ return localStorage.getItem(TOKEN_KEY) || ""; }
     function refreshToken(){ return localStorage.getItem(REFRESH_KEY) || ""; }
     function storeSession(data){
@@ -337,6 +343,7 @@ export function getAppScript(turnstileKey = ""): string {
         })
       });
       setValue("emailCode", requested.code || "");
+      revealEmailCodeEntry();
       setEmailCodeStatus(
         requested.code
           ? "Verification code created. Managed smoke mailboxes expose it inline here."
