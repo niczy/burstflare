@@ -210,4 +210,32 @@
   .section-fallback {
     @apply rounded-md border border-dashed border-border bg-secondary/40 p-4 text-sm text-muted-foreground;
   }
+
+  .runtime-shell {
+    @apply grid gap-3;
+  }
+
+  .runtime-row {
+    @apply grid gap-3 md:grid-cols-[1fr_auto];
+  }
+
+  .runtime-status-row {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .runtime-note {
+    @apply rounded-md border border-border bg-secondary/50 p-3 text-xs text-muted-foreground;
+  }
+
+  .runtime-terminal {
+    @apply h-52 overflow-y-auto rounded-md border border-border bg-foreground p-3 font-mono text-xs text-white;
+  }
+
+  .runtime-terminal-row {
+    @apply grid gap-2 md:grid-cols-[1fr_auto_auto];
+  }
+
+  .runtime-code {
+    @apply overflow-x-auto rounded-md border border-border bg-background p-2 font-mono text-xs;
+  }
 }

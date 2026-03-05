@@ -192,3 +192,10 @@ export type DashboardSnapshot = {
   lastRefreshedAt: string | null;
   warning: string | null;
 };
+
+export type RuntimeAttachResponse = {
+  token: string;
+  sshUser?: string;
+  sshCommand?: string;
+  sshKeyCount?: number;
+};

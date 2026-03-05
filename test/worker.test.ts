@@ -1758,6 +1758,79 @@ test("worker proxies browser terminal websocket upgrades into the session contai
   assert.equal(forwarded.upgrade, "websocket");
 });
 
+test("worker allows browser-auth terminal websocket upgrades without a runtime token", async () => {
+  const forwarded: {
+    started: number;
+    sessionId: string | null;
+    path: string | null;
+    requestSessionId: string | null;
+    upgrade: string | null;
+  } = {
+    started: 0,
+    sessionId: null,
+    path: null,
+    requestSessionId: null,
+    upgrade: null
+  };
+  const service = createWorkerService();
+  const app = createApp({
+    service,
+    containersEnabled: true,
+    getSessionContainer(sessionId: string) {
+      forwarded.sessionId = sessionId;
+      return {
+        async startAndWaitForPorts() {
+          forwarded.started += 1;
+        },
+        async fetch(request: Request) {
+          const url = new URL(request.url);
+          forwarded.path = url.pathname;
+          forwarded.requestSessionId = url.searchParams.get("sessionId");
+          forwarded.upgrade = request.headers.get("upgrade");
+          return new Response("proxied shell", {
+            headers: {
+              "content-type": "text/plain; charset=utf-8"
+            }
+          });
+        }
+      };
+    }
+  });
+
+  const owner = await service.registerUser({
+    email: "terminal-browser-auth@example.com",
+    name: "Terminal Browser Auth"
+  });
+  const instance = await service.createInstance(owner.token, {
+    name: "terminal-browser-auth",
+    description: "Instance for browser-auth terminal proxy",
+    image: "registry.cloudflare.com/test/terminal-browser-auth:1.0.0"
+  });
+
+  const session = await service.createSession(owner.token, {
+    name: "container-terminal-browser-auth",
+    instanceId: instance.instance.id
+  });
+  await service.startSession(owner.token, session.session.id);
+
+  const response = await app.fetch(
+    new Request(`http://example.test/runtime/sessions/${session.session.id}/terminal`, {
+      headers: {
+        authorization: `Bearer ${owner.token}`,
+        upgrade: "websocket"
+      }
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "proxied shell");
+  assert.equal(forwarded.started, 1);
+  assert.equal(forwarded.sessionId, session.session.id);
+  assert.equal(forwarded.path, "/shell");
+  assert.equal(forwarded.requestSessionId, session.session.id);
+  assert.equal(forwarded.upgrade, "websocket");
+});
+
 test("worker proxies browser editor requests into the session container editor route", async () => {
   const forwarded: {
     started: number;
